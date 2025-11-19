@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@plugin "daisyui";
+
+:root {
+	--animation-btn: 0.25s;
+	--animation-input: 0.2s;
+	--btn-focus-scale: 0.95;
+}
+
+body {
+	min-height: 100vh;
+}

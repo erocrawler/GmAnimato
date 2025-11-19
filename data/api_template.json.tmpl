@@ -1,0 +1,467 @@
+{
+  "input": {
+    "images": [
+      {
+        "name": "{image_name}",
+        "image": "{image_url}"
+      }
+    ],
+    "workflow": {
+      "1": {
+        "inputs": {
+          "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "type": "wan",
+          "device": "default"
+        },
+        "class_type": "CLIPLoader",
+        "_meta": {
+          "title": "Load CLIP"
+        }
+      },
+      "4": {
+        "inputs": {
+          "samples": [
+            "44",
+            0
+          ],
+          "vae": [
+            "7",
+            0
+          ]
+        },
+        "class_type": "VAEDecode",
+        "_meta": {
+          "title": "VAE Decode"
+        }
+      },
+      "6": {
+        "inputs": {
+          "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走，阴茎变形,",
+          "clip": [
+            "1",
+            0
+          ]
+        },
+        "class_type": "CLIPTextEncode",
+        "_meta": {
+          "title": "CLIP Text Encode (Negative Prompt)"
+        }
+      },
+      "7": {
+        "inputs": {
+          "vae_name": "wan_2.1_vae.safetensors"
+        },
+        "class_type": "VAELoader",
+        "_meta": {
+          "title": "Load VAE"
+        }
+      },
+      "10": {
+        "inputs": {
+          "width": [
+            "24",
+            0
+          ],
+          "height": [
+            "25",
+            0
+          ],
+          "length": 145,
+          "batch_size": 1,
+          "positive": [
+            "13",
+            0
+          ],
+          "negative": [
+            "6",
+            0
+          ],
+          "vae": [
+            "7",
+            0
+          ],
+          "start_image": [
+            "14",
+            0
+          ]
+        },
+        "class_type": "WanImageToVideo",
+        "_meta": {
+          "title": "WanImageToVideo"
+        }
+      },
+      "13": {
+        "inputs": {
+          "text": "{input_prompt}",
+          "clip": [
+            "1",
+            0
+          ]
+        },
+        "class_type": "CLIPTextEncode",
+        "_meta": {
+          "title": "CLIP Text Encode (Positive Prompt)"
+        }
+      },
+      "14": {
+        "inputs": {
+          "image": "{image_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Image"
+        }
+      },
+      "16": {
+        "inputs": {
+          "frame_rate": 18,
+          "loop_count": 0,
+          "filename_prefix": "Wan22",
+          "format": "video/h264-mp4",
+          "pix_fmt": "yuv420p",
+          "crf": 20,
+          "save_metadata": true,
+          "trim_to_audio": false,
+          "pingpong": false,
+          "save_output": true,
+          "images": [
+            "4",
+            0
+          ]
+        },
+        "class_type": "VHS_VideoCombine",
+        "_meta": {
+          "title": "Video Combine 🎥🅥🅗🅢"
+        }
+      },
+      "21": {
+        "inputs": {
+          "sage_attention": "disabled",
+          "model": [
+            "61:39",
+            0
+          ]
+        },
+        "class_type": "PathchSageAttentionKJ",
+        "_meta": {
+          "title": "Patch Sage Attention KJ"
+        }
+      },
+      "22": {
+        "inputs": {
+          "sage_attention": "disabled",
+          "model": [
+            "60:36",
+            0
+          ]
+        },
+        "class_type": "PathchSageAttentionKJ",
+        "_meta": {
+          "title": "Patch Sage Attention KJ"
+        }
+      },
+      "23": {
+        "inputs": {
+          "operator": ">",
+          "a": [
+            "28",
+            1
+          ],
+          "b": [
+            "28",
+            2
+          ]
+        },
+        "class_type": "LayerUtility: BooleanOperator",
+        "_meta": {
+          "title": "LayerUtility: Boolean Operator"
+        }
+      },
+      "24": {
+        "inputs": {
+          "boolean": [
+            "23",
+            0
+          ],
+          "on_true": [
+            "26",
+            0
+          ],
+          "on_false": [
+            "27",
+            0
+          ]
+        },
+        "class_type": "Switch any [Crystools]",
+        "_meta": {
+          "title": "Width Switch"
+        }
+      },
+      "25": {
+        "inputs": {
+          "boolean": [
+            "23",
+            0
+          ],
+          "on_true": [
+            "27",
+            0
+          ],
+          "on_false": [
+            "26",
+            0
+          ]
+        },
+        "class_type": "Switch any [Crystools]",
+        "_meta": {
+          "title": "Height Switch"
+        }
+      },
+      "26": {
+        "inputs": {
+          "value": 925
+        },
+        "class_type": "INTConstant",
+        "_meta": {
+          "title": "Long Side"
+        }
+      },
+      "27": {
+        "inputs": {
+          "value": 720
+        },
+        "class_type": "INTConstant",
+        "_meta": {
+          "title": "Short Side"
+        }
+      },
+      "28": {
+        "inputs": {
+          "image": [
+            "14",
+            0
+          ]
+        },
+        "class_type": "GetImageSizeAndCount",
+        "_meta": {
+          "title": "Get Image Size & Count"
+        }
+      },
+      "34": {
+        "inputs": {
+          "unet_name": "wan2.2_i2v_high_noise_14B_Q8_0.gguf"
+        },
+        "class_type": "UnetLoaderGGUF",
+        "_meta": {
+          "title": "Unet Loader (GGUF) High"
+        }
+      },
+      "44": {
+        "inputs": {
+          "boundary": 0.9,
+          "seed": {seed},
+          "steps": 8,
+          "cfg_high_noise": 1,
+          "cfg_low_noise": 1,
+          "sampler_name": "euler",
+          "scheduler": "simple",
+          "sigma_shift": 8,
+          "denoise": 1,
+          "model_high_noise": [
+            "70",
+            0
+          ],
+          "model_low_noise": [
+            "72",
+            0
+          ],
+          "positive": [
+            "10",
+            0
+          ],
+          "negative": [
+            "10",
+            1
+          ],
+          "latent_image": [
+            "10",
+            2
+          ]
+        },
+        "class_type": "WanMoeKSampler",
+        "_meta": {
+          "title": "Wan MoE KSampler"
+        }
+      },
+      "62": {
+        "inputs": {
+          "unet_name": "wan2.2_i2v_low_noise_14B_Q8_0.gguf"
+        },
+        "class_type": "UnetLoaderGGUF",
+        "_meta": {
+          "title": "Unet Loader (GGUF) Low"
+        }
+      },
+      "67": {
+        "inputs": {
+          "lora_name": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+          "strength_model": 0.4,
+          "model": [
+            "34",
+            0
+          ]
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "_meta": {
+          "title": "LoraLoaderModelOnly"
+        }
+      },
+      "68": {
+        "inputs": {
+          "lora_name": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+          "strength_model": 1,
+          "model": [
+            "62",
+            0
+          ]
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "_meta": {
+          "title": "LoraLoaderModelOnly"
+        }
+      },
+      "69": {
+        "inputs": {
+          "lora_name": "wan22-video10-arcshot-16-sel-7-high.safetensors",
+          "strength_model": 0.8,
+          "model": [
+            "67",
+            0
+          ]
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "_meta": {
+          "title": "LoraLoaderModelOnly"
+        }
+      },
+      "70": {
+        "inputs": {
+          "model_type": "wan2.1_i2v_720p_14B_ret_mode",
+          "rel_l1_thresh": 0.25,
+          "start_percent": 0.1,
+          "end_percent": 1,
+          "cache_device": "cuda",
+          "model": [
+            "21",
+            0
+          ]
+        },
+        "class_type": "TeaCache",
+        "_meta": {
+          "title": "TeaCache"
+        }
+      },
+      "72": {
+        "inputs": {
+          "model_type": "wan2.1_i2v_720p_14B_ret_mode",
+          "rel_l1_thresh": 0.25,
+          "start_percent": 0.1,
+          "end_percent": 1,
+          "cache_device": "cuda",
+          "model": [
+            "22",
+            0
+          ]
+        },
+        "class_type": "TeaCache",
+        "_meta": {
+          "title": "TeaCache"
+        }
+      },
+      "60:35": {
+        "inputs": {
+          "lora_name": "DR34ML4Y_I2V_14B_LOW.safetensors",
+          "strength_model": 1,
+          "model": [
+            "68",
+            0
+          ]
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "_meta": {
+          "title": "LoraLoaderModelOnly"
+        }
+      },
+      "60:37": {
+        "inputs": {
+          "lora_name": "st0m4chBulg3_FUSED_LN.safetensors",
+          "strength_model": 0.55,
+          "model": [
+            "60:35",
+            0
+          ]
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "_meta": {
+          "title": "LoRA加载器（stomach）"
+        }
+      },
+      "60:36": {
+        "inputs": {
+          "lora_name": "NSFW-22-L-e8.safetensors",
+          "strength_model": 0.8,
+          "model": [
+            "60:37",
+            0
+          ]
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "_meta": {
+          "title": "LoraLoaderModelOnly"
+        }
+      },
+      "61:41": {
+        "inputs": {
+          "lora_name": "DR34ML4Y_I2V_14B_HIGH.safetensors",
+          "strength_model": 1,
+          "model": [
+            "69",
+            0
+          ]
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "_meta": {
+          "title": "LoraLoaderModelOnly"
+        }
+      },
+      "61:39": {
+        "inputs": {
+          "lora_name": "NSFW-22-H-e8.safetensors",
+          "strength_model": 1,
+          "model": [
+            "61:37",
+            0
+          ]
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "_meta": {
+          "title": "LoraLoaderModelOnly"
+        }
+      },
+      "61:37": {
+        "inputs": {
+          "lora_name": "st0m4chBulg3_FUSED_HN.safetensors",
+          "strength_model": 0.7,
+          "model": [
+            "61:41",
+            0
+          ]
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "_meta": {
+          "title": "LoRA加载器（stomach）"
+        }
+      }
+    }
+  }
+}
