@@ -1,4 +1,4 @@
-# GmI2V - Image-to-Video Generator
+# GmAnimato - Image-to-Video Generator
 
 NOTE: Under Development
 
@@ -7,7 +7,7 @@ A full-stack SvelteKit application for generating videos from images using AI. U
 ## Project Structure
 
 ```
-GmI2V/
+GmAnimato/
   src/
     lib/
       auth.ts          # In-memory user management (dev)
@@ -47,7 +47,7 @@ GmI2V/
 ### Installation
 
 ```bash
-cd d:\Projects\GmI2V
+cd d:\Projects\GmAnimato
 npm install
 ```
 

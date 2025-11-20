@@ -16,27 +16,27 @@ npm run dev
 **Option A: Using Docker (Recommended)**
 ```bash
 docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=YourStrong@Password123" \
-  -p 1433:1433 --name sqlserver-gmi2v \
+  -p 1433:1433 --name sqlserver-gmanimato \
   -d mcr.microsoft.com/mssql/server:2022-latest
 ```
 
 **Option B: Use existing SQL Server**
 - Ensure SQL Server is running
-- Create a database named `gmi2v` (or use existing)
+- Create a database named `gmanimato` (or use existing)
 
 ### Step 2: Configure Environment
 
 Create or update `.env` file:
 ```env
 DATABASE_PROVIDER=sqlserver
-DATABASE_URL="sqlserver://localhost:1433;database=gmi2v;user=sa;password=YourStrong@Password123;encrypt=true;trustServerCertificate=true"
+DATABASE_URL="sqlserver://localhost:1433;database=gmanimato;user=sa;password=YourStrong@Password123;encrypt=true;trustServerCertificate=true"
 ```
 
 **Note**: This project uses Prisma 7, where `DATABASE_URL` is passed to the PrismaClient constructor at runtime, not in the schema file.
 
 **For Azure SQL Database:**
 ```env
-DATABASE_URL="sqlserver://yourserver.database.windows.net:1433;database=gmi2v;user=yourusername;password=yourpassword;encrypt=true"
+DATABASE_URL="sqlserver://yourserver.database.windows.net:1433;database=gmanimato;user=yourusername;password=yourpassword;encrypt=true"
 ```
 
 ### Step 3: Generate Prisma Client

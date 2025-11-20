@@ -18,8 +18,8 @@
 			</div>
 			<div class="flex-1">
 				<a href="/" class="btn btn-ghost text-xl">
-					<img src="/apple-touch-icon.png" alt="GmI2V" class="w-8 h-8" />
-					GmI2V
+					<img src="/apple-touch-icon.png" alt="GmAnimato" class="w-8 h-8" />
+					GmAnimato
 				</a>
 			</div>
 			<div class="flex-none hidden lg:block">
@@ -44,7 +44,7 @@
 		<!-- Footer -->
 		<footer class="footer footer-center p-4 bg-base-200 text-base-content">
 			<aside>
-				<p>GmI2V — Image-to-Video Generator © 2024</p>
+				<p>GmAnimato — Image-to-Video Generator © 2024</p>
 			</aside>
 		</footer>
 	</div>

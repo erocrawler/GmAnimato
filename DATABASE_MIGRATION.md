@@ -50,7 +50,7 @@ Create a `.env` file (or update existing one):
 DATABASE_PROVIDER=sqlserver
 
 # SQL Server connection string
-DATABASE_URL="sqlserver://localhost:1433;database=gmi2v;user=sa;password=YourStrong@Password;encrypt=true;trustServerCertificate=true"
+DATABASE_URL="sqlserver://localhost:1433;database=gmanimato;user=sa;password=YourStrong@Password;encrypt=true;trustServerCertificate=true"
 ```
 
 **Connection String Format:**
@@ -274,7 +274,7 @@ Set these in your production environment:
 
 ```env
 DATABASE_PROVIDER=sqlserver
-DATABASE_URL="sqlserver://prod-server:1433;database=gmi2v;user=app_user;password=SecurePassword;encrypt=true"
+DATABASE_URL="sqlserver://prod-server:1433;database=gmanimato;user=app_user;password=SecurePassword;encrypt=true"
 ```
 
 ### Build Steps
