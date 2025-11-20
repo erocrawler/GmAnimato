@@ -15,7 +15,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
   }
 
   if (action === 'login') {
-    const user = authenticateUser(username, password);
+    const user = await authenticateUser(username, password);
     if (!user) {
       return new Response(JSON.stringify({ error: 'Invalid credentials' }), {
         status: 401,
@@ -37,7 +37,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
   }
 
   if (action === 'register') {
-    const user = registerUser(username, password);
+    const user = await registerUser(username, password);
     if (!user) {
       return new Response(JSON.stringify({ error: 'Username already exists' }), {
         status: 400,

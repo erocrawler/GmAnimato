@@ -1,0 +1,233 @@
+import { PrismaClient } from '@prisma/client';
+import type { IDatabase, VideoEntry, User } from './IDatabase';
+
+export class SqlServerDatabase implements IDatabase {
+  private prisma: PrismaClient;
+
+  constructor() {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      throw new Error('DATABASE_URL environment variable is required for SQL Server mode');
+    }
+    
+    this.prisma = new PrismaClient({
+      datasourceUrl: databaseUrl,
+    });
+  }
+
+  // ==================== Video Methods ====================
+
+  async createVideoEntry(entry: Omit<VideoEntry, 'id' | 'created_at'> & { id?: string }): Promise<VideoEntry> {
+    const video = await this.prisma.video.create({
+      data: {
+        id: entry.id,
+        userId: entry.user_id,
+        originalImageUrl: entry.original_image_url,
+        prompt: entry.prompt,
+        tags: entry.tags ? JSON.stringify(entry.tags) : null,
+        suggestedPrompts: entry.suggested_prompts ? JSON.stringify(entry.suggested_prompts) : null,
+        status: entry.status,
+        jobId: entry.job_id,
+        finalVideoUrl: entry.final_video_url,
+        isPublished: entry.is_published ?? false,
+        likes: entry.likes ? JSON.stringify(entry.likes) : null,
+      },
+    });
+
+    return this.mapToVideoEntry(video);
+  }
+
+  async getVideosByUser(user_id: string): Promise<VideoEntry[]> {
+    const videos = await this.prisma.video.findMany({
+      where: { userId: user_id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return videos.map(this.mapToVideoEntry);
+  }
+
+  async getActiveJobsByUser(user_id: string): Promise<VideoEntry[]> {
+    const videos = await this.prisma.video.findMany({
+      where: {
+        userId: user_id,
+        status: {
+          in: ['in_queue', 'processing'],
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return videos.map(this.mapToVideoEntry);
+  }
+
+  async getPublishedVideos(): Promise<VideoEntry[]> {
+    const videos = await this.prisma.video.findMany({
+      where: { isPublished: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return videos.map(this.mapToVideoEntry);
+  }
+
+  async getVideoById(id: string): Promise<VideoEntry | undefined> {
+    const video = await this.prisma.video.findUnique({
+      where: { id },
+    });
+
+    return video ? this.mapToVideoEntry(video) : undefined;
+  }
+
+  async updateVideo(id: string, patch: Partial<VideoEntry>): Promise<VideoEntry | null> {
+    try {
+      const data: any = {};
+      
+      if (patch.user_id !== undefined) data.userId = patch.user_id;
+      if (patch.original_image_url !== undefined) data.originalImageUrl = patch.original_image_url;
+      if (patch.prompt !== undefined) data.prompt = patch.prompt;
+      if (patch.tags !== undefined) data.tags = patch.tags ? JSON.stringify(patch.tags) : null;
+      if (patch.suggested_prompts !== undefined) data.suggestedPrompts = patch.suggested_prompts ? JSON.stringify(patch.suggested_prompts) : null;
+      if (patch.status !== undefined) data.status = patch.status;
+      if (patch.job_id !== undefined) data.jobId = patch.job_id;
+      if (patch.final_video_url !== undefined) data.finalVideoUrl = patch.final_video_url;
+      if (patch.is_published !== undefined) data.isPublished = patch.is_published;
+      if (patch.likes !== undefined) data.likes = patch.likes ? JSON.stringify(patch.likes) : null;
+
+      const video = await this.prisma.video.update({
+        where: { id },
+        data,
+      });
+
+      return this.mapToVideoEntry(video);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async toggleLike(videoId: string, userId: string): Promise<VideoEntry | null> {
+    const video = await this.prisma.video.findUnique({
+      where: { id: videoId },
+    });
+
+    if (!video) return null;
+
+    const likes = video.likes ? JSON.parse(video.likes) : [];
+    const userIndex = likes.indexOf(userId);
+
+    if (userIndex > -1) {
+      likes.splice(userIndex, 1);
+    } else {
+      likes.push(userId);
+    }
+
+    const updated = await this.prisma.video.update({
+      where: { id: videoId },
+      data: { likes: JSON.stringify(likes) },
+    });
+
+    return this.mapToVideoEntry(updated);
+  }
+
+  // ==================== User Methods ====================
+
+  async createUser(username: string, password_hash: string, email?: string): Promise<User> {
+    const user = await this.prisma.user.create({
+      data: {
+        username,
+        email: email || null,
+        passwordHash: password_hash,
+      },
+    });
+
+    return this.mapToUser(user);
+  }
+
+  async getUserById(id: string): Promise<User | undefined> {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+    });
+
+    return user ? this.mapToUser(user) : undefined;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const user = await this.prisma.user.findUnique({
+      where: { username },
+    });
+
+    return user ? this.mapToUser(user) : undefined;
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    if (!email) return undefined;
+    
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    return user ? this.mapToUser(user) : undefined;
+  }
+
+  async updateUser(id: string, patch: Partial<Omit<User, 'id' | 'created_at'>>): Promise<User | null> {
+    try {
+      const data: any = {};
+      
+      if (patch.username !== undefined) data.username = patch.username;
+      if (patch.email !== undefined) data.email = patch.email || null;
+      if (patch.password_hash !== undefined) data.passwordHash = patch.password_hash;
+
+      const user = await this.prisma.user.update({
+        where: { id },
+        data,
+      });
+
+      return this.mapToUser(user);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    try {
+      await this.prisma.user.delete({
+        where: { id },
+      });
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // ==================== Mapping Methods ====================
+
+  private mapToVideoEntry(video: any): VideoEntry {
+    return {
+      id: video.id,
+      user_id: video.userId,
+      original_image_url: video.originalImageUrl,
+      prompt: video.prompt || undefined,
+      tags: video.tags ? JSON.parse(video.tags) : undefined,
+      suggested_prompts: video.suggestedPrompts ? JSON.parse(video.suggestedPrompts) : undefined,
+      status: video.status as VideoEntry['status'],
+      job_id: video.jobId || undefined,
+      final_video_url: video.finalVideoUrl || undefined,
+      is_published: video.isPublished || undefined,
+      likes: video.likes ? JSON.parse(video.likes) : undefined,
+      created_at: video.createdAt.toISOString(),
+    };
+  }
+
+  private mapToUser(user: any): User {
+    return {
+      id: user.id,
+      username: user.username,
+      email: user.email || undefined,
+      password_hash: user.passwordHash,
+      created_at: user.createdAt.toISOString(),
+      updated_at: user.updatedAt.toISOString(),
+    };
+  }
+
+  async disconnect() {
+    await this.prisma.$disconnect();
+  }
+}

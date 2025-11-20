@@ -1,0 +1,46 @@
+// Prisma schema for SQL Server
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+}
+
+model User {
+  id            String   @id @default(cuid())
+  username      String   @unique @db.VarChar(50)
+  email         String?  @unique @db.VarChar(255)
+  passwordHash  String   @map("password_hash") @db.VarChar(255)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  videos        Video[]
+
+  @@map("users")
+  @@index([username])
+  @@index([email])
+}
+
+model Video {
+  id                 String   @id @default(cuid())
+  userId             String   @map("user_id")
+  originalImageUrl   String   @map("original_image_url") @db.VarChar(500)
+  prompt             String?  @db.VarChar(2000)
+  tags               String?  @db.VarChar(1000) // JSON string array
+  suggestedPrompts   String?  @map("suggested_prompts") @db.VarChar(2000) // JSON string array
+  status             String   @default("uploaded") // 'uploaded' | 'in_queue' | 'processing' | 'completed' | 'failed'
+  jobId              String?  @map("job_id") @db.VarChar(200)
+  finalVideoUrl      String?  @map("final_video_url") @db.VarChar(500)
+  isPublished        Boolean  @default(false) @map("is_published")
+  likes              String?  @db.VarChar(4000) // JSON string array of user_ids
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("videos")
+  @@index([userId])
+  @@index([status])
+  @@index([isPublished])
+}

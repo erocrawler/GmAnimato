@@ -9,7 +9,10 @@ GmI2V/
   src/
     lib/
       auth.ts          # In-memory user management (dev)
-      db.ts            # File-based video entry storage
+      db.ts            # Database factory & backward-compatible exports
+      IDatabase.ts     # Database interface definition
+      db-json.ts       # JSON file-based implementation
+      db-sqlserver.ts  # SQL Server implementation (Prisma)
     routes/
       +layout.svelte   # Root layout
       +page.svelte     # Home page with intro
@@ -25,8 +28,10 @@ GmI2V/
           kickoff/     # Start I2V job processing
         i2v-webhook/   # Receive job completion callbacks
   hooks.server.ts      # Session management & route protection
+  prisma/
+    schema.prisma      # Database schema for SQL Server
   data/
-    videos.json        # Persistent video metadata store
+    videos.json        # Persistent video metadata store (JSON mode)
   static/
     uploads/           # Uploaded images
 ```
@@ -70,10 +75,13 @@ npm run preview
 ## Features
 
 ### Authentication
-- ✅ Local login/register (in-memory storage during dev)
+- ✅ Database-backed user storage (JSON file or SQL Server)
+- ✅ Secure password hashing with bcrypt
 - ✅ Session-based auth with httpOnly cookies
 - ✅ Protected routes: `/new`, `/videos`, `/api/*`
 - ✅ Public routes: `/`, `/login`, `/gallery`, `/api/logout`
+- ✅ Unique username constraint
+- ✅ Optional email field
 
 ### Video Generation Workflow
 1. **Login** → Enter credentials
@@ -86,9 +94,11 @@ npm run preview
 8. **Gallery** (`/gallery`) → Browse published videos
 
 ### Data Persistence
-- **Videos:** `data/videos.json` (file-based, auto-created)
+- **Database:** Supports both JSON file storage and SQL Server (see [DATABASE_MIGRATION.md](./DATABASE_MIGRATION.md))
+  - JSON mode: `data/videos.json` and `data/users.json` (default, auto-created)
+  - SQL Server mode: Uses Prisma ORM with SQL Server database
 - **Images:** `static/uploads/` (local files)
-- **Users:** In-memory map (resets on server restart)
+- **Authentication:** Database-backed user accounts with bcrypt password hashing (see [AUTHENTICATION.md](./AUTHENTICATION.md))
 
 ## API Endpoints
 
@@ -141,7 +151,8 @@ Sessions are stored in `session` cookie (httpOnly):
 - Validated on every request via `hooks.server.ts`
 
 ### Future Enhancements
-- [ ] Real database (SQLite, PostgreSQL, etc.)
+- [x] **Database abstraction layer** - Supports JSON and SQL Server
+- [ ] Real database migrations to production SQL Server
 - [ ] OIDC/OAuth integration (Google, GitHub)
 - [ ] S3 storage for images and videos
 - [ ] Real I2V API integration (Runpod, Replicate, etc.)

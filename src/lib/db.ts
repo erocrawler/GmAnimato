@@ -1,96 +1,93 @@
-import fs from 'fs/promises';
-import path from 'path';
+// Main database module - exports interface and provides factory for database implementation
+import type { IDatabase, VideoEntry, User, UserPublic } from './IDatabase';
+import { JsonFileDatabase } from './db-json';
 
-const DATA_DIR = path.resolve('data');
-const DB_FILE = path.join(DATA_DIR, 'videos.json');
+// Re-export types for backward compatibility
+export type { VideoEntry, IDatabase, User, UserPublic };
 
-export type VideoEntry = {
-  id: string;
-  user_id: string;
-  original_image_url: string;
-  prompt?: string;
-  tags?: string[];
-  suggested_prompts?: string[];
-  status: 'uploaded' | 'in_queue' | 'processing' | 'completed' | 'failed';
-  job_id?: string; // RunPod job ID for status polling
-  final_video_url?: string;
-  is_published?: boolean;
-  likes?: string[]; // Array of user_ids who liked this video
-  created_at: string;
-};
+// Database instance (singleton)
+let dbInstance: IDatabase | null = null;
 
-async function ensureDB() {
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.access(DB_FILE);
-  } catch (err) {
-    await fs.writeFile(DB_FILE, '[]', 'utf-8');
+/**
+ * Get the database instance based on environment configuration
+ * Uses DATABASE_PROVIDER environment variable to determine which implementation to use
+ * - 'sqlserver': SQL Server with Prisma
+ * - 'json' or undefined: JSON file-based storage (default)
+ */
+export function getDatabase(): IDatabase {
+  if (dbInstance) {
+    return dbInstance;
   }
+
+  const provider = process.env.DATABASE_PROVIDER || 'json';
+
+  if (provider === 'sqlserver') {
+    // Dynamically import to avoid loading Prisma when not needed
+    const { SqlServerDatabase } = require('./db-sqlserver');
+    dbInstance = new SqlServerDatabase();
+  } else {
+    dbInstance = new JsonFileDatabase();
+  }
+
+  return dbInstance!;
 }
 
-async function readAll(): Promise<VideoEntry[]> {
-  await ensureDB();
-  const txt = await fs.readFile(DB_FILE, 'utf-8');
-  return JSON.parse(txt) as VideoEntry[];
-}
+// Convenience functions that delegate to the database instance
+// These maintain backward compatibility with existing code
+const db = getDatabase();
 
-async function writeAll(rows: VideoEntry[]) {
-  await ensureDB();
-  await fs.writeFile(DB_FILE, JSON.stringify(rows, null, 2), 'utf-8');
-}
+// ==================== Video Functions ====================
 
 export async function createVideoEntry(entry: Omit<VideoEntry, 'id' | 'created_at'> & { id?: string }) {
-  const rows = await readAll();
-  const id = entry.id || String(Date.now()) + '-' + Math.floor(Math.random() * 1000);
-  const created_at = new Date().toISOString();
-  const row: VideoEntry = { ...entry, id, created_at } as VideoEntry;
-  rows.push(row);
-  await writeAll(rows);
-  return row;
+  return db.createVideoEntry(entry);
 }
 
 export async function getVideosByUser(user_id: string) {
-  const rows = await readAll();
-  return rows.filter((r) => r.user_id === user_id);
+  return db.getVideosByUser(user_id);
+}
+
+export async function getActiveJobsByUser(user_id: string) {
+  return db.getActiveJobsByUser(user_id);
 }
 
 export async function getPublishedVideos() {
-  const rows = await readAll();
-  return rows.filter((r) => r.is_published);
+  return db.getPublishedVideos();
 }
 
 export async function getVideoById(id: string) {
-  const rows = await readAll();
-  return rows.find((r) => r.id === id);
+  return db.getVideoById(id);
 }
 
 export async function updateVideo(id: string, patch: Partial<VideoEntry>) {
-  const rows = await readAll();
-  const idx = rows.findIndex((r) => r.id === id);
-  if (idx === -1) return null;
-  rows[idx] = { ...rows[idx], ...patch } as VideoEntry;
-  await writeAll(rows);
-  return rows[idx];
+  return db.updateVideo(id, patch);
 }
 
 export async function toggleLike(videoId: string, userId: string) {
-  const rows = await readAll();
-  const idx = rows.findIndex((r) => r.id === videoId);
-  if (idx === -1) return null;
-  
-  const video = rows[idx];
-  const likes = video.likes || [];
-  const userIndex = likes.indexOf(userId);
-  
-  if (userIndex > -1) {
-    // Unlike
-    likes.splice(userIndex, 1);
-  } else {
-    // Like
-    likes.push(userId);
-  }
-  
-  rows[idx] = { ...video, likes };
-  await writeAll(rows);
-  return rows[idx];
+  return db.toggleLike(videoId, userId);
+}
+
+// ==================== User Functions ====================
+
+export async function createUser(username: string, password_hash: string, email?: string) {
+  return db.createUser(username, password_hash, email);
+}
+
+export async function getUserById(id: string) {
+  return db.getUserById(id);
+}
+
+export async function getUserByUsername(username: string) {
+  return db.getUserByUsername(username);
+}
+
+export async function getUserByEmail(email: string) {
+  return db.getUserByEmail(email);
+}
+
+export async function updateUser(id: string, patch: Partial<Omit<User, 'id' | 'created_at'>>) {
+  return db.updateUser(id, patch);
+}
+
+export async function deleteUser(id: string) {
+  return db.deleteUser(id);
 }

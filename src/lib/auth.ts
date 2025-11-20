@@ -1,59 +1,82 @@
 /**
- * Simple in-memory auth store for local dev/testing.
- * In production, replace with a real database and proper auth library.
+ * Authentication module with database-backed user storage and bcrypt password hashing.
+ * Supports both JSON file and SQL Server backends.
  */
 
-export type User = {
-  id: string;
-  username: string;
-  password?: string; // only stored temporarily during login, never returned
-};
+import bcrypt from 'bcrypt';
+import { createUser, getUserById, getUserByUsername, type UserPublic } from './db';
 
-// In-memory store of users (persists only during server runtime)
-const users: Map<string, User> = new Map();
+const SALT_ROUNDS = 10;
 
-// Pre-populate with a demo account
-users.set('demo', { id: 'user-demo', username: 'demo', password: 'demo123' });
+export type User = UserPublic;
 
 /**
  * Register a new user (username must be unique)
+ * Automatically hashes the password before storing
  */
-export function registerUser(username: string, password: string): User | null {
-  if (users.has(username)) {
+export async function registerUser(username: string, password: string, email?: string): Promise<User | null> {
+  // Check if username already exists
+  const existing = await getUserByUsername(username);
+  if (existing) {
     return null; // User already exists
   }
 
-  const user: User = {
-    id: `user-${Date.now()}`,
-    username,
-    password, // In production, hash this!
-  };
+  // Hash the password
+  const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
 
-  users.set(username, user);
-  return { ...user, password: undefined };
+  // Create user in database
+  const user = await createUser(username, password_hash, email);
+
+  // Return user without password hash
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+  };
 }
 
 /**
  * Authenticate a user by username/password
+ * Verifies password against stored hash
  */
-export function authenticateUser(username: string, password: string): User | null {
-  const user = users.get(username);
-  if (!user || user.password !== password) {
-    return null; // Invalid credentials
+export async function authenticateUser(username: string, password: string): Promise<User | null> {
+  const user = await getUserByUsername(username);
+  if (!user) {
+    return null; // User not found
   }
 
-  // Return user without password
-  return { id: user.id, username: user.username };
+  // Verify password
+  const isValid = await bcrypt.compare(password, user.password_hash);
+  if (!isValid) {
+    return null; // Invalid password
+  }
+
+  // Return user without password hash
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+  };
 }
 
 /**
- * Get a user by ID
+ * Get a user by ID (without password hash)
  */
-export function getUserById(id: string): User | null {
-  for (const user of users.values()) {
-    if (user.id === id) {
-      return { id: user.id, username: user.username };
-    }
+export async function getUserByIdPublic(id: string): Promise<User | null> {
+  const user = await getUserById(id);
+  if (!user) {
+    return null;
   }
-  return null;
+
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+  };
 }

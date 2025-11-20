@@ -1,13 +1,8 @@
 <script lang="ts">
-	import favicon from '$lib/assets/favicon.svg';
 	import '../app.css';
 	import { page } from '$app/stores';
 	let { children } = $props();
 </script>
-
-<svelte:head>
-	<link rel="icon" href={favicon} />
-</svelte:head>
 
 <div class="drawer">
 	<input id="main-drawer" type="checkbox" class="drawer-toggle" />
@@ -22,7 +17,10 @@
 				</label>
 			</div>
 			<div class="flex-1">
-				<a href="/" class="btn btn-ghost text-xl">🎬 GmI2V</a>
+				<a href="/" class="btn btn-ghost text-xl">
+					<img src="/apple-touch-icon.png" alt="GmI2V" class="w-8 h-8" />
+					GmI2V
+				</a>
 			</div>
 			<div class="flex-none hidden lg:block">
 				<ul class="menu menu-horizontal px-1">

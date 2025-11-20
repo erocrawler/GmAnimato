@@ -13,6 +13,8 @@
   let busy = false;
   let message = "";
   let newtag = "";
+  let showBusyModal = false;
+  let busyModalMessage = "";
   let pollInterval: ReturnType<typeof setInterval> | null = null;
 
   $: isEditable = entry.status !== 'processing' && entry.status !== 'completed' && entry.status !== 'in_queue' && entry.status !== 'failed';
@@ -97,7 +99,22 @@
   async function generate() {
     busy = true;
     message = "";
+    showBusyModal = false;
+    busyModalMessage = "";
+    
     try {
+      // Check health before proceeding
+      const healthRes = await fetch('/api/health');
+      if (healthRes.ok) {
+        const health = await healthRes.json();
+        if (!health.available || health.queueFull) {
+          showBusyModal = true;
+          busyModalMessage = "Our servers are working hard right now! Please try again in a few minutes.";
+          busy = false;
+          return;
+        }
+      }
+      
       // First update the stored prompt and tags so they're saved with the entry
       await fetch("/api/video/update", {
         method: "POST",
@@ -111,6 +128,23 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: entry.id }),
       });
+      
+      if (!res.ok) {
+        const j = await res.json();
+        if (res.status === 429) {
+          // User hit their personal limit
+          showBusyModal = true;
+          busyModalMessage = j.error || "You have too many videos processing right now. Please wait for some to complete before starting new ones.";
+        } else if (res.status === 503) {
+          // System-wide queue full
+          showBusyModal = true;
+          busyModalMessage = "Our servers are experiencing high demand right now. Please try again in a few minutes.";
+        } else {
+          message = "Failed to submit: " + (j.error || "unknown");
+        }
+        return;
+      }
+      
       const j = await res.json();
       if (j.success) {
         message = "Job submitted — processing.";
@@ -296,3 +330,21 @@
     </div>
   </div>
 </div>
+
+<!-- Busy Server Modal -->
+{#if showBusyModal}
+  <div class="modal modal-open">
+    <div class="modal-box max-w-2xl">
+      <h3 class="font-bold text-2xl mb-4">Server is Busy! 🐢</h3>
+      <div class="flex justify-center mb-4">
+        <img src="/images/BUSY.jpg" alt="Server Busy" class="rounded-lg max-w-full max-h-96 object-contain" />
+      </div>
+      <p class="text-lg mb-4">
+        {busyModalMessage}
+      </p>
+      <div class="modal-action">
+        <button class="btn btn-primary" on:click={() => showBusyModal = false}>OK, I'll Try Later</button>
+      </div>
+    </div>
+  </div>
+{/if}

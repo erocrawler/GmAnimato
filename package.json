@@ -9,18 +9,28 @@
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"prisma:generate": "prisma generate",
+		"prisma:migrate": "prisma migrate dev",
+		"prisma:studio": "prisma studio",
+		"db:push": "prisma db push",
+		"db:seed": "tsx scripts/seed-demo-user.ts",
+		"db:migrate-json": "tsx scripts/migrate-json-to-sql.ts"
 	},
 	"devDependencies": {
 		"@melt-ui/pp": "^0.3.2",
+		"@prisma/client": "^7.0.0",
 		"@sveltejs/adapter-auto": "^7.0.0",
 		"@sveltejs/kit": "^2.47.1",
 		"@sveltejs/vite-plugin-svelte": "^6.2.1",
+		"@types/bcrypt": "^6.0.0",
 		"@types/node": "^24.10.1",
 		"daisyui": "^5.5.5",
+		"prisma": "^7.0.0",
 		"svelte": "^5.41.0",
 		"svelte-check": "^4.3.3",
 		"tailwindcss": "^4.1.17",
+		"tsx": "^4.20.6",
 		"typescript": "^5.9.3",
 		"vite": "^7.1.10"
 	},
@@ -29,6 +39,7 @@
 		"@melt-ui/svelte": "^0.86.6",
 		"@tailwindcss/vite": "^4.1.17",
 		"autoprefixer": "^10.4.22",
+		"bcrypt": "^6.0.0",
 		"node-fetch": "^3.3.2",
 		"postcss": "^8.5.6",
 		"sharp": "^0.34.5"

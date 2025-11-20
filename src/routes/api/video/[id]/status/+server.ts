@@ -1,6 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { getVideoById, updateVideo } from '$lib/db';
 import { env } from '$env/dynamic/private';
+import { getRunPodConfig, getRunPodJobStatus, mapRunPodStatus, extractVideoUrl, PROCESSING_TIMEOUT_MS } from '$lib/runpod';
 
 export const GET: RequestHandler = async ({ params }) => {
   try {
@@ -32,10 +33,28 @@ export const GET: RequestHandler = async ({ params }) => {
     }
     // If video is in_queue or processing and we have a job_id, poll RunPod
     if ((video.status === 'in_queue' || video.status === 'processing') && video.job_id) {
-      const VIDEO_STATUS_ENDPOINT_URL = env.VIDEO_STATUS_ENDPOINT_URL;
-      const VIDEO_ENDPOINT_API_KEY = env.VIDEO_ENDPOINT_API_KEY;
+      // Check if processing has timed out (longer than 1 hour)
+      const createdAt = new Date(video.created_at).getTime();
+      const now = Date.now();
+      const elapsedMs = now - createdAt;
+      
+      if (elapsedMs > PROCESSING_TIMEOUT_MS) {
+        console.log(`[Status Poll] Video ${video.id} has timed out after ${Math.floor(elapsedMs / 1000 / 60)} minutes`);
+        await updateVideo(video.id, { status: 'failed' });
+        return new Response(JSON.stringify({ 
+          status: 'failed',
+          reason: 'processing_timeout'
+        }), { 
+          headers: { 'Content-Type': 'application/json' } 
+        });
+      }
+      
+      const runpodConfig = getRunPodConfig({
+        RUNPOD_ENDPOINT_URL: env.RUNPOD_ENDPOINT_URL,
+        RUNPOD_API_KEY: env.RUNPOD_API_KEY
+      });
 
-      if (!VIDEO_STATUS_ENDPOINT_URL || !VIDEO_ENDPOINT_API_KEY) {
+      if (!runpodConfig) {
         // No polling configured, just return current status
         return new Response(JSON.stringify({ 
           status: video.status 
@@ -44,76 +63,47 @@ export const GET: RequestHandler = async ({ params }) => {
         });
       }
 
-      // Poll RunPod status endpoint
-      const statusUrl = `${VIDEO_STATUS_ENDPOINT_URL}/${video.job_id}`;
-      console.log(`[Status Poll] Checking job ${video.job_id} at ${statusUrl}`);
-
-      const statusResponse = await fetch(statusUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${VIDEO_ENDPOINT_API_KEY}`
+      try {
+        const statusData = await getRunPodJobStatus(runpodConfig, video.job_id);
+        
+        // Map RunPod status to internal status
+        const mappedStatus = mapRunPodStatus(statusData.status);
+        
+        // Extract video URL if job completed
+        let finalVideoUrl = video.final_video_url;
+        if (mappedStatus === 'completed') {
+          const extractedUrl = extractVideoUrl(statusData);
+          if (extractedUrl) {
+            finalVideoUrl = extractedUrl;
+          }
         }
-      });
 
-      if (!statusResponse.ok) {
-        console.error(`[Status Poll] Failed to get status: ${statusResponse.status}`);
+        // Update database if status has changed or we have a new video URL
+        if (mappedStatus !== video.status || (finalVideoUrl && finalVideoUrl !== video.final_video_url)) {
+          console.log(`[Status Poll] Updating video ${video.id} - status: ${video.status} -> ${mappedStatus}, video_url: ${finalVideoUrl || 'none'}`);
+          await updateVideo(video.id, { 
+            status: mappedStatus,
+            ...(finalVideoUrl && { final_video_url: finalVideoUrl })
+          });
+        }
+
+        // Return the RunPod status along with our video status
+        return new Response(JSON.stringify({ 
+          status: mappedStatus,
+          job_status: statusData.status,
+          job_data: statusData
+        }), { 
+          headers: { 'Content-Type': 'application/json' } 
+        });
+      } catch (err) {
+        console.error(`[Status Poll] Error checking job status:`, err);
+        // Return current status if polling fails
         return new Response(JSON.stringify({ 
           status: video.status 
         }), { 
           headers: { 'Content-Type': 'application/json' } 
         });
       }
-
-      const statusData = await statusResponse.json();
-      console.log(`[Status Poll] Job ${video.job_id} status:`, statusData);
-
-      // Map api status to our internal status
-      // e.g. RunPod uses: IN_QUEUE, IN_PROGRESS, COMPLETED, FAILED
-      let mappedStatus: 'in_queue' | 'processing' | 'completed' | 'failed' | 'uploaded' = video.status;
-      let finalVideoUrl = video.final_video_url;
-      
-      if (statusData.status) {
-        const apiStatus = statusData.status.toUpperCase();
-        if (apiStatus === 'IN_QUEUE') {
-          mappedStatus = 'in_queue';
-        } else if (apiStatus === 'IN_PROGRESS') {
-          mappedStatus = 'processing';
-        } else if (apiStatus === 'COMPLETED') {
-          mappedStatus = 'completed';
-          
-          // Extract video URL from output.files if available
-          if (statusData.output?.files && Array.isArray(statusData.output.files)) {
-            const videoFile = statusData.output.files.find((file: any) => 
-              file.type === 's3_url' && file.filename && 
-              (file.filename.endsWith('.mp4') || file.filename.endsWith('.webm'))
-            );
-            if (videoFile?.data) {
-              finalVideoUrl = videoFile.data;
-              console.log(`[Status Poll] Found video URL: ${finalVideoUrl}`);
-            }
-          }
-        } else if (apiStatus === 'FAILED') {
-          mappedStatus = 'failed';
-        }
-      }
-
-      // Update database if status has changed or we have a new video URL
-      if (mappedStatus !== video.status || (finalVideoUrl && finalVideoUrl !== video.final_video_url)) {
-        console.log(`[Status Poll] Updating video ${video.id} - status: ${video.status} -> ${mappedStatus}, video_url: ${finalVideoUrl || 'none'}`);
-        await updateVideo(video.id, { 
-          status: mappedStatus,
-          ...(finalVideoUrl && { final_video_url: finalVideoUrl })
-        });
-      }
-
-      // Return the RunPod status along with our video status
-      return new Response(JSON.stringify({ 
-        status: mappedStatus,
-        job_status: statusData.status,
-        job_data: statusData
-      }), { 
-        headers: { 'Content-Type': 'application/json' } 
-      });
     }
 
     // Default: return current video status

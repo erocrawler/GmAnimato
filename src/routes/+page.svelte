@@ -1,7 +1,10 @@
 <div class="hero min-h-[60vh] bg-base-200 rounded-lg">
 	<div class="hero-content text-center">
-		<div class="max-w-md">
-			<h1 class="text-5xl font-bold mb-4">🎬 Image-to-Video Generator</h1>
+		<div class="max-w-3xl">
+			<div class="flex justify-center mb-6">
+				<img src="/images/LOGO.jpg" alt="Visualize AI Logo" class="w-64 h-auto" />
+			</div>
+			<h1 class="text-5xl font-bold mb-4">Image-to-Video Generator</h1>
 			<p class="py-6 text-lg">
 				Transform your images into videos using AI-powered generation. Upload, customize, and create amazing videos in minutes.
 			</p>
