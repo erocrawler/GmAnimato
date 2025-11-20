@@ -48,7 +48,10 @@
 <div class="hero min-h-screen bg-base-200">
   <div class="hero-content flex-col lg:flex-row-reverse">
     <div class="text-center lg:text-left lg:ml-8">
-      <h1 class="text-5xl font-bold">🎬 {isRegister ? 'Join' : 'Welcome Back'}!</h1>
+      <div class="mb-6 flex justify-center lg:justify-start">
+        <img src="/images/LOGO.png" alt="Logo" class="w-full h-auto" />
+      </div>
+      <h1 class="text-5xl font-bold">{isRegister ? 'Join' : 'Welcome Back'}!</h1>
       <p class="py-6">
         {#if isRegister}
           Create your account to start generating amazing videos from your images.
@@ -124,17 +127,6 @@
             <p class="text-sm">Don't have an account?</p>
             <button type="button" class="btn btn-link btn-sm" on:click={toggleMode}>Register</button>
           {/if}
-        </div>
-
-        <div class="alert alert-info mt-4">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-          </svg>
-          <div class="text-xs">
-            <strong>Demo Account:</strong><br/>
-            username: <code class="badge badge-sm">demo</code><br/>
-            password: <code class="badge badge-sm">demo123</code>
-          </div>
         </div>
       </form>
     </div>

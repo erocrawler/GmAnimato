@@ -1,15 +1,26 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { authenticateUser, registerUser } from '$lib/auth';
+import { validateUser, formatValidationErrors } from '$lib/validation';
 
 export const POST: RequestHandler = async ({ request, cookies }) => {
   const body = await request.json();
   const action = body.action as string | undefined; // 'login' or 'register'
   const username = body.username as string | undefined;
   const password = body.password as string | undefined;
+  const email = body.email as string | undefined;
 
   if (!action || !username || !password) {
     return new Response(
       JSON.stringify({ error: 'Missing required fields (action, username, password)' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // Validate field lengths
+  const validationErrors = validateUser({ username, email });
+  if (validationErrors.length > 0) {
+    return new Response(
+      JSON.stringify({ error: formatValidationErrors(validationErrors) }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -37,7 +48,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
   }
 
   if (action === 'register') {
-    const user = await registerUser(username, password);
+    const user = await registerUser(username, password, email);
     if (!user) {
       return new Response(JSON.stringify({ error: 'Username already exists' }), {
         status: 400,

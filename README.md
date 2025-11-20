@@ -1,5 +1,7 @@
 # GmI2V - Image-to-Video Generator
 
+NOTE: Under Development
+
 A full-stack SvelteKit application for generating videos from images using AI. Upload an image, refine a prompt, and queue a video generation job.
 
 ## Project Structure

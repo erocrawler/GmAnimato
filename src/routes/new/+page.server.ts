@@ -5,6 +5,7 @@ import { annotateImage } from '$lib/imageRecognition';
 import { uploadBufferToS3 } from '$lib/s3';
 import { Buffer } from 'buffer';
 import { validateAndConvertImage } from '$lib/imageValidation';
+import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
 
 export const actions: Actions = {
   default: async ({ request, locals }) => {
@@ -31,6 +32,18 @@ export const actions: Actions = {
     // Run image recognition to get tags and suggested prompts (pass the S3 url so the recognizer can inspect basename)
     const annotation = await annotateImage(s3Url);
 
+    // Validate field lengths before creating entry
+    const validationErrors = validateVideoEntry({
+      original_image_url: s3Url,
+      prompt: '',
+      tags: annotation.tags,
+      suggested_prompts: annotation.suggested_prompts,
+    });
+
+    if (validationErrors.length > 0) {
+      return { error: formatValidationErrors(validationErrors) };
+    }
+
     const entry = await createVideoEntry({
       user_id: locals.user.id,
       original_image_url: s3Url,
@@ -44,3 +57,4 @@ export const actions: Actions = {
     return { success: true, entry };
   }
 };
+

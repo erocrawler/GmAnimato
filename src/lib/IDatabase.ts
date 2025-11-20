@@ -18,6 +18,7 @@ export type User = {
   username: string;
   email?: string;
   password_hash: string; // Hashed password
+  roles: string[];
   created_at: string;
   updated_at?: string;
 };
@@ -33,9 +34,11 @@ export interface IDatabase {
   getVideoById(id: string): Promise<VideoEntry | undefined>;
   updateVideo(id: string, patch: Partial<VideoEntry>): Promise<VideoEntry | null>;
   toggleLike(videoId: string, userId: string): Promise<VideoEntry | null>;
+  getLikeCount(videoId: string): Promise<number>;
+  isVideoLikedByUser(videoId: string, userId: string): Promise<boolean>;
   
   // User methods
-  createUser(username: string, password_hash: string, email?: string): Promise<User>;
+  createUser(username: string, password_hash: string, email?: string, roles?: string[]): Promise<User>;
   getUserById(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;

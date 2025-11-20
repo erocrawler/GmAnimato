@@ -2,7 +2,7 @@
 	<div class="hero-content text-center">
 		<div class="max-w-3xl">
 			<div class="flex justify-center mb-6">
-				<img src="/images/LOGO.jpg" alt="Visualize AI Logo" class="w-64 h-auto" />
+				<img src="/images/LOGO_COLOR.png" alt="Visualize AI Logo" class="w-64 h-auto" />
 			</div>
 			<h1 class="text-5xl font-bold mb-4">Image-to-Video Generator</h1>
 			<p class="py-6 text-lg">

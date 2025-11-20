@@ -1,5 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { updateVideo, getVideoById } from '$lib/db';
+import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
   try {
@@ -29,9 +30,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       });
     }
 
+    // Validate field lengths
+    const validationErrors = validateVideoEntry({ prompt, tags });
+    if (validationErrors.length > 0) {
+      return new Response(
+        JSON.stringify({ error: formatValidationErrors(validationErrors) }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const updated = await updateVideo(id, { prompt, tags, is_published });
     return new Response(JSON.stringify({ success: true, updated }), { headers: { 'Content-Type': 'application/json' } });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
   }
 };
+

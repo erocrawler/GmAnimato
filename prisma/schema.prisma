@@ -12,6 +12,7 @@ model User {
   username      String   @unique @db.VarChar(50)
   email         String?  @unique @db.VarChar(255)
   passwordHash  String   @map("password_hash") @db.VarChar(255)
+  roles         String   @default("[]") @db.VarChar(200)
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -33,14 +34,28 @@ model Video {
   jobId              String?  @map("job_id") @db.VarChar(200)
   finalVideoUrl      String?  @map("final_video_url") @db.VarChar(500)
   isPublished        Boolean  @default(false) @map("is_published")
-  likes              String?  @db.VarChar(4000) // JSON string array of user_ids
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  likes              VideoLike[]
 
   @@map("videos")
   @@index([userId])
   @@index([status])
   @@index([isPublished])
+}
+
+model VideoLike {
+  id        String   @id @default(cuid())
+  videoId   String   @map("video_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, userId])
+  @@map("video_likes")
+  @@index([videoId])
+  @@index([userId])
 }

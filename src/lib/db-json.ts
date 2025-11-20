@@ -72,25 +72,25 @@ export class JsonFileDatabase implements IDatabase {
   }
 
   async toggleLike(videoId: string, userId: string): Promise<VideoEntry | null> {
+    // Likes are only supported in SQL Server implementation
+    // This keeps the JSON implementation simple and focused on development/testing
     const rows = await this.readAll();
-    const idx = rows.findIndex((r) => r.id === videoId);
-    if (idx === -1) return null;
+    const video = rows.find((r) => r.id === videoId);
+    if (!video) return null;
     
-    const video = rows[idx];
-    const likes = video.likes || [];
-    const userIndex = likes.indexOf(userId);
-    
-    if (userIndex > -1) {
-      // Unlike
-      likes.splice(userIndex, 1);
-    } else {
-      // Like
-      likes.push(userId);
-    }
-    
-    rows[idx] = { ...video, likes };
-    await this.writeAll(rows);
-    return rows[idx];
+    // Return video without modifying likes
+    console.warn('[JSON DB] toggleLike not supported - use SQL Server for like functionality');
+    return video;
+  }
+
+  async getLikeCount(videoId: string): Promise<number> {
+    console.warn('[JSON DB] getLikeCount not supported - use SQL Server for like functionality');
+    return 0;
+  }
+
+  async isVideoLikedByUser(videoId: string, userId: string): Promise<boolean> {
+    console.warn('[JSON DB] isVideoLikedByUser not supported - use SQL Server for like functionality');
+    return false;
   }
 
   // ==================== User Methods ====================
@@ -115,7 +115,7 @@ export class JsonFileDatabase implements IDatabase {
     await fs.writeFile(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
   }
 
-  async createUser(username: string, password_hash: string, email?: string): Promise<User> {
+  async createUser(username: string, password_hash: string, email?: string, roles?: string[]): Promise<User> {
     const users = await this.readAllUsers();
     const id = `user-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const created_at = new Date().toISOString();
@@ -124,6 +124,7 @@ export class JsonFileDatabase implements IDatabase {
       username,
       email,
       password_hash,
+      roles: roles || [],
       created_at,
       updated_at: created_at,
     };

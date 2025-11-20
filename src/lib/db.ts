@@ -66,10 +66,18 @@ export async function toggleLike(videoId: string, userId: string) {
   return db.toggleLike(videoId, userId);
 }
 
+export async function getLikeCount(videoId: string) {
+  return db.getLikeCount(videoId);
+}
+
+export async function isVideoLikedByUser(videoId: string, userId: string) {
+  return db.isVideoLikedByUser(videoId, userId);
+}
+
 // ==================== User Functions ====================
 
-export async function createUser(username: string, password_hash: string, email?: string) {
-  return db.createUser(username, password_hash, email);
+export async function createUser(username: string, password_hash: string, email?: string, roles?: string[]) {
+  return db.createUser(username, password_hash, email, roles);
 }
 
 export async function getUserById(id: string) {

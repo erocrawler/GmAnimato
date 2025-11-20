@@ -1,5 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { updateVideo, getVideoById } from '$lib/db';
+import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
 
 export const POST: RequestHandler = async ({ request, params }) => {
   try {
@@ -33,7 +34,7 @@ export const POST: RequestHandler = async ({ request, params }) => {
 
     console.log(`[Webhook] Job ID verified for video ${id}. Current status: ${existing.status}`);
 
-    const patch: any = { status };
+    const patch: any = { status, job_id };
     
     // Extract video URL from files array if present
     if (files && Array.isArray(files)) {
@@ -46,6 +47,20 @@ export const POST: RequestHandler = async ({ request, params }) => {
         patch.final_video_url = videoFile.data;
         console.log(`[Webhook] Extracted video URL from files: ${videoFile.data}`);
       }
+    }
+
+    // Validate field lengths before updating
+    const validationErrors = validateVideoEntry({
+      job_id: patch.job_id,
+      final_video_url: patch.final_video_url,
+    });
+
+    if (validationErrors.length > 0) {
+      console.error(`[Webhook] Validation failed for video ${id}: ${formatValidationErrors(validationErrors)}`);
+      return new Response(
+        JSON.stringify({ error: formatValidationErrors(validationErrors) }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
     console.log(`[Webhook] Updating ${id} with patch:`, patch);

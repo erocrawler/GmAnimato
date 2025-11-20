@@ -30,7 +30,6 @@ export class SqlServerDatabase implements IDatabase {
         jobId: entry.job_id,
         finalVideoUrl: entry.final_video_url,
         isPublished: entry.is_published ?? false,
-        likes: entry.likes ? JSON.stringify(entry.likes) : null,
       },
     });
 
@@ -90,7 +89,7 @@ export class SqlServerDatabase implements IDatabase {
       if (patch.job_id !== undefined) data.jobId = patch.job_id;
       if (patch.final_video_url !== undefined) data.finalVideoUrl = patch.final_video_url;
       if (patch.is_published !== undefined) data.isPublished = patch.is_published;
-      if (patch.likes !== undefined) data.likes = patch.likes ? JSON.stringify(patch.likes) : null;
+      // Note: likes are handled via toggleLike method now
 
       const video = await this.prisma.video.update({
         where: { id },
@@ -110,31 +109,64 @@ export class SqlServerDatabase implements IDatabase {
 
     if (!video) return null;
 
-    const likes = video.likes ? JSON.parse(video.likes) : [];
-    const userIndex = likes.indexOf(userId);
-
-    if (userIndex > -1) {
-      likes.splice(userIndex, 1);
-    } else {
-      likes.push(userId);
-    }
-
-    const updated = await this.prisma.video.update({
-      where: { id: videoId },
-      data: { likes: JSON.stringify(likes) },
+    // Check if like exists
+    const existingLike = await this.prisma.videoLike.findUnique({
+      where: {
+        videoId_userId: {
+          videoId,
+          userId,
+        },
+      },
     });
 
-    return this.mapToVideoEntry(updated);
+    if (existingLike) {
+      // Unlike - delete the like
+      await this.prisma.videoLike.delete({
+        where: {
+          id: existingLike.id,
+        },
+      });
+    } else {
+      // Like - create the like
+      await this.prisma.videoLike.create({
+        data: {
+          videoId,
+          userId,
+        },
+      });
+    }
+
+    // Return updated video with like count
+    return this.getVideoById(videoId) as Promise<VideoEntry>;
+  }
+
+  async getLikeCount(videoId: string): Promise<number> {
+    return await this.prisma.videoLike.count({
+      where: { videoId },
+    });
+  }
+
+  async isVideoLikedByUser(videoId: string, userId: string): Promise<boolean> {
+    const like = await this.prisma.videoLike.findUnique({
+      where: {
+        videoId_userId: {
+          videoId,
+          userId,
+        },
+      },
+    });
+    return !!like;
   }
 
   // ==================== User Methods ====================
 
-  async createUser(username: string, password_hash: string, email?: string): Promise<User> {
+  async createUser(username: string, password_hash: string, email?: string, roles?: string[]): Promise<User> {
     const user = await this.prisma.user.create({
       data: {
         username,
         email: email || null,
         passwordHash: password_hash,
+        roles: JSON.stringify(roles || []),
       },
     });
 
@@ -174,6 +206,7 @@ export class SqlServerDatabase implements IDatabase {
       if (patch.username !== undefined) data.username = patch.username;
       if (patch.email !== undefined) data.email = patch.email || null;
       if (patch.password_hash !== undefined) data.passwordHash = patch.password_hash;
+      if (patch.roles !== undefined) data.roles = JSON.stringify(patch.roles);
 
       const user = await this.prisma.user.update({
         where: { id },
@@ -211,7 +244,7 @@ export class SqlServerDatabase implements IDatabase {
       job_id: video.jobId || undefined,
       final_video_url: video.finalVideoUrl || undefined,
       is_published: video.isPublished || undefined,
-      likes: video.likes ? JSON.parse(video.likes) : undefined,
+      likes: [], // Deprecated - use getLikeCount() and isVideoLikedByUser() instead
       created_at: video.createdAt.toISOString(),
     };
   }
@@ -222,6 +255,7 @@ export class SqlServerDatabase implements IDatabase {
       username: user.username,
       email: user.email || undefined,
       password_hash: user.passwordHash,
+      roles: JSON.parse(user.roles),
       created_at: user.createdAt.toISOString(),
       updated_at: user.updatedAt.toISOString(),
     };
