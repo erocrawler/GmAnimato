@@ -26,9 +26,9 @@ jobs:
 
           # Install dependencies
           npm ci
-
+          npx prisma generate
           # Build the SvelteKit app
           npm run build
 
           # Restart the PM2 process
-          pm2 reload svelte-server
+          pm2 reload svelte-server || pm2 start .svelte-kit/output/server/index.js --name svelte-server
