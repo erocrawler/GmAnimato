@@ -18,17 +18,24 @@ jobs:
         key: ${{ secrets.SSH_KEY }}
         port: 22
         script: |
-          # Navigate to app directory
+          # 1. Load NVM environment (Critical for finding 'npm')
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+          # 2. Navigate to app directory
           cd /var/www/app
 
-          # Pull latest changes
-          git pull origin main
+          # 3. Update Code safely
+          # Fetch all refs to ensure we see 'origin/main'
+          git fetch --all
+          # Reset to match remote main exactly (discards local server changes)
+          git reset --hard origin/main
 
-          # Install dependencies
+          # 4. Install & Build
           npm ci
           npx prisma generate
-          # Build the SvelteKit app
           npm run build
 
-          # Restart the PM2 process
-          pm2 reload svelte-server || pm2 start .svelte-kit/output/server/index.js --name svelte-server
+          # 5. Restart the PM2 process
+          # --update-env refreshes environment variables
+          pm2 reload svelte-server --update-env || pm2 start .svelte-kit/output/server/index.js --name svelte-server
