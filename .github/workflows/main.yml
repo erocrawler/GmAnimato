@@ -26,10 +26,10 @@ jobs:
           cd /var/www/app
 
           # 3. Update Code safely
-          # Fetch all refs to ensure we see 'origin/main'
+          # Fetch all refs to ensure we see 'origin/master'
           git fetch --all
           # Reset to match remote main exactly (discards local server changes)
-          git reset --hard origin/main
+          git reset --hard origin/master
 
           # 4. Install & Build
           npm ci
