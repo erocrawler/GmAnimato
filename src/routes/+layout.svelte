@@ -36,7 +36,7 @@
 		<!-- Footer -->
 		<footer class="footer footer-center p-4 bg-base-200 text-base-content">
 			<aside>
-				<p>GmAnimato — Image-to-Video Generator © 2024</p>
+				<p>GmAnimato — Image-to-Video Generator © 2025</p>
 			</aside>
 		</footer>
 	</div>

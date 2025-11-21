@@ -51,11 +51,19 @@ async function annotateWithGrok(
   imageUrl: string,
   apiKey: string
 ): Promise<GrokVisionResponse | null> {
-  const systemPrompt = `You are an expert image analyzer. Analyze the provided image and return a JSON object with:
-1. suggested_prompts: Array with exactly 2 prompts - first one normal/straightforward, second one more dramatic/cinematic
-2. tags: Array of booru-style tags (descriptive tags like "1girl", "solo", "outdoors", "blue_sky", "smile", etc.)
+  const systemPrompt = `You are an expert image analyzer for an AI image-to-video generation system. Analyze the provided image and return a JSON object with:
+
+1. suggested_prompts: Array with exactly 2 Image to Video generation prompts. They are concise and optimized for a 6-second AI video. They should start with the exact scene in the image:
+   - First prompt: A straightforward description focusing on motion, camera movement, and what should happen in the video.
+   - Second prompt: A more cinematic/dramatic version intensifying the motion but still fit the short duration.
+   
+2. tags: Array of booru-style tags describing the visual elements (e.g., "1girl", "solo", "outdoors", "blue_sky", "smile", "nature", "landscape", etc.)
+
 3. is_photo_realistic: Boolean indicating if the image is photographic/realistic or artistic/illustrated
+
 4. is_nsfw: Boolean indicating if the image contains NSFW content
+
+IMPORTANT: The prompts should describe VIDEO MOTION and CAMERA MOVEMENT, not just describe what's in the static image. Think about how to bring this image to life with motion, camera work, and atmosphere.
 
 Return ONLY valid JSON, no other text.`;
 
@@ -75,7 +83,7 @@ Return ONLY valid JSON, no other text.`;
           content: [
             {
               type: 'text',
-              text: 'Analyze this image and provide the requested JSON output.',
+              text: 'Analyze this image and generate video motion prompts that will bring it to life. Focus on camera movement, motion, and cinematic effects.',
             },
             {
               type: 'image',

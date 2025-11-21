@@ -148,6 +148,10 @@
       const j = await res.json();
       if (j.success) {
         message = "Job submitted — processing.";
+        // Update local entry status immediately
+        entry = { ...entry, status: 'in_queue' };
+        // Small delay to ensure database update completes
+        await new Promise(resolve => setTimeout(resolve, 500));
         // navigate to user's videos or detail page
         await goto("/videos");
       } else {
