@@ -6,7 +6,7 @@
  *   npx tsx scripts/seed-demo-user.ts
  */
 
-import { getUserByUsername, createUser } from '../src/lib/db';
+import { getUserByUsername, createUser } from './db-script';
 import bcrypt from 'bcrypt';
 
 const DEMO_USERNAME = 'demo';
