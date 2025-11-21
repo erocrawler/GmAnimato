@@ -38,4 +38,4 @@ jobs:
 
           # 5. Restart the PM2 process
           # --update-env refreshes environment variables
-          pm2 reload svelte-server --update-env || pm2 start build/index.js --name svelte-server
+          pm2 reload svelte-server --update-env || pm2 start build/index.js --name svelte-server --node-args="-r dotenv/config"
