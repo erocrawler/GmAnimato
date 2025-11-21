@@ -14,8 +14,9 @@
 		"prisma:migrate": "prisma migrate dev",
 		"prisma:studio": "prisma studio",
 		"db:push": "prisma db push",
-		"db:seed": "tsx scripts/seed-demo-user.ts",
-		"db:migrate-json": "tsx scripts/migrate-json-to-sql.ts"
+		"db:seed": "tsx --env-file=.env scripts/seed-demo-user.ts",
+		"db:seed-admin": "tsx --env-file=.env scripts/seed-admin-user.ts",
+		"db:migrate-json": "tsx --env-file=.env scripts/migrate-json-to-sql.ts"
 	},
 	"devDependencies": {
 		"@melt-ui/pp": "^0.3.2",
@@ -35,9 +36,12 @@
 		"vite": "^7.1.10"
 	},
 	"dependencies": {
+		"@ai-sdk/xai": "^2.0.34",
 		"@aws-sdk/client-s3": "^3.486.0",
 		"@melt-ui/svelte": "^0.86.6",
+		"@prisma/adapter-pg": "^7.0.0",
 		"@tailwindcss/vite": "^4.1.17",
+		"ai": "^5.0.98",
 		"autoprefixer": "^10.4.22",
 		"bcrypt": "^6.0.0",
 		"node-fetch": "^3.3.2",

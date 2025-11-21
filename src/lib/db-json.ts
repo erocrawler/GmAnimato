@@ -1,10 +1,11 @@
 import fs from 'fs/promises';
 import path from 'path';
-import type { IDatabase, VideoEntry, User } from './IDatabase';
+import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic } from './IDatabase';
 
 const DATA_DIR = path.resolve('data');
 const DB_FILE = path.join(DATA_DIR, 'videos.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'admin_settings.json');
 
 export class JsonFileDatabase implements IDatabase {
   // ==================== Video Methods ====================
@@ -171,5 +172,105 @@ export class JsonFileDatabase implements IDatabase {
     users.splice(idx, 1);
     await this.writeAllUsers(users);
     return true;
+  }
+
+  // ==================== Admin Settings Methods ====================
+
+  private async ensureSettingsDB() {
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true });
+      await fs.access(SETTINGS_FILE);
+    } catch (err) {
+      const defaultSettings: AdminSettings = {
+        id: 'default',
+        registrationEnabled: true,
+        freeUserQuotaPerDay: 5,
+        paidUserQuotaPerDay: 50,
+        maxConcurrentJobs: 5,
+        maxQueueThreshold: 5000,
+        updatedAt: new Date().toISOString(),
+      };
+      await fs.writeFile(SETTINGS_FILE, JSON.stringify(defaultSettings, null, 2), 'utf-8');
+    }
+  }
+
+  async getAdminSettings(): Promise<AdminSettings> {
+    await this.ensureSettingsDB();
+    const txt = await fs.readFile(SETTINGS_FILE, 'utf-8');
+    return JSON.parse(txt) as AdminSettings;
+  }
+
+  async updateAdminSettings(patch: Partial<Omit<AdminSettings, 'id'>>): Promise<AdminSettings> {
+    await this.ensureSettingsDB();
+    const settings = await this.getAdminSettings();
+    const updated: AdminSettings = {
+      ...settings,
+      ...patch,
+      id: 'default',
+      updatedAt: new Date().toISOString(),
+    };
+    await fs.writeFile(SETTINGS_FILE, JSON.stringify(updated, null, 2), 'utf-8');
+    return updated;
+  }
+
+  async getAllUsers(): Promise<UserPublic[]> {
+    const users = await this.readAllUsers();
+    return users.map(user => ({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      roles: user.roles,
+      created_at: user.created_at,
+      updated_at: user.updated_at,
+    }));
+  }
+
+  // ==================== Session Methods ====================
+  // Note: JSON storage is not recommended for production sessions
+  // Sessions are stored in memory only and will be lost on restart
+
+  private sessions: Map<string, import('./IDatabase').Session> = new Map();
+
+  async createSession(userId: string, token: string, expiresAt: Date): Promise<import('./IDatabase').Session> {
+    const session: import('./IDatabase').Session = {
+      id: `session_${Date.now()}_${Math.random()}`,
+      user_id: userId,
+      token,
+      expires_at: expiresAt.toISOString(),
+      created_at: new Date().toISOString(),
+    };
+    this.sessions.set(token, session);
+    return session;
+  }
+
+  async getSessionByToken(token: string): Promise<import('./IDatabase').Session | undefined> {
+    return this.sessions.get(token);
+  }
+
+  async deleteSession(token: string): Promise<boolean> {
+    return this.sessions.delete(token);
+  }
+
+  async deleteExpiredSessions(): Promise<number> {
+    const now = new Date();
+    let count = 0;
+    for (const [token, session] of this.sessions.entries()) {
+      if (new Date(session.expires_at) < now) {
+        this.sessions.delete(token);
+        count++;
+      }
+    }
+    return count;
+  }
+
+  async deleteUserSessions(userId: string): Promise<number> {
+    let count = 0;
+    for (const [token, session] of this.sessions.entries()) {
+      if (session.user_id === userId) {
+        this.sessions.delete(token);
+        count++;
+      }
+    }
+    return count;
   }
 }

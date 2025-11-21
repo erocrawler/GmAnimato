@@ -1,8 +1,130 @@
 import path from 'path';
+import { createXai } from '@ai-sdk/xai';
+import { generateText } from 'ai';
 
-export async function annotateImage(filePath: string): Promise<{ tags: string[]; suggested_prompts: string[] }> {
+interface GrokVisionResponse {
+  suggested_prompts: [string, string]; // [normal, dramatic]
+  tags: string[];
+  is_photo_realistic: boolean;
+  is_nsfw: boolean;
+}
+
+export async function annotateImage(
+  filePath: string,
+  grokApiKey?: string
+): Promise<{ 
+  tags: string[]; 
+  suggested_prompts: string[];
+  is_photo_realistic?: boolean;
+  is_nsfw?: boolean;
+}> {
+  // Try Grok Vision API if API key is provided
+  if (grokApiKey) {
+    try {
+      const grokResult = await annotateWithGrok(filePath, grokApiKey);
+      if (grokResult) {
+        return {
+          tags: grokResult.tags,
+          suggested_prompts: grokResult.suggested_prompts,
+          is_photo_realistic: grokResult.is_photo_realistic,
+          is_nsfw: grokResult.is_nsfw,
+        };
+      }
+    } catch (error) {
+      console.error('[Grok Vision] Error:', error);
+    }
+  } else {
+    return mockAnnotateImage(filePath);
+  }
+
+  // Return empty result if Grok fails or no API key
+  // This will prevent gallery publishing for unanalyzed images
+  return {
+    tags: [],
+    suggested_prompts: [],
+    is_photo_realistic: undefined,
+    is_nsfw: undefined,
+  };
+}
+
+async function annotateWithGrok(
+  imageUrl: string,
+  apiKey: string
+): Promise<GrokVisionResponse | null> {
+  const systemPrompt = `You are an expert image analyzer. Analyze the provided image and return a JSON object with:
+1. suggested_prompts: Array with exactly 2 prompts - first one normal/straightforward, second one more dramatic/cinematic
+2. tags: Array of booru-style tags (descriptive tags like "1girl", "solo", "outdoors", "blue_sky", "smile", etc.)
+3. is_photo_realistic: Boolean indicating if the image is photographic/realistic or artistic/illustrated
+4. is_nsfw: Boolean indicating if the image contains NSFW content
+
+Return ONLY valid JSON, no other text.`;
+
+  try {
+    const xaiProvider = createXai({ apiKey });
+    const model = xaiProvider('grok-4-1-fast-non-reasoning');
+    console.log('[Grok Vision] Sending image for analysis:', imageUrl);
+    const { text } = await generateText({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: systemPrompt,
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'Analyze this image and provide the requested JSON output.',
+            },
+            {
+              type: 'image',
+              image: imageUrl,
+            },
+          ],
+        },
+      ],
+      temperature: 0.7,
+    });
+
+    // Parse JSON response
+    // Remove markdown code blocks if present
+    let jsonStr = text.trim();
+    if (jsonStr.startsWith('```json')) {
+      jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+    } else if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.replace(/```\n?/g, '');
+    }
+
+    const parsed: GrokVisionResponse = JSON.parse(jsonStr);
+
+    // Validate response structure
+    if (
+      !Array.isArray(parsed.suggested_prompts) ||
+      parsed.suggested_prompts.length !== 2 ||
+      !Array.isArray(parsed.tags) ||
+      typeof parsed.is_photo_realistic !== 'boolean' ||
+      typeof parsed.is_nsfw !== 'boolean'
+    ) {
+      console.error('[Grok Vision] Invalid response structure:', parsed);
+      return null;
+    }
+
+    console.log('[Grok Vision] Successfully analyzed image');
+    return parsed;
+  } catch (error) {
+    console.error('[Grok Vision] Request failed:', error);
+    return null;
+  }
+}
+
+function mockAnnotateImage(filePath: string): { 
+  tags: string[]; 
+  suggested_prompts: string[];
+  is_photo_realistic?: boolean;
+  is_nsfw?: boolean;
+} {
   // Very small local stub for image recognition.
-  // Replace this with a real vision API call (AWS Rekognition, Google Vision, etc.)
   const name = path.basename(filePath).toLowerCase();
   const tags: string[] = [];
 

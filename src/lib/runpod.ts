@@ -35,8 +35,8 @@ export interface RunPodHealthResponse {
 
 export type InternalStatus = 'uploaded' | 'in_queue' | 'processing' | 'completed' | 'failed';
 
-// Processing timeout: 1 hour in milliseconds
-export const PROCESSING_TIMEOUT_MS = 60 * 60 * 1000;
+// Processing timeout: 30 minutes in milliseconds
+export const PROCESSING_TIMEOUT_MS = 30 * 60 * 1000;
 
 // Queue threshold: disable job submission if more than this many jobs in queue
 export const MAX_QUEUE_THRESHOLD = 5000;

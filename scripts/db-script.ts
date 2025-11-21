@@ -1,32 +1,31 @@
-// Main database module - exports interface and provides factory for database implementation
-import type { IDatabase, VideoEntry, User, UserPublic, AdminSettings, Session } from './IDatabase';
-import { JsonFileDatabase } from './db-json';
-import { PostgresDatabase } from './db-postgres';
-import { env } from '$env/dynamic/private';
+// Database module for Node.js scripts (seed, migrations, etc.)
+// This is separate from src/lib/db.ts which uses SvelteKit-specific imports
 
-// Re-export types for backward compatibility
+import type { IDatabase, VideoEntry, User, UserPublic, AdminSettings, Session } from '../src/lib/IDatabase';
+import { PostgresDatabase } from '../src/lib/db-postgres';
+import { JsonFileDatabase } from '../src/lib/db-json';
+
+// Re-export types for convenience
 export type { VideoEntry, IDatabase, User, UserPublic, AdminSettings, Session };
 
 // Database instance (singleton)
 let dbInstance: IDatabase | null = null;
 
 /**
- * Get the database instance based on environment configuration
- * Uses DATABASE_PROVIDER environment variable to determine which implementation to use
- * - 'postgres' or 'postgresql': PostgreSQL with Prisma
- * - 'json' or undefined: JSON file-based storage (default)
+ * Get the database instance for scripts
+ * Uses process.env.DATABASE_PROVIDER to determine which implementation to use
  */
 export function getDatabase(): IDatabase {
   if (dbInstance) {
     return dbInstance;
   }
 
-  const provider = env.DATABASE_PROVIDER || 'json';
-
+  const provider = process.env.DATABASE_PROVIDER || 'json';
+  console.log(`Using database provider: ${provider}`);
   if (provider === 'postgres' || provider === 'postgresql') {
-    const databaseUrl = env.DATABASE_URL;
+    const databaseUrl = process.env.DATABASE_URL;
     if (!databaseUrl) {
-      throw new Error('DATABASE_URL is required when using PostgreSQL');
+      throw new Error('DATABASE_URL environment variable is required for PostgreSQL');
     }
     dbInstance = new PostgresDatabase(databaseUrl);
   } else {
@@ -37,7 +36,6 @@ export function getDatabase(): IDatabase {
 }
 
 // Convenience functions that delegate to the database instance
-// These maintain backward compatibility with existing code
 const db = getDatabase();
 
 // ==================== Video Functions ====================

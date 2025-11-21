@@ -1,6 +1,6 @@
 # Database Migration Guide
 
-This project now supports both JSON file-based storage and SQL Server database through a clean interface abstraction.
+This project now supports both JSON file-based storage and PostgreSQL database through a clean interface abstraction.
 
 ## Architecture
 
@@ -8,7 +8,7 @@ The database layer has been refactored to use the **Repository Pattern** with th
 
 - **`IDatabase`** (`src/lib/IDatabase.ts`): Interface defining all database operations
 - **`JsonFileDatabase`** (`src/lib/db-json.ts`): JSON file-based implementation (original behavior)
-- **`SqlServerDatabase`** (`src/lib/db-sqlserver.ts`): SQL Server implementation using Prisma
+- **`PostgresDatabase`** (`src/lib/db-postgres.ts`): PostgreSQL implementation using Prisma
 - **`db.ts`** (`src/lib/db.ts`): Main module that provides a factory and backward-compatible exports
 
 ## Switching Between Implementations
@@ -19,26 +19,29 @@ The database implementation is controlled by the `DATABASE_PROVIDER` environment
 # Use JSON file storage (default)
 DATABASE_PROVIDER=json
 
-# Use SQL Server
-DATABASE_PROVIDER=sqlserver
+# Use PostgreSQL
+DATABASE_PROVIDER=postgres
 ```
 
-## Setting Up SQL Server
+## Setting Up PostgreSQL
 
-### 1. Install SQL Server
+### 1. Install PostgreSQL
 
 For development, you can use:
-- **SQL Server Express** (Windows)
-- **SQL Server Docker Container** (Cross-platform)
-- **Azure SQL Database** (Cloud)
+- **PostgreSQL** (Cross-platform)
+- **PostgreSQL Docker Container** (Recommended)
+- **Managed PostgreSQL** (Cloud: AWS RDS, Azure Database, Google Cloud SQL)
 
 #### Docker Setup (Recommended for Development)
 
 ```bash
-# Run SQL Server in Docker
-docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=YourStrong@Password" \
-  -p 1433:1433 --name sqlserver \
-  -d mcr.microsoft.com/mssql/server:2022-latest
+# Run PostgreSQL in Docker
+docker run --name postgres \
+  -e POSTGRES_PASSWORD=yourpassword \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_DB=gmanimato \
+  -p 5432:5432 \
+  -d postgres:16
 ```
 
 ### 2. Configure Environment Variables
@@ -46,16 +49,16 @@ docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=YourStrong@Password" \
 Create a `.env` file (or update existing one):
 
 ```env
-# Set provider to SQL Server
-DATABASE_PROVIDER=sqlserver
+# Set provider to PostgreSQL
+DATABASE_PROVIDER=postgres
 
-# SQL Server connection string
-DATABASE_URL="sqlserver://localhost:1433;database=gmanimato;user=sa;password=YourStrong@Password;encrypt=true;trustServerCertificate=true"
+# PostgreSQL connection string
+DATABASE_URL="postgresql://postgres:yourpassword@localhost:5432/gmanimato?schema=public"
 ```
 
 **Connection String Format:**
 ```
-sqlserver://SERVER:PORT;database=DATABASE_NAME;user=USERNAME;password=PASSWORD;encrypt=true;trustServerCertificate=true
+postgresql://USERNAME:PASSWORD@HOST:PORT/DATABASE_NAME?schema=public
 ```
 
 ### 3. Generate Prisma Client
@@ -104,7 +107,7 @@ Opens a web interface at `http://localhost:5555` to view and edit database recor
 
 ## Database Schema
 
-The SQL Server schema (in `prisma/schema.prisma`) mirrors the original JSON structure with additional user management:
+The PostgreSQL schema (in `prisma/schema.prisma`) mirrors the original JSON structure with additional user management:
 
 **Note**: This project uses Prisma 7, where the connection URL is passed to the PrismaClient constructor rather than in the schema file.
 
@@ -157,7 +160,7 @@ The old in-memory user storage has been replaced with persistent database storag
 
 ## Migrating Existing Data
 
-To migrate data from JSON to SQL Server:
+To migrate data from JSON to PostgreSQL:
 
 ### Step 1: Export Existing Data
 
@@ -202,7 +205,7 @@ async function migrate() {
     });
   }
 
-  console.log(`Migrated ${videos.length} videos to SQL Server`);
+  console.log(`Migrated ${videos.length} videos to PostgreSQL`);
   await prisma.$disconnect();
 }
 
@@ -227,9 +230,9 @@ npm run dev
 
 Data is stored in `data/videos.json`.
 
-### Using SQL Server
+### Using PostgreSQL
 
-1. Start SQL Server (Docker or local)
+1. Start PostgreSQL (Docker or local)
 2. Set environment variables in `.env`
 3. Generate Prisma client: `npm run prisma:generate`
 4. Push schema: `npm run db:push`
@@ -247,7 +250,7 @@ import {
   // ... all other functions
 } from '$lib/db';
 
-// Works with either JSON or SQL Server backend
+// Works with either JSON or PostgreSQL backend
 const video = await createVideoEntry({ 
   user_id: '123', 
   status: 'uploaded',
@@ -273,8 +276,8 @@ const videos = await db.getVideosByUser('user123');
 Set these in your production environment:
 
 ```env
-DATABASE_PROVIDER=sqlserver
-DATABASE_URL="sqlserver://prod-server:1433;database=gmanimato;user=app_user;password=SecurePassword;encrypt=true"
+DATABASE_PROVIDER=postgres
+DATABASE_URL="postgresql://app_user:SecurePassword@prod-server:5432/gmanimato?schema=public"
 ```
 
 ### Build Steps
@@ -307,13 +310,13 @@ npm run prisma:migrate deploy
 ### Connection Issues
 
 **Error: "Connection refused"**
-- Check SQL Server is running
-- Verify port 1433 is open
+- Check PostgreSQL is running
+- Verify port 5432 is open
 - Check firewall settings
 
 **Error: "Login failed"**
 - Verify username and password in DATABASE_URL
-- Check SQL Server authentication mode
+- Check PostgreSQL authentication settings in `pg_hba.conf`
 
 ### Schema Issues
 
@@ -330,5 +333,5 @@ npm run prisma:migrate deploy
 ## Additional Resources
 
 - [Prisma Documentation](https://www.prisma.io/docs)
-- [SQL Server Connection Strings](https://www.connectionstrings.com/sql-server/)
-- [Prisma SQL Server Guide](https://www.prisma.io/docs/concepts/database-connectors/sql-server)
+- [PostgreSQL Connection Strings](https://www.connectionstrings.com/postgresql/)
+- [Prisma PostgreSQL Guide](https://www.prisma.io/docs/concepts/database-connectors/postgresql)

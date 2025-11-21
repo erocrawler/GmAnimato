@@ -39,6 +39,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       );
     }
 
+    // Prevent publishing NSFW photo-realistic content to gallery
+    if (is_published && existing.is_nsfw && existing.is_photo_realistic) {
+      return new Response(
+        JSON.stringify({ error: 'Cannot publish NSFW photo-realistic content to gallery' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const updated = await updateVideo(id, { prompt, tags, is_published });
     return new Response(JSON.stringify({ success: true, updated }), { headers: { 'Content-Type': 'application/json' } });
   } catch (err) {

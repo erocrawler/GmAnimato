@@ -5,10 +5,14 @@ export type VideoEntry = {
   prompt?: string;
   tags?: string[];
   suggested_prompts?: string[];
+  is_photo_realistic?: boolean;
+  is_nsfw?: boolean;
   status: 'uploaded' | 'in_queue' | 'processing' | 'completed' | 'failed';
   job_id?: string; // RunPod job ID for status polling
   final_video_url?: string;
   is_published?: boolean;
+  processing_time_ms?: number; // Time taken to process in milliseconds
+  processing_started_at?: string; // ISO timestamp when job was submitted
   likes?: string[]; // Array of user_ids who liked this video
   created_at: string;
 };
@@ -24,6 +28,24 @@ export type User = {
 };
 
 export type UserPublic = Omit<User, 'password_hash'>;
+
+export type Session = {
+  id: string;
+  user_id: string;
+  token: string;
+  expires_at: string;
+  created_at: string;
+};
+
+export type AdminSettings = {
+  id: string;
+  registrationEnabled: boolean;
+  freeUserQuotaPerDay: number;
+  paidUserQuotaPerDay: number;
+  maxConcurrentJobs: number;
+  maxQueueThreshold: number;
+  updatedAt?: string;
+};
 
 export interface IDatabase {
   // Video methods
@@ -44,4 +66,16 @@ export interface IDatabase {
   getUserByEmail(email: string): Promise<User | undefined>;
   updateUser(id: string, patch: Partial<Omit<User, 'id' | 'created_at'>>): Promise<User | null>;
   deleteUser(id: string): Promise<boolean>;
+  
+  // Session methods
+  createSession(userId: string, token: string, expiresAt: Date): Promise<Session>;
+  getSessionByToken(token: string): Promise<Session | undefined>;
+  deleteSession(token: string): Promise<boolean>;
+  deleteExpiredSessions(): Promise<number>;
+  deleteUserSessions(userId: string): Promise<number>;
+  
+  // Admin settings methods
+  getAdminSettings(): Promise<AdminSettings>;
+  updateAdminSettings(patch: Partial<Omit<AdminSettings, 'id'>>): Promise<AdminSettings>;
+  getAllUsers(): Promise<UserPublic[]>;
 }

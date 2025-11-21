@@ -36,6 +36,14 @@ export const POST: RequestHandler = async ({ request, params }) => {
 
     const patch: any = { status, job_id };
     
+    // Calculate processing time if we have a start time
+    if (existing.processing_started_at && status.toLowerCase() === 'completed') {
+      const startTime = new Date(existing.processing_started_at).getTime();
+      const endTime = Date.now();
+      patch.processing_time_ms = endTime - startTime;
+      console.log(`[Webhook] Processing time for video ${id}: ${patch.processing_time_ms}ms (${(patch.processing_time_ms / 1000).toFixed(1)}s)`);
+    }
+    
     // Extract video URL from files array if present
     if (files && Array.isArray(files)) {
       const videoFile = files.find(file => 

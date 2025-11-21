@@ -1,6 +1,8 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { authenticateUser, registerUser } from '$lib/auth';
 import { validateUser, formatValidationErrors } from '$lib/validation';
+import { getAdminSettings, createSession } from '$lib/db';
+import { generateSessionToken, getSessionExpiry, SESSION_COOKIE_OPTIONS } from '$lib/session';
 
 export const POST: RequestHandler = async ({ request, cookies }) => {
   const body = await request.json();
@@ -34,13 +36,13 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
       });
     }
 
+    // Create session in database
+    const sessionToken = generateSessionToken();
+    const expiresAt = getSessionExpiry();
+    await createSession(user.id, sessionToken, expiresAt);
+
     // Set session cookie
-    cookies.set('session', JSON.stringify(user), {
-      path: '/',
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-    });
+    cookies.set('session', sessionToken, SESSION_COOKIE_OPTIONS);
 
     return new Response(JSON.stringify({ success: true, user }), {
       headers: { 'Content-Type': 'application/json' },
@@ -48,6 +50,15 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
   }
 
   if (action === 'register') {
+    // Check if registration is enabled
+    const settings = await getAdminSettings();
+    if (!settings.registrationEnabled) {
+      return new Response(JSON.stringify({ error: 'Registration is currently disabled' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     const user = await registerUser(username, password, email);
     if (!user) {
       return new Response(JSON.stringify({ error: 'Username already exists' }), {
@@ -56,13 +67,13 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
       });
     }
 
+    // Create session in database
+    const sessionToken = generateSessionToken();
+    const expiresAt = getSessionExpiry();
+    await createSession(user.id, sessionToken, expiresAt);
+
     // Set session cookie
-    cookies.set('session', JSON.stringify(user), {
-      path: '/',
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-    });
+    cookies.set('session', sessionToken, SESSION_COOKIE_OPTIONS);
 
     return new Response(JSON.stringify({ success: true, user }), {
       headers: { 'Content-Type': 'application/json' },

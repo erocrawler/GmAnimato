@@ -1,10 +1,10 @@
-// Prisma schema for SQL Server
+// Prisma schema for PostgreSQL
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlserver"
+  provider = "postgresql"
 }
 
 model User {
@@ -17,10 +17,26 @@ model User {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   videos        Video[]
+  sessions      Session[]
 
   @@map("users")
   @@index([username])
   @@index([email])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  token     String   @unique @db.VarChar(255)
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
 }
 
 model Video {
@@ -30,10 +46,13 @@ model Video {
   prompt             String?  @db.VarChar(2000)
   tags               String?  @db.VarChar(1000) // JSON string array
   suggestedPrompts   String?  @map("suggested_prompts") @db.VarChar(2000) // JSON string array
+  isPhotoRealistic   Boolean? @map("is_photo_realistic")
+  isNsfw             Boolean? @map("is_nsfw")
   status             String   @default("uploaded") // 'uploaded' | 'in_queue' | 'processing' | 'completed' | 'failed'
   jobId              String?  @map("job_id") @db.VarChar(200)
   finalVideoUrl      String?  @map("final_video_url") @db.VarChar(500)
   isPublished        Boolean  @default(false) @map("is_published")
+  processingTimeMs   Int?     @map("processing_time_ms") // Time taken to process in milliseconds
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
@@ -58,4 +77,16 @@ model VideoLike {
   @@map("video_likes")
   @@index([videoId])
   @@index([userId])
+}
+
+model AdminSettings {
+  id                      String   @id @default("default")
+  registrationEnabled     Boolean  @default(true) @map("registration_enabled")
+  freeUserQuotaPerDay     Int      @default(5) @map("free_user_quota_per_day")
+  paidUserQuotaPerDay     Int      @default(50) @map("paid_user_quota_per_day")
+  maxConcurrentJobs       Int      @default(5) @map("max_concurrent_jobs")
+  maxQueueThreshold       Int      @default(5000) @map("max_queue_threshold")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  @@map("admin_settings")
 }

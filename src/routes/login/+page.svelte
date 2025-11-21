@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
+  import { goto, invalidateAll } from '$app/navigation';
 
   let username = '';
   let password = '';
@@ -30,7 +30,8 @@
         return;
       }
 
-      // Success - redirect to home
+      // Success - invalidate all data and redirect to home
+      await invalidateAll();
       await goto('/');
     } catch (err) {
       error = String(err);
@@ -49,7 +50,7 @@
   <div class="hero-content flex-col lg:flex-row-reverse">
     <div class="text-center lg:text-left lg:ml-8">
       <div class="mb-6 flex justify-center lg:justify-start">
-        <img src="/images/LOGO.png" alt="Logo" class="w-full h-auto" />
+        <img src="/images/LOGO_COLOR.png" alt="Logo" class="w-full h-auto" />
       </div>
       <h1 class="text-5xl font-bold">{isRegister ? 'Join' : 'Welcome Back'}!</h1>
       <p class="py-6">

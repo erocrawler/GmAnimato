@@ -3,7 +3,15 @@ import { env } from '$env/dynamic/private';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { getAdminSettings } from '$lib/db';
 
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async ({ locals }) => {
+  // Check if user is admin
+  if (!locals.user?.roles?.includes('admin')) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   try {
     const settings = await getAdminSettings();
     const runpodConfig = getRunPodConfig({
@@ -36,6 +44,14 @@ export const GET: RequestHandler = async () => {
           completed: health.jobs?.completed || 0,
           failed: health.jobs?.failed || 0
         },
+        workers: health.workers || {
+          idle: 0,
+          initializing: 0,
+          ready: 0,
+          running: 0,
+          throttled: 0,
+          unhealthy: 0
+        },
         threshold: settings.maxQueueThreshold,
         ...(queueFull && { 
           reason: `Queue is full (${inQueueCount}/${settings.maxQueueThreshold}). Please try again later.` 
@@ -44,18 +60,18 @@ export const GET: RequestHandler = async () => {
         headers: { 'Content-Type': 'application/json' } 
       });
     } catch (err) {
-      console.error('[Health] Error checking RunPod health:', err);
-      // If health check fails, assume service is unavailable
+      console.error('[Admin Queue Status] Error checking RunPod health:', err);
       return new Response(JSON.stringify({ 
         available: false,
         reason: 'Unable to check RunPod status',
-        queueFull: false
+        queueFull: false,
+        error: String(err)
       }), { 
         headers: { 'Content-Type': 'application/json' } 
       });
     }
   } catch (err) {
-    console.error('[Health] Error:', err);
+    console.error('[Admin Queue Status] Error:', err);
     return new Response(JSON.stringify({ 
       error: String(err),
       available: false,

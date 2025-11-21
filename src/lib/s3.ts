@@ -51,18 +51,29 @@ export async function uploadBufferToS3(buf: Buffer, filename?: string) {
   const client = makeClient();
   const key = (filename || `${Date.now()}-${randomUUID()}`).replace(/[^A-Za-z0-9._-]/g, '_');
 
+  // Detect content type from filename extension
+  const ext = key.toLowerCase().split('.').pop();
+  let contentType = 'application/octet-stream';
+  
+  if (ext === 'jpg' || ext === 'jpeg') contentType = 'image/jpeg';
+  else if (ext === 'png') contentType = 'image/png';
+  else if (ext === 'webp') contentType = 'image/webp';
+  else if (ext === 'gif') contentType = 'image/gif';
+  else if (ext === 'mp4') contentType = 'video/mp4';
+  else if (ext === 'webm') contentType = 'video/webm';
+
   console.log('S3 Config:', {
     bucket: S3_BUCKET,
     region: S3_REGION,
     endpoint: S3_ENDPOINT,
-    hasAccessKey: !!S3_ACCESS_KEY,
-    hasSecretKey: !!S3_SECRET_KEY
+    contentType
   });
 
   const cmd = new PutObjectCommand({
     Bucket: S3_BUCKET,
     Key: key,
     Body: buf,
+    ContentType: contentType,
   });
 
   try {

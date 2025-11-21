@@ -1,17 +1,14 @@
 import { PrismaClient } from '@prisma/client';
-import type { IDatabase, VideoEntry, User } from './IDatabase';
+import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic } from './IDatabase';
+import { PrismaPg } from '@prisma/adapter-pg'
 
-export class SqlServerDatabase implements IDatabase {
+export class PostgresDatabase implements IDatabase {
   private prisma: PrismaClient;
 
-  constructor() {
-    const databaseUrl = process.env.DATABASE_URL;
-    if (!databaseUrl) {
-      throw new Error('DATABASE_URL environment variable is required for SQL Server mode');
-    }
-    
+  constructor(databaseUrl: string) {
+    const adapter = new PrismaPg({ connectionString: databaseUrl });
     this.prisma = new PrismaClient({
-      datasourceUrl: databaseUrl,
+      adapter: adapter
     });
   }
 
@@ -26,6 +23,8 @@ export class SqlServerDatabase implements IDatabase {
         prompt: entry.prompt,
         tags: entry.tags ? JSON.stringify(entry.tags) : null,
         suggestedPrompts: entry.suggested_prompts ? JSON.stringify(entry.suggested_prompts) : null,
+        isPhotoRealistic: entry.is_photo_realistic,
+        isNsfw: entry.is_nsfw,
         status: entry.status,
         jobId: entry.job_id,
         finalVideoUrl: entry.final_video_url,
@@ -85,10 +84,14 @@ export class SqlServerDatabase implements IDatabase {
       if (patch.prompt !== undefined) data.prompt = patch.prompt;
       if (patch.tags !== undefined) data.tags = patch.tags ? JSON.stringify(patch.tags) : null;
       if (patch.suggested_prompts !== undefined) data.suggestedPrompts = patch.suggested_prompts ? JSON.stringify(patch.suggested_prompts) : null;
+      if (patch.is_photo_realistic !== undefined) data.isPhotoRealistic = patch.is_photo_realistic;
+      if (patch.is_nsfw !== undefined) data.isNsfw = patch.is_nsfw;
       if (patch.status !== undefined) data.status = patch.status;
       if (patch.job_id !== undefined) data.jobId = patch.job_id;
       if (patch.final_video_url !== undefined) data.finalVideoUrl = patch.final_video_url;
       if (patch.is_published !== undefined) data.isPublished = patch.is_published;
+      if (patch.processing_time_ms !== undefined) data.processingTimeMs = patch.processing_time_ms;
+      if (patch.processing_started_at !== undefined) data.processingStartedAt = patch.processing_started_at ? new Date(patch.processing_started_at) : null;
       // Note: likes are handled via toggleLike method now
 
       const video = await this.prisma.video.update({
@@ -230,6 +233,135 @@ export class SqlServerDatabase implements IDatabase {
     }
   }
 
+  // ==================== Session Methods ====================
+
+  async createSession(userId: string, token: string, expiresAt: Date): Promise<import('./IDatabase').Session> {
+    const session = await this.prisma.session.create({
+      data: {
+        userId,
+        token,
+        expiresAt,
+      },
+    });
+
+    return {
+      id: session.id,
+      user_id: session.userId,
+      token: session.token,
+      expires_at: session.expiresAt.toISOString(),
+      created_at: session.createdAt.toISOString(),
+    };
+  }
+
+  async getSessionByToken(token: string): Promise<import('./IDatabase').Session | undefined> {
+    const session = await this.prisma.session.findUnique({
+      where: { token },
+    });
+
+    if (!session) return undefined;
+
+    return {
+      id: session.id,
+      user_id: session.userId,
+      token: session.token,
+      expires_at: session.expiresAt.toISOString(),
+      created_at: session.createdAt.toISOString(),
+    };
+  }
+
+  async deleteSession(token: string): Promise<boolean> {
+    try {
+      await this.prisma.session.delete({
+        where: { token },
+      });
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async deleteExpiredSessions(): Promise<number> {
+    const result = await this.prisma.session.deleteMany({
+      where: {
+        expiresAt: {
+          lt: new Date(),
+        },
+      },
+    });
+    return result.count;
+  }
+
+  async deleteUserSessions(userId: string): Promise<number> {
+    const result = await this.prisma.session.deleteMany({
+      where: { userId },
+    });
+    return result.count;
+  }
+
+  // ==================== Admin Settings Methods ====================
+
+  async getAdminSettings(): Promise<AdminSettings> {
+    let settings = await this.prisma.adminSettings.findUnique({
+      where: { id: 'default' },
+    });
+
+    // Create default settings if they don't exist
+    if (!settings) {
+      settings = await this.prisma.adminSettings.create({
+        data: {
+          id: 'default',
+          registrationEnabled: true,
+          freeUserQuotaPerDay: 5,
+          paidUserQuotaPerDay: 50,
+          maxConcurrentJobs: 5,
+          maxQueueThreshold: 5000,
+        },
+      });
+    }
+
+    return this.mapToAdminSettings(settings);
+  }
+
+  async updateAdminSettings(patch: Partial<Omit<AdminSettings, 'id'>>): Promise<AdminSettings> {
+    const data: any = {};
+    
+    if (patch.registrationEnabled !== undefined) data.registrationEnabled = patch.registrationEnabled;
+    if (patch.freeUserQuotaPerDay !== undefined) data.freeUserQuotaPerDay = patch.freeUserQuotaPerDay;
+    if (patch.paidUserQuotaPerDay !== undefined) data.paidUserQuotaPerDay = patch.paidUserQuotaPerDay;
+    if (patch.maxConcurrentJobs !== undefined) data.maxConcurrentJobs = patch.maxConcurrentJobs;
+    if (patch.maxQueueThreshold !== undefined) data.maxQueueThreshold = patch.maxQueueThreshold;
+
+    const settings = await this.prisma.adminSettings.upsert({
+      where: { id: 'default' },
+      update: data,
+      create: {
+        id: 'default',
+        registrationEnabled: patch.registrationEnabled ?? true,
+        freeUserQuotaPerDay: patch.freeUserQuotaPerDay ?? 5,
+        paidUserQuotaPerDay: patch.paidUserQuotaPerDay ?? 50,
+        maxConcurrentJobs: patch.maxConcurrentJobs ?? 5,
+        maxQueueThreshold: patch.maxQueueThreshold ?? 5000,
+      },
+    });
+
+    return this.mapToAdminSettings(settings);
+  }
+
+  async getAllUsers(): Promise<UserPublic[]> {
+    const users = await this.prisma.user.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return users.map(user => ({
+      id: user.id,
+      username: user.username,
+      email: user.email || undefined,
+      roles: JSON.parse(user.roles),
+      created_at: user.createdAt.toISOString(),
+      updated_at: user.updatedAt.toISOString(),
+    }));
+  }
+
   // ==================== Mapping Methods ====================
 
   private mapToVideoEntry(video: any): VideoEntry {
@@ -240,10 +372,14 @@ export class SqlServerDatabase implements IDatabase {
       prompt: video.prompt || undefined,
       tags: video.tags ? JSON.parse(video.tags) : undefined,
       suggested_prompts: video.suggestedPrompts ? JSON.parse(video.suggestedPrompts) : undefined,
+      is_photo_realistic: video.isPhotoRealistic ?? undefined,
+      is_nsfw: video.isNsfw ?? undefined,
       status: video.status as VideoEntry['status'],
       job_id: video.jobId || undefined,
       final_video_url: video.finalVideoUrl || undefined,
       is_published: video.isPublished || undefined,
+      processing_time_ms: video.processingTimeMs ?? undefined,
+      processing_started_at: video.processingStartedAt ? video.processingStartedAt.toISOString() : undefined,
       likes: [], // Deprecated - use getLikeCount() and isVideoLikedByUser() instead
       created_at: video.createdAt.toISOString(),
     };
@@ -258,6 +394,18 @@ export class SqlServerDatabase implements IDatabase {
       roles: JSON.parse(user.roles),
       created_at: user.createdAt.toISOString(),
       updated_at: user.updatedAt.toISOString(),
+    };
+  }
+
+  private mapToAdminSettings(settings: any): AdminSettings {
+    return {
+      id: settings.id,
+      registrationEnabled: settings.registrationEnabled,
+      freeUserQuotaPerDay: settings.freeUserQuotaPerDay,
+      paidUserQuotaPerDay: settings.paidUserQuotaPerDay,
+      maxConcurrentJobs: settings.maxConcurrentJobs,
+      maxQueueThreshold: settings.maxQueueThreshold,
+      updatedAt: settings.updatedAt.toISOString(),
     };
   }
 

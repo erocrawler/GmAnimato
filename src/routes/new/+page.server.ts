@@ -6,6 +6,7 @@ import { uploadBufferToS3 } from '$lib/s3';
 import { Buffer } from 'buffer';
 import { validateAndConvertImage } from '$lib/imageValidation';
 import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
+import { env } from '$env/dynamic/private';
 
 export const actions: Actions = {
   default: async ({ request, locals }) => {
@@ -29,8 +30,13 @@ export const actions: Actions = {
     // Upload to S3; helper returns a public URL
     const s3Url = await uploadBufferToS3(buffer, finalName);
 
-    // Run image recognition to get tags and suggested prompts (pass the S3 url so the recognizer can inspect basename)
-    const annotation = await annotateImage(s3Url);
+    // Run image recognition to get tags and suggested prompts
+    // Pass Grok API key if configured
+    const grokApiKey = env.GROK_API_KEY;
+    const annotation = await annotateImage(s3Url, grokApiKey);
+
+    // Check if image recognition failed (empty tags means it failed)
+    const recognitionFailed = annotation.tags.length === 0;
 
     // Validate field lengths before creating entry
     const validationErrors = validateVideoEntry({
@@ -50,11 +56,13 @@ export const actions: Actions = {
       prompt: '',
       tags: annotation.tags,
       suggested_prompts: annotation.suggested_prompts,
+      is_photo_realistic: annotation.is_photo_realistic,
+      is_nsfw: annotation.is_nsfw,
       status: 'uploaded',
       is_published: false
     });
 
-    return { success: true, entry };
+    return { success: true, entry, recognitionFailed };
   }
 };
 

@@ -30,8 +30,9 @@ export async function registerUser(
   // Hash the password
   const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
 
-  // Create user in database
-  const user = await createUser(username, password_hash, email, roles);
+  // Create user in database with default role if not specified
+  const defaultRoles = roles || ['free-tier'];
+  const user = await createUser(username, password_hash, email, defaultRoles);
 
   // Return user without password hash
   return {

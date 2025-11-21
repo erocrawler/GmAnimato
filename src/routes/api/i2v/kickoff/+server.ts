@@ -1,8 +1,8 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { updateVideo, getVideoById, getActiveJobsByUser } from '$lib/db';
+import { updateVideo, getVideoById, getActiveJobsByUser, getAdminSettings } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { buildWorkflow } from '$lib/i2vWorkflow';
-import { getRunPodConfig, submitRunPodJob, getRunPodHealth, MAX_QUEUE_THRESHOLD, MAX_USER_CONCURRENT_JOBS } from '$lib/runpod';
+import { getRunPodConfig, submitRunPodJob, getRunPodHealth } from '$lib/runpod';
 
 async function delay(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
@@ -20,6 +20,9 @@ export const POST: RequestHandler = async ({ request }) => {
     if (existing.status === 'processing' || existing.status === 'in_queue') {
       return new Response(JSON.stringify({ error: 'already processing' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
+
+    // Get admin settings for thresholds
+    const settings = await getAdminSettings();
 
     // Check if RunPod is configured
     const runpodConfig = getRunPodConfig({
@@ -67,9 +70,9 @@ export const POST: RequestHandler = async ({ request }) => {
 
     // Check user's concurrent job limit
     const activeJobs = await getActiveJobsByUser(existing.user_id);
-    if (activeJobs.length >= MAX_USER_CONCURRENT_JOBS) {
+    if (activeJobs.length >= settings.maxConcurrentJobs) {
       return new Response(JSON.stringify({ 
-        error: `You have reached the maximum of ${MAX_USER_CONCURRENT_JOBS} concurrent jobs. Please wait for some to complete.` 
+        error: `You have reached the maximum of ${settings.maxConcurrentJobs} concurrent jobs. Please wait for some to complete.` 
       }), { 
         status: 429, 
         headers: { 'Content-Type': 'application/json' } 
@@ -81,7 +84,7 @@ export const POST: RequestHandler = async ({ request }) => {
       const health = await getRunPodHealth(runpodConfig);
       const inQueueCount = health.jobs?.inQueue || 0;
       
-      if (inQueueCount >= MAX_QUEUE_THRESHOLD) {
+      if (inQueueCount >= settings.maxQueueThreshold) {
         return new Response(JSON.stringify({ 
           error: `We're experiencing high demand right now (${inQueueCount} jobs queued). Please try again in a few minutes. We apologize for the inconvenience.`,
           queueFull: true
@@ -95,7 +98,7 @@ export const POST: RequestHandler = async ({ request }) => {
       // Continue with job submission even if health check fails
     }
 
-    await updateVideo(id, { status: 'in_queue' });
+    await updateVideo(id, { status: 'in_queue', processing_started_at: new Date().toISOString() });
 
     // Use real I2V API endpoint
     // Build callback URL for webhook notification with video ID
