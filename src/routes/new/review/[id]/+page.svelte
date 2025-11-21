@@ -72,6 +72,12 @@
   }
 
   onMount(() => {
+    // Redirect to video details if already completed
+    if (entry.status === 'completed') {
+      goto(`/videos/${entry.id}`);
+      return;
+    }
+    
     // Start polling if video is in progress
     if (entry.status === 'in_queue' || entry.status === 'processing') {
       pollStatus(); // Initial poll
@@ -115,18 +121,15 @@
         }
       }
       
-      // First update the stored prompt and tags so they're saved with the entry
-      await fetch("/api/video/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: entry.id, prompt, tags: $tags.map(t => t.value) }),
-      });
-
-      // Then kickoff the I2V job
+      // Kickoff the I2V job with updated prompt and tags
       const res = await fetch("/api/i2v/kickoff", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: entry.id }),
+        body: JSON.stringify({ 
+          id: entry.id, 
+          prompt, 
+          tags: $tags.map(t => t.value) 
+        }),
       });
       
       if (!res.ok) {
@@ -148,10 +151,13 @@
       const j = await res.json();
       if (j.success) {
         message = "Job submitted — processing.";
-        // Update local entry status immediately
-        entry = { ...entry, status: 'in_queue' };
-        // Small delay to ensure database update completes
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Update local entry with the returned video data
+        if (j.video) {
+          entry = j.video;
+        } else {
+          // Fallback to manual status update
+          entry = { ...entry, status: 'in_queue' };
+        }
         // navigate to user's videos or detail page
         await goto("/videos");
       } else {

@@ -21,6 +21,10 @@ export const POST: RequestHandler = async ({ request }) => {
       return new Response(JSON.stringify({ error: 'already processing' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
+    // Extract prompt and tags from request body
+    const prompt = body?.prompt;
+    const tags = body?.tags;
+
     // Get admin settings for thresholds
     const settings = await getAdminSettings();
 
@@ -98,7 +102,25 @@ export const POST: RequestHandler = async ({ request }) => {
       // Continue with job submission even if health check fails
     }
 
-    await updateVideo(id, { status: 'in_queue', processing_started_at: new Date().toISOString() });
+    // Update video with status, prompt, tags, and processing start time
+    const updatePayload: any = { 
+      status: 'in_queue', 
+      processing_started_at: new Date().toISOString() 
+    };
+    
+    if (prompt !== undefined) {
+      updatePayload.prompt = prompt;
+    }
+    
+    if (tags !== undefined) {
+      updatePayload.tags = tags;
+    }
+
+    await updateVideo(id, updatePayload);
+
+    // Verify the update by fetching the video again
+    const updated = await getVideoById(id);
+    console.log(`[I2V] Video ${id} status after update: ${updated?.status}`);
 
     // Use real I2V API endpoint
     // Build callback URL for webhook notification with video ID
@@ -133,7 +155,12 @@ export const POST: RequestHandler = async ({ request }) => {
       );
     }
 
-    return new Response(JSON.stringify({ success: true, job_id: jobId }), { headers: { 'Content-Type': 'application/json' } });
+    // Return the updated video status
+    const finalVideo = await getVideoById(id);
+    return new Response(
+      JSON.stringify({ success: true, job_id: jobId, video: finalVideo }), 
+      { headers: { 'Content-Type': 'application/json' } }
+    );
   } catch (err) {
     console.error('[I2V] Error:', err);
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
