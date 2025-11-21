@@ -1,0 +1,33 @@
+name: Deploy to Linode
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Deploy using SSH
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_KEY }}
+        port: 22
+        script: |
+          # Navigate to app directory
+          cd /var/www/app
+
+          # Pull latest changes
+          git pull origin main
+
+          # Install dependencies
+          npm ci
+
+          # Build the SvelteKit app
+          npm run build
+
+          # Restart the PM2 process
+          pm2 reload svelte-server
