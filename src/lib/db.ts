@@ -5,7 +5,7 @@ import { PostgresDatabase } from './db-postgres';
 import { env } from '$env/dynamic/private';
 
 // Re-export types for backward compatibility
-export type { VideoEntry, IDatabase, User, UserPublic, AdminSettings, Session };
+export type { VideoEntry, IDatabase, User, UserPublic, AdminSettings, Session, PaginatedVideos } from './IDatabase';
 
 // Database instance (singleton)
 let dbInstance: IDatabase | null = null;
@@ -54,8 +54,8 @@ export async function getActiveJobsByUser(user_id: string) {
   return db.getActiveJobsByUser(user_id);
 }
 
-export async function getPublishedVideos() {
-  return db.getPublishedVideos();
+export async function getPublishedVideos(page?: number, pageSize?: number, likedBy?: string) {
+  return db.getPublishedVideos(page, pageSize, likedBy);
 }
 
 export async function getVideoById(id: string) {

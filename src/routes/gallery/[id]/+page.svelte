@@ -18,24 +18,6 @@
     }
   }
 
-  async function downloadVideo() {
-    try {
-      const response = await fetch(video.final_video_url);
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `video-${video.id}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err) {
-      console.error('Download failed:', err);
-      alert('Failed to download video');
-    }
-  }
-
   const isLiked = $derived(data.user && video.likes?.includes(data.user.id));
   const likesCount = $derived(video.likes?.length || 0);
 </script>
@@ -142,12 +124,16 @@
 
             <div class="divider"></div>
             
-            <button class="btn btn-primary" on:click={downloadVideo}>
+            <a 
+              href={video.final_video_url}
+              download="video-{video.id}.mp4"
+              class="btn btn-primary"
+            >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               Download Video
-            </button>
+            </a>
           </div>
         </div>
       {/if}
@@ -172,10 +158,9 @@
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {#each data.relatedVideos as v}
           <a href="/gallery/{v.id}" class="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow cursor-pointer">
-            {#if v.status === 'completed' && v.final_video_url}
+            {#if v.original_image_url}
               <figure class="aspect-video bg-base-200">
-                <!-- svelte-ignore a11y_media_has_caption -->
-                <video src={v.final_video_url} class="w-full h-full object-cover pointer-events-none"></video>
+                <img src={v.original_image_url} alt={v.prompt || 'Video thumbnail'} class="w-full h-full object-cover" />
               </figure>
               <div class="card-body p-4">
                 <h3 class="card-title text-sm line-clamp-2">

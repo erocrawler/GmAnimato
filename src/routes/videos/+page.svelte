@@ -21,10 +21,9 @@
           
           // Update the video in the list if status changed
           if (statusData.status && statusData.status !== video.status) {
-            const index = videos.findIndex(v => v.id === video.id);
-            if (index !== -1) {
-              videos[index] = { ...videos[index], status: statusData.status };
-            }
+            videos = videos.map(v => 
+              v.id === video.id ? { ...v, status: statusData.status } : v
+            );
           }
         }
       } catch (err) {
@@ -95,12 +94,7 @@
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {#each videos as v}
         <div class="card bg-base-100 shadow-xl image-full">
-          {#if v.status === "completed" && v.final_video_url}
-            <figure>
-              <!-- svelte-ignore a11y_media_has_caption -->
-              <video src={v.final_video_url} class="w-full h-full object-cover"></video>
-            </figure>
-          {:else if v.original_image_url}
+          {#if v.original_image_url}
             <figure>
               <img src={v.original_image_url} alt="thumbnail" class="w-full h-full object-cover" />
             </figure>

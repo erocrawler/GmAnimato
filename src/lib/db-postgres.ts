@@ -58,13 +58,35 @@ export class PostgresDatabase implements IDatabase {
     return videos.map(this.mapToVideoEntry);
   }
 
-  async getPublishedVideos(): Promise<VideoEntry[]> {
-    const videos = await this.prisma.video.findMany({
-      where: { isPublished: true },
-      orderBy: { createdAt: 'desc' },
-    });
+  async getPublishedVideos(page: number = 1, pageSize: number = 12, likedBy?: string): Promise<import('./IDatabase').PaginatedVideos> {
+    const skip = (page - 1) * pageSize;
+    
+    const where: any = { isPublished: true };
+    
+    // Filter by liked videos if likedBy is provided
+    if (likedBy) {
+      where.likes = {
+        contains: likedBy
+      };
+    }
+    
+    const [videos, total] = await Promise.all([
+      this.prisma.video.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.video.count({ where })
+    ]);
 
-    return videos.map(this.mapToVideoEntry);
+    return {
+      videos: videos.map(this.mapToVideoEntry),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize)
+    };
   }
 
   async getVideoById(id: string): Promise<VideoEntry | undefined> {

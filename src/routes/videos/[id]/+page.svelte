@@ -65,24 +65,6 @@
     }
   }
 
-  async function downloadVideo() {
-    try {
-      const response = await fetch(video.final_video_url);
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `video-${video.id}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err) {
-      console.error('Download failed:', err);
-      alert('Failed to download video');
-    }
-  }
-
   const isLiked = $derived(data.user && video.likes?.includes(data.user.id));
   const likesCount = $derived(video.likes?.length || 0);
 </script>
@@ -189,12 +171,12 @@
                   class="toggle toggle-primary" 
                   checked={video.is_published}
                   onchange={togglePublish}
-                  disabled={publishing || (video.is_nsfw && video.is_photo_realistic) || (!video.tags || video.tags.length === 0)}
+                  disabled={publishing || (video.is_nsfw && video.is_photo_realistic) || (!video.suggested_prompts || video.suggested_prompts.length === 0)}
                 />
               </label>
               {#if video.is_nsfw && video.is_photo_realistic}
                 <p class="text-xs text-error mt-1">NSFW photo-realistic content cannot be published</p>
-              {:else if !video.tags || video.tags.length === 0}
+              {:else if !video.suggested_prompts || video.suggested_prompts.length === 0}
                 <p class="text-xs text-warning mt-1">⚠️ Image recognition failed - cannot publish to gallery. Please try uploading again.</p>
               {/if}
             </div>
@@ -225,12 +207,16 @@
 
             <div class="divider"></div>
 
-            <button class="btn btn-primary" onclick={downloadVideo}>
+            <a 
+              href={video.final_video_url}
+              download="video-{video.id}.mp4"
+              class="btn btn-primary"
+            >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               Download Video
-            </button>
+            </a>
           {/if}
 
           <button class="btn btn-error btn-outline" onclick={deleteVideo}>

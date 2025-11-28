@@ -47,6 +47,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       );
     }
 
+    // Prevent publishing if image recognition failed (no suggested prompts)
+    if (is_published && (!existing.suggested_prompts || existing.suggested_prompts.length === 0)) {
+      return new Response(
+        JSON.stringify({ error: 'Cannot publish to gallery - image recognition failed. Please try uploading again.' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const updated = await updateVideo(id, { prompt, tags, is_published });
     return new Response(JSON.stringify({ success: true, updated }), { headers: { 'Content-Type': 'application/json' } });
   } catch (err) {

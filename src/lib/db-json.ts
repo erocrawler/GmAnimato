@@ -53,9 +53,29 @@ export class JsonFileDatabase implements IDatabase {
     );
   }
 
-  async getPublishedVideos(): Promise<VideoEntry[]> {
+  async getPublishedVideos(page: number = 1, pageSize: number = 12, likedBy?: string): Promise<import('./IDatabase').PaginatedVideos> {
     const rows = await this.readAll();
-    return rows.filter((r) => r.is_published);
+    let filtered = rows.filter((r) => r.is_published);
+    
+    // Filter by liked videos if likedBy is provided
+    if (likedBy) {
+      filtered = filtered.filter((r) => r.likes?.includes(likedBy));
+    }
+    
+    // Sort by created_at descending
+    filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    
+    const total = filtered.length;
+    const skip = (page - 1) * pageSize;
+    const videos = filtered.slice(skip, skip + pageSize);
+    
+    return {
+      videos,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize)
+    };
   }
 
   async getVideoById(id: string): Promise<VideoEntry | undefined> {
