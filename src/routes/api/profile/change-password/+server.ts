@@ -17,9 +17,9 @@ export const POST: RequestHandler = async ({ request, locals, cookies }) => {
   const currentPassword = body.currentPassword as string | undefined;
   const newPassword = body.newPassword as string | undefined;
 
-  if (!currentPassword || !newPassword) {
+  if (!newPassword) {
     return new Response(
-      JSON.stringify({ error: 'Current password and new password are required' }),
+      JSON.stringify({ error: 'New password is required' }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -40,13 +40,30 @@ export const POST: RequestHandler = async ({ request, locals, cookies }) => {
     });
   }
 
-  // Verify current password
-  const isValid = await bcrypt.compare(currentPassword, user.password_hash);
-  if (!isValid) {
-    return new Response(JSON.stringify({ error: 'Current password is incorrect' }), {
-      status: 401,
+  // Block GmGard OAuth accounts from setting/changing passwords
+  if (user.roles?.includes('gmgard-user')) {
+    return new Response(JSON.stringify({ error: 'Password changes are disabled for GmGard OAuth users' }), {
+      status: 403,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  // If user already has a password, require currentPassword and verify
+  if (user.password_hash) {
+    if (!currentPassword) {
+      return new Response(
+        JSON.stringify({ error: 'Current password is required to change password' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const isValid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isValid) {
+      return new Response(JSON.stringify({ error: 'Current password is incorrect' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
   }
 
   // Hash new password

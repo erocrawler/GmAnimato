@@ -35,13 +35,26 @@ export class PostgresDatabase implements IDatabase {
     return this.mapToVideoEntry(video);
   }
 
-  async getVideosByUser(user_id: string): Promise<VideoEntry[]> {
-    const videos = await this.prisma.video.findMany({
-      where: { userId: user_id },
-      orderBy: { createdAt: 'desc' },
-    });
+  async getVideosByUser(user_id: string, page: number = 1, pageSize: number = 12): Promise<import('./IDatabase').PaginatedVideos> {
+    const skip = (page - 1) * pageSize;
+    
+    const [videos, total] = await Promise.all([
+      this.prisma.video.findMany({
+        where: { userId: user_id },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.video.count({ where: { userId: user_id } })
+    ]);
 
-    return videos.map(this.mapToVideoEntry);
+    return {
+      videos: videos.map(this.mapToVideoEntry),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize)
+    };
   }
 
   async getActiveJobsByUser(user_id: string): Promise<VideoEntry[]> {
@@ -58,7 +71,8 @@ export class PostgresDatabase implements IDatabase {
     return videos.map(this.mapToVideoEntry);
   }
 
-  async getPublishedVideos(page: number = 1, pageSize: number = 12, likedBy?: string): Promise<import('./IDatabase').PaginatedVideos> {
+  async getPublishedVideos(options?: import('./IDatabase').GetPublishedVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
+    const { page = 1, pageSize = 12, likedBy, excludeId, status, isNsfw } = options || {};
     const skip = (page - 1) * pageSize;
     
     const where: any = { isPublished: true };
@@ -68,6 +82,21 @@ export class PostgresDatabase implements IDatabase {
       where.likes = {
         contains: likedBy
       };
+    }
+    
+    // Exclude specific video if excludeId is provided
+    if (excludeId) {
+      where.id = { not: excludeId };
+    }
+    
+    // Filter by status if provided
+    if (status) {
+      where.status = status;
+    }
+    
+    // Filter by NSFW if provided
+    if (isNsfw !== undefined) {
+      where.isNsfw = isNsfw;
     }
     
     const [videos, total] = await Promise.all([

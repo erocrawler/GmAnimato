@@ -40,9 +40,24 @@ export class JsonFileDatabase implements IDatabase {
     return row;
   }
 
-  async getVideosByUser(user_id: string): Promise<VideoEntry[]> {
+  async getVideosByUser(user_id: string, page: number = 1, pageSize: number = 12): Promise<import('./IDatabase').PaginatedVideos> {
     const rows = await this.readAll();
-    return rows.filter((r) => r.user_id === user_id);
+    let filtered = rows.filter((r) => r.user_id === user_id);
+    
+    // Sort by created_at descending (newest first)
+    filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    
+    const total = filtered.length;
+    const skip = (page - 1) * pageSize;
+    const videos = filtered.slice(skip, skip + pageSize);
+    
+    return {
+      videos,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize)
+    };
   }
 
   async getActiveJobsByUser(user_id: string): Promise<VideoEntry[]> {
@@ -53,13 +68,29 @@ export class JsonFileDatabase implements IDatabase {
     );
   }
 
-  async getPublishedVideos(page: number = 1, pageSize: number = 12, likedBy?: string): Promise<import('./IDatabase').PaginatedVideos> {
+  async getPublishedVideos(options?: import('./IDatabase').GetPublishedVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
+    const { page = 1, pageSize = 12, likedBy, excludeId, status, isNsfw } = options || {};
     const rows = await this.readAll();
     let filtered = rows.filter((r) => r.is_published);
     
     // Filter by liked videos if likedBy is provided
     if (likedBy) {
       filtered = filtered.filter((r) => r.likes?.includes(likedBy));
+    }
+    
+    // Exclude specific video if excludeId is provided
+    if (excludeId) {
+      filtered = filtered.filter((r) => r.id !== excludeId);
+    }
+    
+    // Filter by status if provided
+    if (status) {
+      filtered = filtered.filter((r) => r.status === status);
+    }
+    
+    // Filter by NSFW if provided
+    if (isNsfw !== undefined) {
+      filtered = filtered.filter((r) => r.is_nsfw === isNsfw);
     }
     
     // Sort by created_at descending

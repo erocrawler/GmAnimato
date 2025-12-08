@@ -55,12 +55,21 @@ export type PaginatedVideos = {
   totalPages: number;
 };
 
+export type GetPublishedVideosOptions = {
+  page?: number;
+  pageSize?: number;
+  likedBy?: string;
+  excludeId?: string;
+  status?: VideoEntry['status'];
+  isNsfw?: boolean;
+};
+
 export interface IDatabase {
   // Video methods
   createVideoEntry(entry: Omit<VideoEntry, 'id' | 'created_at'> & { id?: string }): Promise<VideoEntry>;
-  getVideosByUser(user_id: string): Promise<VideoEntry[]>;
+  getVideosByUser(user_id: string, page?: number, pageSize?: number): Promise<PaginatedVideos>;
   getActiveJobsByUser(user_id: string): Promise<VideoEntry[]>;
-  getPublishedVideos(page?: number, pageSize?: number, likedBy?: string): Promise<PaginatedVideos>;
+  getPublishedVideos(options?: GetPublishedVideosOptions): Promise<PaginatedVideos>;
   getVideoById(id: string): Promise<VideoEntry | undefined>;
   updateVideo(id: string, patch: Partial<VideoEntry>): Promise<VideoEntry | null>;
   toggleLike(videoId: string, userId: string): Promise<VideoEntry | null>;

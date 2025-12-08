@@ -5,10 +5,11 @@
 	let { children, data }: { children: any; data: any } = $props();
 	
 	const isAdmin = $derived(data?.user?.roles?.includes('admin') || false);
+	let drawerToggle: HTMLInputElement | null = $state(null);
 </script>
 
 <div class="drawer">
-	<input id="main-drawer" type="checkbox" class="drawer-toggle" />
+	<input bind:this={drawerToggle} id="main-drawer" type="checkbox" class="drawer-toggle" />
 	<div class="drawer-content flex flex-col">
 		<!-- Navbar -->
 		<div class="navbar bg-base-200 shadow-lg">
@@ -45,7 +46,7 @@
 	<div class="drawer-side">
 		<label for="main-drawer" aria-label="close sidebar" class="drawer-overlay"></label>
 		<div class="w-80 min-h-full bg-base-200 p-4">
-			<NavMenu user={data?.user} {isAdmin} orientation="vertical" />
+			<NavMenu user={data?.user} {isAdmin} orientation="vertical" {drawerToggle} />
 		</div>
 	</div>
 </div>

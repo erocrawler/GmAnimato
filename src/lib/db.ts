@@ -1,11 +1,11 @@
 // Main database module - exports interface and provides factory for database implementation
-import type { IDatabase, VideoEntry, User, UserPublic, AdminSettings, Session } from './IDatabase';
+import type { IDatabase, VideoEntry, User, UserPublic, AdminSettings, Session, GetPublishedVideosOptions } from './IDatabase';
 import { JsonFileDatabase } from './db-json';
 import { PostgresDatabase } from './db-postgres';
 import { env } from '$env/dynamic/private';
 
 // Re-export types for backward compatibility
-export type { VideoEntry, IDatabase, User, UserPublic, AdminSettings, Session, PaginatedVideos } from './IDatabase';
+export type { VideoEntry, IDatabase, User, UserPublic, AdminSettings, Session, PaginatedVideos, GetPublishedVideosOptions } from './IDatabase';
 
 // Database instance (singleton)
 let dbInstance: IDatabase | null = null;
@@ -46,16 +46,16 @@ export async function createVideoEntry(entry: Omit<VideoEntry, 'id' | 'created_a
   return db.createVideoEntry(entry);
 }
 
-export async function getVideosByUser(user_id: string) {
-  return db.getVideosByUser(user_id);
+export async function getVideosByUser(user_id: string, page?: number, pageSize?: number) {
+  return db.getVideosByUser(user_id, page, pageSize);
 }
 
 export async function getActiveJobsByUser(user_id: string) {
   return db.getActiveJobsByUser(user_id);
 }
 
-export async function getPublishedVideos(page?: number, pageSize?: number, likedBy?: string) {
-  return db.getPublishedVideos(page, pageSize, likedBy);
+export async function getPublishedVideos(options?: GetPublishedVideosOptions) {
+  return db.getPublishedVideos(options);
 }
 
 export async function getVideoById(id: string) {

@@ -9,15 +9,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   // Only apply liked filter if user is logged in and filter is 'liked'
   const likedBy = (locals.user && filter === 'liked') ? locals.user.id : undefined;
   
-  const result = await getPublishedVideos(page, pageSize, likedBy);
+  // Filter out NSFW content for non-logged-in users at database level
+  const isNsfw = locals.user ? undefined : false;
   
-  // Filter out NSFW content for non-logged-in users
-  const videos = locals.user 
-    ? result.videos 
-    : result.videos.filter(v => !v.is_nsfw);
+  const result = await getPublishedVideos({ page, pageSize, likedBy, isNsfw });
   
   return { 
-    videos,
+    videos: result.videos,
     total: result.total,
     page: result.page,
     pageSize: result.pageSize,

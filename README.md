@@ -11,6 +11,7 @@ GmAnimato/
   src/
     lib/
       auth.ts          # In-memory user management (dev)
+      oauth.ts         # OAuth client helpers for GmGard
       db.ts            # Database factory & backward-compatible exports
       IDatabase.ts     # Database interface definition
       db-json.ts       # JSON file-based implementation
@@ -22,6 +23,8 @@ GmAnimato/
       new/             # Upload & queue new video
       videos/          # User's video library (protected)
       gallery/         # Published videos (public)
+    auth/
+      gmgard/          # OAuth login + callback routes
       api/
         auth/          # Login/Register endpoint
         logout/        # Logout endpoint
@@ -80,6 +83,7 @@ npm run preview
 - ✅ Database-backed user storage (JSON file or SQL Server)
 - ✅ Secure password hashing with bcrypt
 - ✅ Session-based auth with httpOnly cookies
+- ✅ OAuth login with GmGard (OIDC authorization code flow)
 - ✅ Protected routes: `/new`, `/videos`, `/api/*`
 - ✅ Public routes: `/`, `/login`, `/gallery`, `/api/logout`
 - ✅ Unique username constraint
@@ -151,13 +155,19 @@ Sessions are stored in `session` cookie (httpOnly):
 - Max age: 7 days
 - Format: JSON `{id, username}`
 - Validated on every request via `hooks.server.ts`
+- Automatic cleanup runs daily at 3 AM server local time to delete expired sessions
+
+### OAuth Setup (GmGard)
+- Copy `.env.example` to `.env.local` and set:
+  - `PUBLIC_OAUTH_ISSUER`, `PUBLIC_OAUTH_AUTHORIZATION_ENDPOINT`, `PUBLIC_OAUTH_TOKEN_ENDPOINT`, `PUBLIC_OAUTH_USERINFO_ENDPOINT`, `PUBLIC_OAUTH_LOGOUT_ENDPOINT`
+  - `OAUTH_CLIENT_SECRET`, `OAUTH_REDIRECT_URI`
 
 ### Future Enhancements
 - [x] **Database abstraction layer** - Supports JSON and SQL Server
-- [ ] Real database migrations to production SQL Server
-- [ ] OIDC/OAuth integration (Google, GitHub)
-- [ ] S3 storage for images and videos
-- [ ] Real I2V API integration (Runpod, Replicate, etc.)
+- [x] Real database migrations to production SQL Server
+- [x] **OAuth/OIDC integration** - Sign in with GmGard account (see [OAuth Setup Guide](./docs/oauth-setup-guide.md))
+- [x] S3 storage for images and videos
+- [x] Real I2V API integration (Runpod, Replicate, etc.)
 - [ ] Video preview thumbnails
 - [ ] User profile settings
 - [ ] Comments/reactions on published videos
@@ -173,13 +183,6 @@ Sessions are stored in `session` cookie (httpOnly):
 3. Go to `/new` and upload a test image
 4. Monitor `/videos` to see status change to `completed` after ~1.5s
 5. Visit `/gallery` to publish/view shared videos
-
-### Unit Tests
-
-```bash
-cd d:\Projects\GmComfy
-python -m unittest tests.test_handler -v
-```
 
 ## Deployment
 

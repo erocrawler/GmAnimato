@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { goto } from '$app/navigation';
 
-  let { data } = $props<{ data: { videos: any[] } }>();
+  let { data } = $props<{ data: { videos: any[]; page: number; totalPages: number; total: number; pageSize: number } }>();
   let videos = $state(data.videos);
   let pollInterval: ReturnType<typeof setInterval> | null = null;
   
@@ -66,6 +67,23 @@
       alert('Error deleting video: ' + err);
     }
   }
+
+  async function setPage(newPage: number) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('page', newPage.toString());
+    await goto(url.toString());
+  }
+
+  function getStatusText(status: string): string {
+    const statusMap: Record<string, string> = {
+      'uploaded': 'Uploaded',
+      'in_queue': 'Queued',
+      'processing': 'Processing',
+      'completed': 'Completed',
+      'failed': 'Failed'
+    };
+    return statusMap[status] || status;
+  }
 </script>
 
 <div class="max-w-6xl mx-auto">
@@ -115,7 +133,7 @@
                 class:badge-info={v.status === 'uploaded'}
                 class:badge-error={v.status === 'failed'}
               >
-                {v.status}
+                {getStatusText(v.status)}
               </div>
             </div>
             
@@ -123,10 +141,10 @@
               <p class="text-sm line-clamp-2 mb-2">{v.prompt}</p>
             {/if}
             
-            {#if v.status === "completed" && v.final_video_url}
+            {#if v.status === "completed"}
               <div class="card-actions justify-end mt-auto">
                 <a href="/videos/{v.id}" class="btn btn-sm btn-primary">View</a>
-                <button class="btn btn-sm btn-error" on:click={() => deleteVideo(v.id)}>Delete</button>
+                <button class="btn btn-sm btn-error" onclick={() => deleteVideo(v.id)}>Delete</button>
               </div>
             {:else if v.status === "processing" || v.status === "in_queue"}
               <div class="card-actions justify-end mt-auto">
@@ -135,17 +153,52 @@
             {:else if v.status === "uploaded"}
               <div class="card-actions justify-end mt-auto">
                 <a href="/new/review/{v.id}" class="btn btn-sm btn-primary">Continue Setup</a>
-                <button class="btn btn-sm btn-error" on:click={() => deleteVideo(v.id)}>Delete</button>
+                <button class="btn btn-sm btn-error" onclick={() => deleteVideo(v.id)}>Delete</button>
               </div>
             {:else}
               <div class="card-actions justify-end mt-auto">
                 <a href="/new/review/{v.id}" class="btn btn-sm btn-error">Retry</a>
-                <button class="btn btn-sm btn-error" on:click={() => deleteVideo(v.id)}>Delete</button>
+                <button class="btn btn-sm btn-error" onclick={() => deleteVideo(v.id)}>Delete</button>
               </div>
             {/if}
           </div>
         </div>
       {/each}
     </div>
+
+    <!-- Pagination -->
+    {#if data.totalPages > 1}
+      <div class="flex justify-center mt-8">
+        <div class="join">
+          <button 
+            class="join-item btn" 
+            disabled={data.page === 1}
+            onclick={() => setPage(data.page - 1)}
+          >
+            «
+          </button>
+          {#each Array.from({ length: data.totalPages }, (_, i) => i + 1) as pageNum}
+            {#if pageNum === 1 || pageNum === data.totalPages || Math.abs(pageNum - data.page) <= 2}
+              <button 
+                class="join-item btn" 
+                class:btn-active={pageNum === data.page}
+                onclick={() => setPage(pageNum)}
+              >
+                {pageNum}
+              </button>
+            {:else if pageNum === data.page - 3 || pageNum === data.page + 3}
+              <button class="join-item btn btn-disabled">...</button>
+            {/if}
+          {/each}
+          <button 
+            class="join-item btn" 
+            disabled={data.page === data.totalPages}
+            onclick={() => setPage(data.page + 1)}
+          >
+            »
+          </button>
+        </div>
+      </div>
+    {/if}
   {/if}
 </div>

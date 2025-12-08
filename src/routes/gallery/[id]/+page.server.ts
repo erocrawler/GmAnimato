@@ -14,11 +14,14 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     throw error(404, 'Video not found');
   }
 
-  // Get other published videos for "More Videos" section
-  const allPublishedVideos = await getPublishedVideos();
-  const relatedVideos = allPublishedVideos
-    .filter(v => v.id !== params.id && v.status === 'completed')
-    .slice(0, 4); // Show up to 4 related videos
+  // Get other published videos for "More Videos" section (exclude current video, only completed)
+  const relatedVideosPage = await getPublishedVideos({
+    page: 1,
+    pageSize: 4,
+    excludeId: params.id,
+    status: 'completed'
+  });
+  const relatedVideos = relatedVideosPage.videos;
   
   return {
     video,

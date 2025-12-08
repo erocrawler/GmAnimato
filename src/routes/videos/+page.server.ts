@@ -1,10 +1,19 @@
 import type { PageServerLoad } from './$types';
 import { getVideosByUser } from '$lib/db';
 
-export const load: PageServerLoad = async ({ locals }) => {
-  if (!locals.user) return { videos: [] };
-  const videos = await getVideosByUser(locals.user.id);
-  // Sort by created_at descending (newest first)
-  videos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  return { videos };
+export const load: PageServerLoad = async ({ locals, url }) => {
+  if (!locals.user) return { videos: [], total: 0, page: 1, pageSize: 12, totalPages: 0 };
+  
+  const page = parseInt(url.searchParams.get('page') || '1');
+  const pageSize = 12;
+  
+  const result = await getVideosByUser(locals.user.id, page, pageSize);
+  
+  return {
+    videos: result.videos,
+    total: result.total,
+    page: result.page,
+    pageSize: result.pageSize,
+    totalPages: result.totalPages
+  };
 };
