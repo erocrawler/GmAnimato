@@ -8,6 +8,7 @@
   let settings = $state({
     ...data.settings,
     loraPresets: data.settings.loraPresets ?? [],
+    quotaPerDay: data.settings.quotaPerDay ?? { "free": 10, "gmgard-user": 50, "paid": 100, "premium": 100 },
   });
   let users = $state(data.users);
   let userPage = $state(data.userPage || 1);
@@ -256,21 +257,47 @@
             <input id="registration-enabled" type="checkbox" bind:checked={settings.registrationEnabled} class="toggle toggle-primary" />
           </label>
         </div>
+      </div>
+
+      <div class="divider">Daily Quota Settings</div>
+      
+      <div class="space-y-4">
+        <p class="text-sm opacity-70">Configure daily video generation limits for different user roles.</p>
         
-        <div class="form-control">
-          <label class="label" for="free-quota">
-            <span class="label-text">Free User Quota (per day)</span>
-          </label>
-          <input id="free-quota" type="number" bind:value={settings.freeUserQuotaPerDay} class="input input-bordered" min="0" />
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="form-control">
+            <label class="label" for="free-quota">
+              <span class="label-text">Free Users</span>
+            </label>
+            <input id="free-quota" type="number" bind:value={settings.quotaPerDay.free} class="input input-bordered" min="0" />
+          </div>
+          
+          <div class="form-control">
+            <label class="label" for="gmgard-quota">
+              <span class="label-text">GmGard Users</span>
+            </label>
+            <input id="gmgard-quota" type="number" bind:value={settings.quotaPerDay['gmgard-user']} class="input input-bordered" min="0" />
+          </div>
+          
+          <div class="form-control">
+            <label class="label" for="paid-quota">
+              <span class="label-text">Paid Users</span>
+            </label>
+            <input id="paid-quota" type="number" bind:value={settings.quotaPerDay.paid} class="input input-bordered" min="0" />
+          </div>
+          
+          <div class="form-control">
+            <label class="label" for="premium-quota">
+              <span class="label-text">Premium Users</span>
+            </label>
+            <input id="premium-quota" type="number" bind:value={settings.quotaPerDay.premium} class="input input-bordered" min="0" />
+          </div>
         </div>
-        
-        <div class="form-control">
-          <label class="label" for="paid-quota">
-            <span class="label-text">Paid User Quota (per day)</span>
-          </label>
-          <input id="paid-quota" type="number" bind:value={settings.paidUserQuotaPerDay} class="input input-bordered" min="0" />
-        </div>
-        
+      </div>
+      
+      <div class="divider">System Settings</div>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="form-control">
           <label class="label" for="max-concurrent">
             <span class="label-text">Max Concurrent Jobs</span>

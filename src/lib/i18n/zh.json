@@ -192,7 +192,7 @@
     "nextStepsMessage": "上传后，您将能够添加提示词并生成视频。"
   },
   "review": {
-    "title": "审核：建议的标签和提示词",
+    "title": "标签和提示词",
     "imagePreview": "图像预览",
     "tags": "标签",
     "addTag": "添加",
@@ -201,7 +201,7 @@
     "suggestedPrompts": "建议的提示词：",
     "noSuggestions": "没有AI建议",
     "yourPrompt": "您的提示词",
-    "promptHelp": "编辑或输入您的自定义提示词。点击上方建议即可使用。",
+    "promptHelp": "编辑或输入您的自定义提示词（支持中英文）。点击上方建议即可使用。",
     "promptPlaceholder": "描述您希望视频的样子...",
     "advancedSettings": "高级设置",
     "loraWeights": "LoRA权重",

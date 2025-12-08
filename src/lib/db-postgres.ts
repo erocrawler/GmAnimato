@@ -400,8 +400,7 @@ export class PostgresDatabase implements IDatabase {
         data: {
           id: 'default',
           registrationEnabled: true,
-          freeUserQuotaPerDay: 5,
-          paidUserQuotaPerDay: 50,
+          quotaPerDay: { "free": 10, "gmgard-user": 50, "paid": 100, "premium": 100 },
           maxConcurrentJobs: 5,
           maxQueueThreshold: 5000,
           loraPresets: DEFAULT_LORA_PRESETS,
@@ -416,8 +415,7 @@ export class PostgresDatabase implements IDatabase {
     const data: any = {};
     
     if (patch.registrationEnabled !== undefined) data.registrationEnabled = patch.registrationEnabled;
-    if (patch.freeUserQuotaPerDay !== undefined) data.freeUserQuotaPerDay = patch.freeUserQuotaPerDay;
-    if (patch.paidUserQuotaPerDay !== undefined) data.paidUserQuotaPerDay = patch.paidUserQuotaPerDay;
+    if (patch.quotaPerDay !== undefined) data.quotaPerDay = patch.quotaPerDay;
     if (patch.maxConcurrentJobs !== undefined) data.maxConcurrentJobs = patch.maxConcurrentJobs;
     if (patch.maxQueueThreshold !== undefined) data.maxQueueThreshold = patch.maxQueueThreshold;
     if (patch.loraPresets !== undefined) data.loraPresets = normalizeLoraPresets(patch.loraPresets);
@@ -428,8 +426,7 @@ export class PostgresDatabase implements IDatabase {
       create: {
         id: 'default',
         registrationEnabled: patch.registrationEnabled ?? true,
-        freeUserQuotaPerDay: patch.freeUserQuotaPerDay ?? 5,
-        paidUserQuotaPerDay: patch.paidUserQuotaPerDay ?? 50,
+        quotaPerDay: patch.quotaPerDay ?? { "free": 10, "gmgard-user": 50, "paid": 100, "premium": 100 },
         maxConcurrentJobs: patch.maxConcurrentJobs ?? 5,
         maxQueueThreshold: patch.maxQueueThreshold ?? 5000,
         loraPresets: normalizeLoraPresets(patch.loraPresets) ?? DEFAULT_LORA_PRESETS,
@@ -490,11 +487,15 @@ export class PostgresDatabase implements IDatabase {
   }
 
   private mapToAdminSettings(settings: any): AdminSettings {
+    // Parse quotaPerDay if it's a string, otherwise use as-is
+    const quotaPerDay = typeof settings.quotaPerDay === 'string' 
+      ? JSON.parse(settings.quotaPerDay) 
+      : (settings.quotaPerDay || { "free": 10, "gmgard-user": 50, "paid": 100, "premium": 100 });
+    
     return {
       id: settings.id,
       registrationEnabled: settings.registrationEnabled,
-      freeUserQuotaPerDay: settings.freeUserQuotaPerDay,
-      paidUserQuotaPerDay: settings.paidUserQuotaPerDay,
+      quotaPerDay,
       maxConcurrentJobs: settings.maxConcurrentJobs,
       maxQueueThreshold: settings.maxQueueThreshold,
       loraPresets: normalizeLoraPresets(settings.loraPresets ?? DEFAULT_LORA_PRESETS),

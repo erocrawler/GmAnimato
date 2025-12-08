@@ -143,3 +143,42 @@ export async function deleteExpiredSessions() {
 export async function deleteUserSessions(userId: string) {
   return db.deleteUserSessions(userId);
 }
+
+// ==================== Helper Functions ====================
+
+/**
+ * Check if a user has exceeded their daily video generation quota
+ * @param user The user to check
+ * @param settings Admin settings containing quota limits
+ * @returns {exceeded: boolean, limit: number, used: number}
+ */
+export async function checkDailyQuota(user: User, settings: AdminSettings): Promise<{exceeded: boolean, limit: number, used: number}> {
+  // Determine quota limit based on user roles
+  let dailyLimit = settings.quotaPerDay['free'] || 10; // Default for free users
+  
+  // Check roles in priority order: paid/premium > gmgard-user > free
+  for (const role of user.roles) {
+    if (settings.quotaPerDay[role] !== undefined) {
+      // Use the highest quota the user has access to
+      dailyLimit = Math.max(dailyLimit, settings.quotaPerDay[role]);
+    }
+  }
+  
+  // Get user's videos from today
+  const userVideos = await db.getVideosByUser(user.id, 1, 1000); // Get up to 1000 videos to count
+  
+  // Count videos created today
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const todayVideos = userVideos.videos.filter(v => {
+    const createdAt = new Date(v.created_at);
+    return createdAt >= today;
+  });
+  
+  return {
+    exceeded: todayVideos.length >= dailyLimit,
+    limit: dailyLimit,
+    used: todayVideos.length
+  };
+}

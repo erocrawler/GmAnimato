@@ -76,14 +76,13 @@ model VideoLike {
 }
 
 model AdminSettings {
-  id                  String   @id @default("default")
-  registrationEnabled Boolean  @default(true) @map("registration_enabled")
-  freeUserQuotaPerDay Int      @default(5) @map("free_user_quota_per_day")
-  paidUserQuotaPerDay Int      @default(50) @map("paid_user_quota_per_day")
-  maxConcurrentJobs   Int      @default(5) @map("max_concurrent_jobs")
-  maxQueueThreshold   Int      @default(5000) @map("max_queue_threshold")
-  loraPresets         Json?    @map("lora_presets")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  id                     String   @id @default("default")
+  registrationEnabled    Boolean  @default(true) @map("registration_enabled")
+  quotaPerDay            Json     @default("{\"free\": 10, \"gmgard-user\": 50, \"paid\": 100, \"premium\": 100}") @map("quota_per_day")
+  maxConcurrentJobs      Int      @default(5) @map("max_concurrent_jobs")
+  maxQueueThreshold      Int      @default(5000) @map("max_queue_threshold")
+  loraPresets            Json?    @map("lora_presets")
+  updatedAt              DateTime @updatedAt @map("updated_at")
 
   @@map("admin_settings")
 }

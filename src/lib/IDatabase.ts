@@ -42,8 +42,7 @@ import type { LoraPreset } from './loraPresets';
 export type AdminSettings = {
   id: string;
   registrationEnabled: boolean;
-  freeUserQuotaPerDay: number;
-  paidUserQuotaPerDay: number;
+  quotaPerDay: Record<string, number>; // Role-based quota map, e.g. { "free": 10, "gmgard-user": 50, "paid": 100 }
   maxConcurrentJobs: number;
   maxQueueThreshold: number;
   loraPresets?: LoraPreset[];

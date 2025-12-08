@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { updateVideo, getVideoById, getActiveJobsByUser, getAdminSettings } from '$lib/db';
+import { updateVideo, getVideoById, getActiveJobsByUser, getAdminSettings, checkDailyQuota } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { buildWorkflow } from '$lib/i2vWorkflow';
 import { getRunPodConfig, submitRunPodJob, getRunPodHealth } from '$lib/runpod';
@@ -8,7 +8,7 @@ async function delay(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
 }
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
   try {
     const body = await request.json();
     const id = body?.id as string | undefined;
@@ -28,6 +28,19 @@ export const POST: RequestHandler = async ({ request }) => {
 
     // Get admin settings for thresholds
     const settings = await getAdminSettings();
+
+    // Check daily quota if user is logged in
+    if (locals.user) {
+      const quotaCheck = await checkDailyQuota(locals.user, settings);
+      if (quotaCheck.exceeded) {
+        return new Response(JSON.stringify({ 
+          error: `You have reached your daily limit of ${quotaCheck.limit} videos. You've created ${quotaCheck.used} videos today. Please try again tomorrow.` 
+        }), { 
+          status: 429, 
+          headers: { 'Content-Type': 'application/json' } 
+        });
+      }
+    }
 
     // Check if RunPod is configured
     const runpodConfig = getRunPodConfig({

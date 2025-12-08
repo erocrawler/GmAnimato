@@ -201,7 +201,7 @@
     "suggestedPrompts": "Suggested Prompts:",
     "noSuggestions": "No AI suggestions available",
     "yourPrompt": "Your Prompt",
-    "promptHelp": "Edit or enter your custom prompt. Click a suggestion above to use it.",
+    "promptHelp": "Edit or enter your custom prompt in English or Chinese. Click a suggestion above to use it.",
     "promptPlaceholder": "Describe how you want your video to look...",
     "advancedSettings": "Advanced Settings",
     "loraWeights": "LoRA Weights",
