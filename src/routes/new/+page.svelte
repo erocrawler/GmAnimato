@@ -1,6 +1,7 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
+  import { _ } from 'svelte-i18n';
 
   let imageFile: File | null = null;
   let preview = '';
@@ -42,13 +43,13 @@
   function validateFile(f: File): Promise<string | null> {
     return new Promise((resolve) => {
       if (f.size > MAX_IMAGE_BYTES) {
-        resolve(`File is too large. Maximum size is ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB.`);
+        resolve($_('newVideo.errors.fileTooLarge', { values: { size: Math.round(MAX_IMAGE_BYTES / 1024 / 1024) } }));
         return;
       }
 
       if (!f.type || !f.type.startsWith('image/')) {
         // still try to load it as an image (some browsers may not provide type)
-        resolve('Selected file does not appear to be an image.');
+        resolve($_('newVideo.errors.notImage'));
         return;
       }
 
@@ -61,7 +62,7 @@
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
-        resolve('The file could not be parsed as an image.');
+        resolve($_('newVideo.errors.invalidImage'));
       };
       img.src = url;
     });
@@ -82,14 +83,14 @@
             await goto(`/new/review/${entry.id}`);
             return;
           }
-          message = 'Image uploaded.';
+          message = $_('newVideo.success');
           messageType = 'success';
         } else if (result.data.error) {
-          message = 'Upload failed: ' + result.data.error;
+          message = $_('newVideo.errors.uploadFailed', { values: { error: result.data.error } });
           messageType = 'error';
         }
       } else {
-        message = 'An unexpected error occurred';
+        message = $_('newVideo.errors.unexpectedError');
         messageType = 'error';
       }
       setTimeout(() => (message = ''), 3000);
@@ -98,7 +99,7 @@
 </script>
 
 <div class="max-w-2xl mx-auto">
-  <h1 class="text-4xl font-bold mb-8">Create a new Image→Video job</h1>
+  <h1 class="text-4xl font-bold mb-8">{$_('newVideo.title')}</h1>
 
   {#if message}
     <div class="alert mb-6" class:alert-error={messageType === 'error'} class:alert-success={messageType === 'success'}>
@@ -118,8 +119,8 @@
       <form bind:this={formElement} method="post" enctype="multipart/form-data" use:enhance={handleUploadEnhance}>
         <div class="form-control w-full">
           <label class="label" for="image">
-            <span class="label-text font-semibold">Select Image</span>
-            <span class="label-text-alt">Max 5MB</span>
+            <span class="label-text font-semibold">{$_('newVideo.selectImage')}</span>
+            <span class="label-text-alt">{$_('newVideo.maxSize')}</span>
           </label>
           <input 
             id="image" 
@@ -135,7 +136,7 @@
         {#if preview}
           <div class="mt-6">
             <div class="label">
-              <span class="label-text font-semibold">Preview</span>
+              <span class="label-text font-semibold">{$_('newVideo.preview')}</span>
             </div>
             <div class="rounded-lg overflow-hidden shadow-lg">
               <img src={preview} alt="preview" class="w-full max-h-96 object-contain bg-base-200" />
@@ -147,12 +148,12 @@
           <button type="submit" class="btn btn-primary btn-lg" disabled={submitting || !imageFile}>
             {#if submitting}
               <span class="loading loading-spinner"></span>
-              Uploading...
+              {$_('common.uploading')}...
             {:else}
               <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
               </svg>
-              Start Processing
+              {$_('newVideo.startProcessing')}
             {/if}
           </button>
         </div>
@@ -165,8 +166,8 @@
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
     </svg>
     <div>
-      <h3 class="font-bold">Next Steps</h3>
-      <div class="text-sm">After upload, you'll be able to add prompts and generate your video.</div>
+      <h3 class="font-bold">{$_('newVideo.nextSteps')}</h3>
+      <div class="text-sm">{$_('newVideo.nextStepsMessage')}</div>
     </div>
   </div>
 </div>

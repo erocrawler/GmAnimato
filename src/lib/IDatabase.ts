@@ -61,7 +61,8 @@ export type PaginatedVideos = {
 export type GetPublishedVideosOptions = {
   page?: number;
   pageSize?: number;
-  likedBy?: string;
+  likedBy?: string; // Filter to only show videos liked by this user
+  currentUserId?: string; // User ID to check like status for all videos
   excludeId?: string;
   status?: VideoEntry['status'];
   isNsfw?: boolean;
@@ -75,6 +76,7 @@ export interface IDatabase {
   getPublishedVideos(options?: GetPublishedVideosOptions): Promise<PaginatedVideos>;
   getVideoById(id: string): Promise<VideoEntry | undefined>;
   updateVideo(id: string, patch: Partial<VideoEntry>): Promise<VideoEntry | null>;
+  deleteVideo(id: string): Promise<boolean>;
   toggleLike(videoId: string, userId: string): Promise<VideoEntry | null>;
   getLikeCount(videoId: string): Promise<number>;
   isVideoLikedByUser(videoId: string, userId: string): Promise<boolean>;

@@ -118,7 +118,5 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
     }
   }
 
-  console.log('[i2vWorkflow] Final workflow:', JSON.stringify(workflow, null, 2));
-
   return workflow;
 }

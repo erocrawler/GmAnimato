@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { getVideoById, getPublishedVideos, getUserById } from '$lib/db';
+import { getVideoById, getPublishedVideos, getUserById, getLikeCount, isVideoLikedByUser } from '$lib/db';
 import { error } from '@sveltejs/kit';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
@@ -13,6 +13,10 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   if (!video.is_published) {
     throw error(404, 'Video not found');
   }
+
+  // Get like information
+  const likesCount = await getLikeCount(video.id);
+  const isLiked = locals.user ? await isVideoLikedByUser(video.id, locals.user.id) : false;
 
   // Get other published videos for "More Videos" section (exclude current video, only completed)
   const relatedVideosPage = await getPublishedVideos({
@@ -33,7 +37,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     : null;
   
   return {
-    video,
+    video: { ...video, likesCount, isLiked },
     user: locals.user || null,
     relatedVideos,
     author: authorPublic,

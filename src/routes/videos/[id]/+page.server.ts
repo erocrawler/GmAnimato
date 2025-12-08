@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { getVideoById } from '$lib/db';
+import { getVideoById, getLikeCount, isVideoLikedByUser } from '$lib/db';
 import { error } from '@sveltejs/kit';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
@@ -17,9 +17,13 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   if (video.user_id !== locals.user.id) {
     throw error(403, 'Forbidden');
   }
+
+  // Get like information
+  const likesCount = await getLikeCount(video.id);
+  const isLiked = await isVideoLikedByUser(video.id, locals.user.id);
   
   return {
-    video,
+    video: { ...video, likesCount, isLiked },
     user: locals.user
   };
 };

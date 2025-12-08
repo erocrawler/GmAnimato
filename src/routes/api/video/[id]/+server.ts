@@ -1,10 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { getVideoById } from '$lib/db';
-import fs from 'fs/promises';
-import path from 'path';
-
-const DATA_DIR = path.resolve('data');
-const DB_FILE = path.join(DATA_DIR, 'videos.json');
+import { getVideoById, deleteVideo } from '$lib/db';
 
 export const DELETE: RequestHandler = async ({ params, locals }) => {
   try {
@@ -24,12 +19,8 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
       });
     }
 
-    // Read current data
-    const txt = await fs.readFile(DB_FILE, 'utf-8');
-    const videos = JSON.parse(txt);
-
-    // Find the video
-    const video = videos.find((v: any) => v.id === id);
+    // Get the video
+    const video = await getVideoById(id);
     if (!video) {
       return new Response(JSON.stringify({ error: 'not found' }), { 
         status: 404, 
@@ -53,11 +44,8 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
       });
     }
 
-    // Remove the video from the array
-    const filtered = videos.filter((v: any) => v.id !== id);
-    
-    // Write back to file
-    await fs.writeFile(DB_FILE, JSON.stringify(filtered, null, 2), 'utf-8');
+    // Delete the video
+    await deleteVideo(id);
 
     return new Response(JSON.stringify({ success: true }), { 
       headers: { 'Content-Type': 'application/json' } 

@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { toggleLike, getVideoById } from '$lib/db';
+import { toggleLike } from '$lib/db';
 
 export const POST: RequestHandler = async ({ params, locals }) => {
   try {
@@ -19,22 +19,20 @@ export const POST: RequestHandler = async ({ params, locals }) => {
       });
     }
 
-    // Check if video exists
-    const video = await getVideoById(videoId);
-    if (!video) {
+    // Toggle like and get updated information in one call
+    const result = await toggleLike(videoId, locals.user.id);
+
+    if (!result) {
       return new Response(JSON.stringify({ error: 'Video not found' }), { 
         status: 404, 
         headers: { 'Content-Type': 'application/json' } 
       });
     }
 
-    // Toggle like
-    const updated = await toggleLike(videoId, locals.user.id);
-
     return new Response(JSON.stringify({ 
       success: true, 
-      likes: updated?.likes || [],
-      likesCount: updated?.likes?.length || 0
+      likesCount: (result as any).likesCount,
+      isLiked: (result as any).isLiked
     }), { 
       headers: { 'Content-Type': 'application/json' } 
     });

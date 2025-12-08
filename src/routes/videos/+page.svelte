@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
+  import { _ } from 'svelte-i18n';
 
   let { data } = $props<{ data: { videos: any[]; page: number; totalPages: number; total: number; pageSize: number } }>();
   let videos = $state(data.videos);
@@ -48,7 +49,7 @@
   });
   
   async function deleteVideo(id: string) {
-    if (!confirm('Are you sure you want to delete this video?')) {
+    if (!confirm($_('videos.actions.deleteConfirm'))) {
       return;
     }
     
@@ -76,11 +77,11 @@
 
   function getStatusText(status: string): string {
     const statusMap: Record<string, string> = {
-      'uploaded': 'Uploaded',
-      'in_queue': 'Queued',
-      'processing': 'Processing',
-      'completed': 'Completed',
-      'failed': 'Failed'
+      'uploaded': $_('videos.status.uploaded'),
+      'in_queue': $_('videos.status.inQueue'),
+      'processing': $_('videos.status.processing'),
+      'completed': $_('videos.status.completed'),
+      'failed': $_('videos.status.failed')
     };
     return statusMap[status] || status;
   }
@@ -88,12 +89,12 @@
 
 <div class="max-w-6xl mx-auto">
   <div class="flex justify-between items-center mb-8">
-    <h1 class="text-4xl font-bold">My Videos</h1>
+    <h1 class="text-4xl font-bold">{$_('videos.title')}</h1>
     <a href="/new" class="btn btn-primary">
       <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
       </svg>
-      Create New
+      {$_('videos.createNew')}
     </a>
   </div>
 
@@ -102,9 +103,9 @@
       <div class="hero-content text-center">
         <div class="max-w-md">
           <div class="text-6xl mb-4">📹</div>
-          <h2 class="text-3xl font-bold mb-4">No videos yet</h2>
-          <p class="mb-6">Start creating amazing videos from your images!</p>
-          <a href="/new" class="btn btn-primary btn-lg">Create Your First Video</a>
+          <h2 class="text-3xl font-bold mb-4">{$_('videos.empty.title')}</h2>
+          <p class="mb-6">{$_('videos.empty.message')}</p>
+          <a href="/new" class="btn btn-primary btn-lg">{$_('videos.empty.button')}</a>
         </div>
       </div>
     </div>
@@ -143,22 +144,22 @@
             
             {#if v.status === "completed"}
               <div class="card-actions justify-end mt-auto">
-                <a href="/videos/{v.id}" class="btn btn-sm btn-primary">View</a>
-                <button class="btn btn-sm btn-error" onclick={() => deleteVideo(v.id)}>Delete</button>
+                <a href="/videos/{v.id}" class="btn btn-sm btn-primary">{$_('videos.actions.view')}</a>
+                <button class="btn btn-sm btn-error" onclick={() => deleteVideo(v.id)}>{$_('common.delete')}</button>
               </div>
             {:else if v.status === "processing" || v.status === "in_queue"}
               <div class="card-actions justify-end mt-auto">
-                <a href="/new/review/{v.id}" class="btn btn-sm btn-primary">View Status</a>
+                <a href="/new/review/{v.id}" class="btn btn-sm btn-primary">{$_('review.viewStatus')}</a>
               </div>
             {:else if v.status === "uploaded"}
               <div class="card-actions justify-end mt-auto">
-                <a href="/new/review/{v.id}" class="btn btn-sm btn-primary">Continue Setup</a>
-                <button class="btn btn-sm btn-error" onclick={() => deleteVideo(v.id)}>Delete</button>
+                <a href="/new/review/{v.id}" class="btn btn-sm btn-primary">{$_('review.continueSetup')}</a>
+                <button class="btn btn-sm btn-error" onclick={() => deleteVideo(v.id)}>{$_('common.delete')}</button>
               </div>
             {:else}
               <div class="card-actions justify-end mt-auto">
-                <a href="/new/review/{v.id}" class="btn btn-sm btn-error">Retry</a>
-                <button class="btn btn-sm btn-error" onclick={() => deleteVideo(v.id)}>Delete</button>
+                <a href="/new/review/{v.id}" class="btn btn-sm btn-error">{$_('videos.actions.retry')}</a>
+                <button class="btn btn-sm btn-error" onclick={() => deleteVideo(v.id)}>{$_('common.delete')}</button>
               </div>
             {/if}
           </div>

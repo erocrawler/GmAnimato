@@ -2,6 +2,8 @@
   import { onMount, onDestroy } from "svelte";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
+  import { _, locale } from 'svelte-i18n';
+  import { get } from 'svelte/store';
   import { createTagsInput, melt } from '@melt-ui/svelte';
   import { DEFAULT_LORA_PRESETS } from '$lib/loraPresets';
   import type { LoraPreset } from '$lib/loraPresets';
@@ -65,7 +67,7 @@
       if (res.ok) {
         const result = await res.json();
         console.log('Retry initiated:', result);
-        message = "Job resubmitted — processing.";
+        message = get(_)('review.jobResubmitted');
         // Update status and start polling again
         entry = { ...entry, status: 'in_queue' };
         pollStatus();
@@ -74,11 +76,12 @@
         }
       } else {
         const error = await res.json();
-        alert(`Failed to retry: ${error.error || 'Unknown error'}`);
+        const t = get(_);
+        alert(t('review.failedToRetry', { values: { error: error.error || 'Unknown error' } }));
       }
     } catch (err) {
       console.error('Failed to retry generation:', err);
-      alert('Failed to retry generation');
+      alert(get(_)('review.failedToRetry', { values: { error: String(err) } }));
     }
   }
 
@@ -132,13 +135,14 @@
     busyModalMessage = "";
     
     try {
+      const t = get(_);
       // Check health before proceeding
       const healthRes = await fetch('/api/health');
       if (healthRes.ok) {
         const health = await healthRes.json();
         if (!health.available || health.queueFull) {
           showBusyModal = true;
-          busyModalMessage = "Our servers are working hard right now! Please try again in a few minutes.";
+          busyModalMessage = t('review.serverBusy.queueFull');
           busy = false;
           return;
         }
@@ -161,20 +165,20 @@
         if (res.status === 429) {
           // User hit their personal limit
           showBusyModal = true;
-          busyModalMessage = j.error || "You have too many videos processing right now. Please wait for some to complete before starting new ones.";
+          busyModalMessage = j.error || t('review.serverBusy.userLimit');
         } else if (res.status === 503) {
           // System-wide queue full
           showBusyModal = true;
-          busyModalMessage = "Our servers are experiencing high demand right now. Please try again in a few minutes.";
+          busyModalMessage = t('review.serverBusy.highDemand');
         } else {
-          message = "Failed to submit: " + (j.error || "unknown");
+          message = t('review.failedToSubmit', { values: { error: j.error || 'unknown' } });
         }
         return;
       }
       
       const j = await res.json();
       if (j.success) {
-        message = "Job submitted — processing.";
+        message = t('review.jobSubmitted');
         // Update local entry with the returned video data
         if (j.video) {
           entry = j.video;
@@ -185,7 +189,7 @@
         // navigate to user's videos or detail page
         await goto("/videos");
       } else {
-        message = "Failed to submit: " + (j.error || "unknown");
+        message = t('review.failedToSubmit', { values: { error: j.error || 'unknown' } });
       }
     } catch (err) {
       message = "Error: " + String(err);
@@ -195,7 +199,7 @@
   }
 
   async function deleteVideo() {
-    if (!confirm('Are you sure you want to delete this video?')) {
+    if (!confirm(get(_)('review.deleteConfirm'))) {
       return;
     }
     
@@ -224,14 +228,14 @@
 
 <div class="max-w-4xl mx-auto">
   <div class="flex justify-between items-center mb-8">
-    <h1 class="text-4xl font-bold">Review: Suggested tags & prompts</h1>
+    <h1 class="text-4xl font-bold">{$_('review.title')}</h1>
     <div class="badge badge-lg" 
       class:badge-success={entry.status === 'completed'}
       class:badge-warning={entry.status === 'processing' || entry.status === 'in_queue'}
       class:badge-info={entry.status === 'uploaded'}
       class:badge-error={entry.status === 'failed'}
     >
-      {entry.status}
+      {$_(`videos.status.${entry.status}`) || entry.status}
     </div>
   </div>
 
@@ -252,7 +256,7 @@
       </figure>
       <div class="card-body">
         <div>
-          <h3 class="font-semibold mb-2">Tags</h3>
+          <h3 class="font-semibold mb-2">{$_('review.tags')}</h3>
           <div class="join w-full">
             <div use:melt={$root} class="join-item flex flex-wrap gap-2 p-3 border border-base-300 rounded-l-lg bg-base-100 min-h-[3rem] items-center flex-1">
               {#each $tags as t}
@@ -267,11 +271,11 @@
                 use:melt={$input}
                 bind:value={newtag}
                 type="text" 
-                placeholder="Type and press Enter..." 
+                placeholder={$_('review.tagPlaceholder')}
                 disabled={!isEditable}
               />
             </div>
-            <button class="btn btn-primary join-item min-h-[3rem]" on:click={addNewTag} disabled={!isEditable}>Add</button>
+            <button class="btn btn-primary join-item min-h-[3rem]" on:click={addNewTag} disabled={!isEditable}>{$_('review.addTag')}</button>
           </div>
         </div>
       </div>
@@ -280,12 +284,12 @@
     <!-- Prompts Card -->
     <div class="card bg-base-100 shadow-xl">
       <div class="card-body">
-        <h2 class="card-title">AI Suggestions</h2>
+        <h2 class="card-title">{$_('review.aiSuggestions')}</h2>
         <div class="divider my-2"></div>
         
         {#if entry.suggested_prompts && entry.suggested_prompts.length > 0}
           <div class="space-y-2">
-            <h3 class="font-semibold text-sm">Suggested Prompts:</h3>
+            <h3 class="font-semibold text-sm">{$_('review.suggestedPrompts')}</h3>
             {#each entry.suggested_prompts as sp, i}
               <button class="alert alert-success py-2 cursor-pointer hover:shadow-md transition-shadow w-full text-left" on:click={() => prompt = sp} disabled={!isEditable}>
                 <span class="text-sm">{i + 1}. {sp}</span>
@@ -294,7 +298,7 @@
           </div>
         {:else}
           <div class="alert">
-            <span class="text-sm">No AI suggestions available</span>
+            <span class="text-sm">{$_('review.noSuggestions')}</span>
           </div>
         {/if}
       </div>
@@ -304,13 +308,13 @@
   <!-- Prompt Input & Generate -->
   <div class="card bg-base-100 shadow-xl">
     <div class="card-body">
-      <h2 class="card-title">Your Prompt</h2>
-      <p class="text-sm opacity-70 mb-2">Edit or enter your custom prompt. Click a suggestion above to use it.</p>
+      <h2 class="card-title">{$_('review.yourPrompt')}</h2>
+      <p class="text-sm opacity-70 mb-2">{$_('review.promptHelp')}</p>
       <div class="form-control">
         <textarea
           id="prompt"
           bind:value={prompt}
-          placeholder="Describe how you want your video to look..."
+          placeholder={$_('review.promptPlaceholder')}
           class="textarea textarea-bordered textarea-lg h-32 w-full"
           disabled={!isEditable}
         ></textarea>
@@ -321,14 +325,14 @@
       <div class="collapse collapse-arrow bg-base-200">
         <input type="checkbox" bind:checked={showAdvancedSettings} />
         <div class="collapse-title text-lg font-medium">
-          Advanced Settings
+          {$_('review.advancedSettings')}
         </div>
         <div class="collapse-content">
           <div class="flex items-center justify-between mb-2">
-            <h3 class="font-semibold">LoRA Weights</h3>
-            <button class="btn btn-ghost btn-sm" on:click={resetLoraWeights} disabled={!isEditable}>Reset</button>
+            <h3 class="font-semibold">{$_('review.loraWeights')}</h3>
+            <button class="btn btn-ghost btn-sm" on:click={resetLoraWeights} disabled={!isEditable}>{$_('review.reset')}</button>
           </div>
-          <p class="text-sm opacity-70 mb-4">Tune how strongly each LoRA influences the generation.</p>
+          <p class="text-sm opacity-70 mb-4">{$_('review.loraWeightsHelp')}</p>
           <div class="space-y-4">
             {#each LORA_PRESETS as lora}
               <div class="space-y-1">
@@ -361,7 +365,7 @@
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
           </svg>
-          Delete
+          {$_('common.delete')}
         </button>
         <div class="flex gap-2">
           {#if entry.status === "failed"}
@@ -372,7 +376,7 @@
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              Retry Generation
+              {$_('review.retryGeneration')}
             </button>
           {:else}
             {#if !entry.tags || entry.tags.length === 0}
@@ -381,8 +385,8 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
                 <div>
-                  <h3 class="font-bold">Image Recognition Failed</h3>
-                  <div class="text-sm">You can still generate a video, but you won't be able to publish it to the gallery. Consider re-uploading the image or try a different image.</div>
+                  <h3 class="font-bold">{$_('review.warnings.noTags.title')}</h3>
+                  <div class="text-sm">{$_('review.warnings.noTags.message')}</div>
                 </div>
               </div>
             {/if}
@@ -392,8 +396,8 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <div>
-                  <h3 class="font-bold">Publishing Restricted</h3>
-                  <div class="text-sm">This image is detected as NSFW and photo-realistic. You can generate a video, but it cannot be published to the gallery.</div>
+                  <h3 class="font-bold">{$_('review.warnings.nsfwRealistic.title')}</h3>
+                  <div class="text-sm">{$_('review.warnings.nsfwRealistic.message')}</div>
                 </div>
               </div>
             {/if}
@@ -404,16 +408,16 @@
             >
               {#if busy}
                 <span class="loading loading-spinner"></span>
-                Submitting...
+                {$_('review.submitting')}
               {:else if entry.status === "processing" || entry.status === "in_queue"}
                 <span class="loading loading-spinner"></span>
-                {entry.status === "in_queue" ? "Queued..." : "Processing..."}
+                {entry.status === "in_queue" ? $_('review.queued') : $_('review.processing')}
               {:else}
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                Generate Video
+                {$_('review.generateVideo')}
               {/if}
             </button>
           {/if}
@@ -427,7 +431,7 @@
 {#if showBusyModal}
   <div class="modal modal-open">
     <div class="modal-box max-w-2xl">
-      <h3 class="font-bold text-2xl mb-4">Server is Busy! 🐢</h3>
+      <h3 class="font-bold text-2xl mb-4">{$_('review.serverBusy.title')}</h3>
       <div class="flex justify-center mb-4">
         <img src="/images/BUSY.jpg" alt="Server Busy" class="rounded-lg max-w-full max-h-96 object-contain" />
       </div>
@@ -435,7 +439,7 @@
         {busyModalMessage}
       </p>
       <div class="modal-action">
-        <button class="btn btn-primary" on:click={() => showBusyModal = false}>OK, I'll Try Later</button>
+        <button class="btn btn-primary" on:click={() => showBusyModal = false}>{$_('review.serverBusy.okButton')}</button>
       </div>
     </div>
   </div>

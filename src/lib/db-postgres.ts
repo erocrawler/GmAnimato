@@ -73,15 +73,17 @@ export class PostgresDatabase implements IDatabase {
   }
 
   async getPublishedVideos(options?: import('./IDatabase').GetPublishedVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
-    const { page = 1, pageSize = 12, likedBy, excludeId, status, isNsfw } = options || {};
+    const { page = 1, pageSize = 12, likedBy, currentUserId, excludeId, status, isNsfw } = options || {};
     const skip = (page - 1) * pageSize;
     
     const where: any = { isPublished: true };
     
-    // Filter by liked videos if likedBy is provided
+    // Filter by liked videos if likedBy is provided (for "My Liked" filter)
     if (likedBy) {
       where.likes = {
-        contains: likedBy
+        some: {
+          userId: likedBy
+        }
       };
     }
     
@@ -103,6 +105,12 @@ export class PostgresDatabase implements IDatabase {
     const [videos, total] = await Promise.all([
       this.prisma.video.findMany({
         where,
+        include: {
+          likes: true,
+          _count: {
+            select: { likes: true }
+          }
+        },
         orderBy: { createdAt: 'desc' },
         skip,
         take: pageSize,
@@ -111,7 +119,11 @@ export class PostgresDatabase implements IDatabase {
     ]);
 
     return {
-      videos: videos.map(this.mapToVideoEntry),
+      videos: videos.map((v) => ({
+        ...this.mapToVideoEntry(v),
+        likesCount: v._count.likes,
+        isLiked: currentUserId ? v.likes.some(like => like.userId === currentUserId) : false
+      })),
       total,
       page,
       pageSize,
@@ -157,13 +169,18 @@ export class PostgresDatabase implements IDatabase {
     }
   }
 
+  async deleteVideo(id: string): Promise<boolean> {
+    try {
+      await this.prisma.video.delete({
+        where: { id },
+      });
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
   async toggleLike(videoId: string, userId: string): Promise<VideoEntry | null> {
-    const video = await this.prisma.video.findUnique({
-      where: { id: videoId },
-    });
-
-    if (!video) return null;
-
     // Check if like exists
     const existingLike = await this.prisma.videoLike.findUnique({
       where: {
@@ -174,6 +191,8 @@ export class PostgresDatabase implements IDatabase {
       },
     });
 
+    let isLiked: boolean;
+    
     if (existingLike) {
       // Unlike - delete the like
       await this.prisma.videoLike.delete({
@@ -181,6 +200,7 @@ export class PostgresDatabase implements IDatabase {
           id: existingLike.id,
         },
       });
+      isLiked = false;
     } else {
       // Like - create the like
       await this.prisma.videoLike.create({
@@ -189,10 +209,27 @@ export class PostgresDatabase implements IDatabase {
           userId,
         },
       });
+      isLiked = true;
     }
 
-    // Return updated video with like count
-    return this.getVideoById(videoId) as Promise<VideoEntry>;
+    // Get updated video with like count in a single query
+    const video = await this.prisma.video.findUnique({
+      where: { id: videoId },
+      include: {
+        _count: {
+          select: { likes: true }
+        }
+      }
+    });
+
+    if (!video) return null;
+
+    // Return video entry with like information
+    return {
+      ...this.mapToVideoEntry(video),
+      likesCount: video._count.likes,
+      isLiked
+    } as any;
   }
 
   async getLikeCount(videoId: string): Promise<number> {

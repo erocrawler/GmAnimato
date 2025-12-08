@@ -1,17 +1,31 @@
 <script lang="ts">
+  import { goto, invalidateAll } from '$app/navigation';
   import type { PageData } from './$types';
+  import { _ } from 'svelte-i18n';
   
-  export let data: PageData;
+  let { data } = $props<{ data: PageData }>();
   
-  let settings = {
+  let settings = $state({
     ...data.settings,
     loraPresets: data.settings.loraPresets ?? [],
-  };
-  let users = data.users;
-  let queueStatus: any = null;
-  let saving = false;
-  let loadingQueue = false;
-  let message = '';
+  });
+  let users = $state(data.users);
+  let userPage = $state(data.userPage || 1);
+  let userTotalPages = $state(data.userTotalPages || 1);
+  let userTotal = $state(data.userTotal || 0);
+  let userSearch = $state(data.userSearch || '');
+  let queueStatus: any = $state(null);
+  let saving = $state(false);
+  let loadingQueue = $state(false);
+  let message = $state('');
+
+  $effect(() => {
+    users = data.users;
+    userPage = data.userPage || 1;
+    userTotalPages = data.userTotalPages || 1;
+    userTotal = data.userTotal || 0;
+    userSearch = data.userSearch || '';
+  });
 
   function sanitizeLoraPresets(presets: any[]) {
     if (!Array.isArray(presets)) return [];
@@ -29,9 +43,9 @@
   }
   
   // Role editor modal state
-  let showRoleModal = false;
-  let editingUser: { id: string; username: string; roles: string[] } | null = null;
-  let roleInput = '';
+  let showRoleModal = $state(false);
+  let editingUser: { id: string; username: string; roles: string[] } | null = $state(null);
+  let roleInput = $state('');
   
   async function saveSettings() {
     saving = true;
@@ -74,6 +88,26 @@
     } finally {
       loadingQueue = false;
     }
+  }
+  
+  async function setUserPage(page: number) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('userPage', page.toString());
+    await goto(url.pathname + url.search, { noScroll: true, replaceState: false });
+  }
+  
+  async function searchUsers() {
+    const url = new URL(window.location.href);
+    url.searchParams.set('userSearch', userSearch);
+    url.searchParams.set('userPage', '1'); // Reset to first page when searching
+    await goto(url.pathname + url.search, { noScroll: true, replaceState: false });
+  }
+  
+  async function clearSearch() {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('userSearch');
+    url.searchParams.set('userPage', '1');
+    await goto(url.pathname + url.search, { noScroll: true, replaceState: false });
   }
   
   async function unpublishVideo(videoId: string, username: string) {
@@ -194,13 +228,15 @@
   }
   
   // Load queue status on mount
-  $: if (typeof window !== 'undefined') {
-    loadQueueStatus();
-  }
+  $effect(() => {
+    if (typeof window !== 'undefined') {
+      loadQueueStatus();
+    }
+  });
 </script>
 
 <div class="container mx-auto p-6 max-w-6xl">
-  <h1 class="text-3xl font-bold mb-6">Admin Dashboard</h1>
+  <h1 class="text-3xl font-bold mb-6">{$_('admin.title')}</h1>
   
   {#if message}
     <div class="alert mb-4" class:alert-success={message.startsWith('✓')} class:alert-error={message.startsWith('✗')}>
@@ -211,12 +247,12 @@
   <!-- System Settings -->
   <div class="card bg-base-200 shadow-xl mb-6">
     <div class="card-body">
-      <h2 class="card-title text-2xl mb-4">System Settings</h2>
+      <h2 class="card-title text-2xl mb-4">{$_('admin.settings.title')}</h2>
       
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="form-control">
           <label class="label cursor-pointer" for="registration-enabled">
-            <span class="label-text text-lg">Registration Enabled</span>
+            <span class="label-text text-lg">{$_('admin.settings.enableRegistration')}</span>
             <input id="registration-enabled" type="checkbox" bind:checked={settings.registrationEnabled} class="toggle toggle-primary" />
           </label>
         </div>
@@ -252,7 +288,7 @@
       
       <div class="card-actions justify-end mt-4">
         <button class="btn btn-primary" onclick={saveSettings} disabled={saving}>
-          {saving ? 'Saving...' : 'Save Settings'}
+          {saving ? $_('admin.settings.saving') : $_('admin.settings.save')}
         </button>
       </div>
     </div>
@@ -262,8 +298,8 @@
   <div class="card bg-base-200 shadow-xl mb-6">
     <div class="card-body">
       <div class="flex items-center justify-between mb-2">
-        <h2 class="card-title text-2xl">LoRA Presets</h2>
-        <button class="btn btn-sm btn-outline" onclick={addLoraPreset}>Add LoRA</button>
+        <h2 class="card-title text-2xl">{$_('admin.settings.loraPresets')}</h2>
+        <button class="btn btn-sm btn-outline" onclick={addLoraPreset}>{$_('admin.settings.addPreset')}</button>
       </div>
       <p class="text-sm opacity-70 mb-4">Manage available LoRAs and their default weights used in generation.</p>
 
@@ -404,7 +440,7 @@
   <!-- RunPod Queue Status -->
   <div class="card bg-base-200 shadow-xl mb-6">
     <div class="card-body">
-      <h2 class="card-title text-2xl mb-4">RunPod Queue Status</h2>
+      <h2 class="card-title text-2xl mb-4">{$_('admin.queue.title')}</h2>
       
       {#if loadingQueue}
         <div class="flex justify-center">
@@ -489,7 +525,7 @@
       
       <div class="card-actions justify-end mt-4">
         <button class="btn btn-outline" onclick={loadQueueStatus} disabled={loadingQueue}>
-          Refresh Status
+          {$_('admin.queue.refresh')}
         </button>
       </div>
     </div>
@@ -498,18 +534,42 @@
   <!-- User Management -->
   <div class="card bg-base-200 shadow-xl">
     <div class="card-body">
-      <h2 class="card-title text-2xl mb-4">User Management</h2>
+      <h2 class="card-title text-2xl mb-4">{$_('admin.users.title')}</h2>
+      
+      <!-- Search Bar -->
+      <div class="form-control mb-4">
+        <div class="join w-full max-w-md">
+          <input 
+            type="text" 
+            placeholder={$_('admin.users.search')} 
+            class="input input-bordered join-item flex-1"
+            bind:value={userSearch}
+            onkeydown={(e) => e.key === 'Enter' && searchUsers()}
+          />
+          <button class="btn join-item" onclick={searchUsers}>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            {$_('admin.users.searchButton')}
+          </button>
+          {#if data.userSearch}
+            <button class="btn join-item btn-ghost" onclick={clearSearch}>
+              {$_('admin.users.clearSearch')}
+            </button>
+          {/if}
+        </div>
+      </div>
       
       <div class="overflow-x-auto">
         <table class="table table-zebra">
           <thead>
             <tr>
-              <th>Username</th>
-              <th>Email</th>
-              <th>Roles</th>
-              <th>Videos</th>
-              <th>Created</th>
-              <th>Actions</th>
+              <th>{$_('admin.users.table.username')}</th>
+              <th>{$_('admin.users.table.email')}</th>
+              <th>{$_('admin.users.table.roles')}</th>
+              <th>{$_('admin.users.table.videos')}</th>
+              <th>{$_('admin.users.table.createdAt')}</th>
+              <th>{$_('admin.users.table.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -533,7 +593,7 @@
                     class="btn btn-xs btn-outline"
                     onclick={() => updateUserRole(user.id, user.username, user.roles)}
                   >
-                    Edit Role
+                    {$_('admin.users.editRoles')}
                   </button>
                 </td>
               </tr>
@@ -542,8 +602,42 @@
         </table>
       </div>
       
-      <div class="text-sm text-base-content/70 mt-4">
-        Total Users: {users.length}
+      <div class="flex justify-between items-center mt-4">
+        <div class="text-sm text-base-content/70">
+          {$_('admin.users.total', { values: { count: userTotal } })}
+        </div>
+        
+        {#if userTotalPages > 1}
+          <div class="join">
+            <button 
+              class="join-item btn btn-sm" 
+              disabled={userPage === 1}
+              onclick={() => setUserPage(userPage - 1)}
+            >
+              «
+            </button>
+            {#each Array.from({ length: userTotalPages }, (_, i) => i + 1) as pageNum}
+              {#if pageNum === 1 || pageNum === userTotalPages || Math.abs(pageNum - userPage) <= 2}
+                <button 
+                  class="join-item btn btn-sm" 
+                  class:btn-active={pageNum === userPage}
+                  onclick={() => setUserPage(pageNum)}
+                >
+                  {pageNum}
+                </button>
+              {:else if pageNum === userPage - 3 || pageNum === userPage + 3}
+                <button class="join-item btn btn-sm btn-disabled">...</button>
+              {/if}
+            {/each}
+            <button 
+              class="join-item btn btn-sm" 
+              disabled={userPage === userTotalPages}
+              onclick={() => setUserPage(userPage + 1)}
+            >
+              »
+            </button>
+          </div>
+        {/if}
       </div>
     </div>
   </div>
@@ -553,7 +647,7 @@
 {#if showRoleModal && editingUser}
   <div class="modal modal-open">
     <div class="modal-box">
-      <h3 class="font-bold text-lg mb-4">Edit Roles for {editingUser.username}</h3>
+      <h3 class="font-bold text-lg mb-4">{$_('admin.users.roleModal.title', { values: { username: editingUser.username } })}</h3>
       
       <div class="mb-4">
         <p class="text-sm text-base-content/70 mb-2">Select roles:</p>
@@ -601,8 +695,8 @@
       </div>
       
       <div class="modal-action">
-        <button class="btn btn-ghost" onclick={closeRoleModal}>Cancel</button>
-        <button class="btn btn-primary" onclick={saveUserRole}>Save</button>
+        <button class="btn btn-ghost" onclick={closeRoleModal}>{$_('common.cancel')}</button>
+        <button class="btn btn-primary" onclick={saveUserRole}>{$_('admin.users.roleModal.save')}</button>
       </div>
     </div>
     <button class="modal-backdrop" type="button" onclick={closeRoleModal} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && closeRoleModal()} aria-label="Close modal"></button>

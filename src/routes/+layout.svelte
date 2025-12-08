@@ -1,13 +1,25 @@
 <script lang="ts">
 	import '../app.css';
 	import NavMenu from '$lib/components/NavMenu.svelte';
+	import { setLocale, waitLocale } from '$lib/i18n';
+	import { locale, _, isLoading } from 'svelte-i18n';
 	
 	let { children, data }: { children: any; data: any } = $props();
 	
 	const isAdmin = $derived(data?.user?.roles?.includes('admin') || false);
 	let drawerToggle: HTMLInputElement | null = $state(null);
+	
+	function switchLanguage(lang: string) {
+		setLocale(lang);
+	}
 </script>
 
+{#await waitLocale()}
+	<!-- Loading state while i18n initializes -->
+	<div class="flex items-center justify-center min-h-screen">
+		<span class="loading loading-spinner loading-lg"></span>
+	</div>
+{:then}
 <div class="drawer">
 	<input bind:this={drawerToggle} id="main-drawer" type="checkbox" class="drawer-toggle" />
 	<div class="drawer-content flex flex-col">
@@ -26,9 +38,24 @@
 					GmAnimato
 				</a>
 			</div>
-		<div class="flex-none hidden lg:block">
-			<NavMenu user={data?.user} {isAdmin} orientation="horizontal" />
-		</div>
+			<div class="flex-none">
+				<div class="hidden lg:flex lg:items-center lg:gap-2">
+					<NavMenu user={data?.user} {isAdmin} orientation="horizontal" />
+					<!-- Language Switcher -->
+					<div class="dropdown dropdown-end">
+						<div tabindex="0" role="button" class="btn btn-ghost btn-sm gap-1">
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+							</svg>
+							{$locale === 'zh' ? '中文' : 'EN'}
+						</div>
+						<ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-32">
+							<li><button onclick={() => switchLanguage('en')} class:active={$locale === 'en'}>English</button></li>
+							<li><button onclick={() => switchLanguage('zh')} class:active={$locale === 'zh'}>中文</button></li>
+						</ul>
+					</div>
+				</div>
+			</div>
 	</div>		<!-- Page content -->
 		<main class="flex-grow container mx-auto p-4 lg:p-8">
 			{@render children()}
@@ -37,7 +64,7 @@
 		<!-- Footer -->
 		<footer class="footer footer-center p-4 bg-base-200 text-base-content">
 			<aside>
-				<p>GmAnimato — Image-to-Video Generator © 2025</p>
+				<p>{$_('home.footer')}</p>
 			</aside>
 		</footer>
 	</div>
@@ -50,3 +77,4 @@
 		</div>
 	</div>
 </div>
+{/await}

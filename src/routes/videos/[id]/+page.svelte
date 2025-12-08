@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { _ } from 'svelte-i18n';
   
   let { data } = $props<{ data: { video: any; user: any } }>();
   let video = $state(data.video);
@@ -30,6 +31,9 @@
     }
   }
 
+  let likesCount = $state(video.likesCount || 0);
+  let isLiked = $state(video.isLiked || false);
+
   async function toggleLike() {
     try {
       const res = await fetch(`/api/video/${video.id}/like`, {
@@ -38,7 +42,8 @@
       
       if (res.ok) {
         const result = await res.json();
-        video = { ...video, likes: result.likes };
+        likesCount = result.likesCount;
+        isLiked = result.isLiked;
       }
     } catch (err) {
       console.error('Failed to toggle like:', err);
@@ -64,9 +69,6 @@
       alert('Error deleting video: ' + err);
     }
   }
-
-  const isLiked = $derived(data.user && video.likes?.includes(data.user.id));
-  const likesCount = $derived(video.likes?.length || 0);
 </script>
 
 <div class="max-w-5xl mx-auto">
@@ -76,9 +78,9 @@
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
         </svg>
-        Back to My Videos
+        {$_('videoDetail.backToMyVideos')}
       </a>
-      <h1 class="text-4xl font-bold">Video Details</h1>
+      <h1 class="text-4xl font-bold">{$_('videoDetail.title')}</h1>
     </div>
     <div class="badge badge-lg" 
       class:badge-success={video.status === 'completed'}
@@ -104,12 +106,12 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              Show Video
+              {$_('videoDetail.showVideo')}
             {:else}
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-              Show Original
+              {$_('videoDetail.showOriginal')}
             {/if}
           </button>
         </div>
@@ -126,7 +128,7 @@
             <img src={video.original_image_url} alt="Original" class="w-full max-h-[600px] object-contain" />
           {:else}
             <div class="h-96 flex items-center justify-center">
-              <span class="text-lg opacity-60">No video available</span>
+              <span class="text-lg opacity-60">{$_('videoDetail.noVideoAvailable')}</span>
             </div>
           {/if}
         </figure>
@@ -138,8 +140,8 @@
       <!-- Prompt -->
       <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
-          <h2 class="card-title">Prompt</h2>
-          <p class="text-sm">{video.prompt || 'No prompt provided'}</p>
+          <h2 class="card-title">{$_('videoDetail.prompt')}</h2>
+          <p class="text-sm">{video.prompt || $_('videoDetail.noPrompt')}</p>
         </div>
       </div>
 
@@ -147,7 +149,7 @@
       {#if video.tags && video.tags.length > 0}
         <div class="card bg-base-100 shadow-xl">
           <div class="card-body">
-            <h2 class="card-title">Tags</h2>
+            <h2 class="card-title">{$_('videoDetail.tags')}</h2>
             <div class="flex flex-wrap gap-2">
               {#each video.tags as tag}
                 <div class="badge badge-primary">{tag}</div>
@@ -160,12 +162,12 @@
       <!-- Actions -->
       <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
-          <h2 class="card-title">Actions</h2>
+          <h2 class="card-title">{$_('videoDetail.actions')}</h2>
           
           {#if video.status === 'completed'}
             <div class="form-control">
               <label class="label cursor-pointer">
-                <span class="label-text">Publish to Gallery</span>
+                <span class="label-text">{$_('videoDetail.publish')}</span>
                 <input 
                   type="checkbox" 
                   class="toggle toggle-primary" 
@@ -202,7 +204,7 @@
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill={isLiked ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
               </svg>
-              {isLiked ? 'Unlike' : 'Like'} ({likesCount})
+              {isLiked ? $_('videoDetail.unlike') : $_('videoDetail.like')} ({likesCount})
             </button>
 
             <div class="divider"></div>
@@ -215,7 +217,7 @@
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
-              Download Video
+              {$_('videoDetail.download')}
             </a>
           {/if}
 
@@ -223,7 +225,7 @@
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
-            Delete Video
+            {$_('common.delete')} {$_('videos.title')}
           </button>
         </div>
       </div>
@@ -231,10 +233,10 @@
       <!-- Metadata -->
       <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
-          <h2 class="card-title">Info</h2>
+          <h2 class="card-title">{$_('videoDetail.info')}</h2>
           <div class="text-sm space-y-1">
-            <p><strong>Created:</strong> {new Date(video.created_at).toLocaleString()}</p>
-            <p><strong>Status:</strong> {video.status}</p>
+            <p><strong>{$_('videoDetail.created')}:</strong> {new Date(video.created_at).toLocaleString()}</p>
+            <p><strong>{$_('videoDetail.status')}:</strong> {video.status}</p>
             {#if video.is_published}
               <p><strong>Published:</strong> Yes</p>
             {/if}

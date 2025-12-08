@@ -1,0 +1,316 @@
+{
+  "common": {
+    "loading": "Loading",
+    "error": "Error",
+    "success": "Success",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "search": "Search",
+    "filter": "Filter",
+    "all": "All",
+    "submit": "Submit",
+    "close": "Close",
+    "confirm": "Confirm",
+    "yes": "Yes",
+    "no": "No",
+    "uploading": "Uploading",
+    "processing": "Processing",
+    "completed": "Completed",
+    "failed": "Failed"
+  },
+  "nav": {
+    "home": "Home",
+    "create": "Create",
+    "myVideos": "My Videos",
+    "gallery": "Gallery",
+    "admin": "Admin",
+    "profile": "Profile",
+    "login": "Login",
+    "logout": "Logout"
+  },
+  "home": {
+    "title": "Image-to-Video Generator",
+    "subtitle": "Transform your images into videos using AI-powered generation. Upload, customize, and create amazing videos in minutes.",
+    "getStarted": "Get Started",
+    "quickStart": "Quick Start",
+    "createCard": {
+      "title": "Create a New Video",
+      "description": "Upload an image and generate a stunning video with AI",
+      "button": "Create"
+    },
+    "myVideosCard": {
+      "title": "My Videos",
+      "description": "View and manage all your generated videos",
+      "button": "View Videos"
+    },
+    "galleryCard": {
+      "title": "Gallery",
+      "description": "Browse published videos from the community",
+      "button": "Browse"
+    },
+    "howItWorks": "How It Works",
+    "steps": {
+      "upload": {
+        "title": "Upload Image",
+        "description": "Upload an image and optional prompt"
+      },
+      "process": {
+        "title": "AI Processing",
+        "description": "Image is queued for AI processing"
+      },
+      "ready": {
+        "title": "Video Ready",
+        "description": "Video appears in My Videos"
+      },
+      "share": {
+        "title": "Share",
+        "description": "Publish to the Gallery"
+      }
+    },
+    "footer": "GmAnimato — Image-to-Video Generator © 2025"
+  },
+  "auth": {
+    "login": {
+      "title": "Login",
+      "welcome": "Welcome Back!",
+      "subtitle": "Login to continue creating and managing your video projects.",
+      "username": "Username",
+      "password": "Password",
+      "enterUsername": "Enter username",
+      "enterPassword": "Enter password",
+      "button": "Login",
+      "noAccount": "Don't have an account?",
+      "signInWith": "Sign in with GmGard",
+      "registrationDisabled": "Registration is currently disabled"
+    },
+    "register": {
+      "title": "Create Account",
+      "welcome": "Join!",
+      "subtitle": "Create your account to start generating amazing videos from your images.",
+      "button": "Create Account",
+      "hasAccount": "Already have an account?",
+      "registrationDisabledWarning": "Registration is currently disabled. Please login with an existing account."
+    },
+    "errors": {
+      "authFailed": "Authentication failed",
+      "loginToAccess": "Please login to access this page"
+    }
+  },
+  "gallery": {
+    "title": "Gallery",
+    "subtitle": "Explore videos created by the community",
+    "filters": {
+      "all": "All Videos",
+      "liked": "My Liked"
+    },
+    "empty": {
+      "noVideos": "No published videos yet",
+      "noLiked": "No liked videos yet",
+      "noVideosMessage": "Be the first to share your creation with the community!",
+      "noLikedMessage": "Start exploring and like videos you enjoy!",
+      "browseGallery": "Browse Gallery",
+      "createAndPublish": "Create & Publish"
+    },
+    "aiGenerated": "AI Generated",
+    "like": "Like",
+    "unlike": "Unlike",
+    "untitled": "Untitled Video"
+  },
+  "videos": {
+    "title": "My Videos",
+    "createNew": "Create New",
+    "empty": {
+      "title": "No videos yet",
+      "message": "Start creating amazing videos from your images!",
+      "button": "Create Your First Video"
+    },
+    "status": {
+      "uploaded": "Uploaded",
+      "inQueue": "Queued",
+      "processing": "Processing",
+      "completed": "Completed",
+      "failed": "Failed"
+    },
+    "actions": {
+      "view": "View",
+      "delete": "Delete",
+      "retry": "Retry",
+      "viewDetails": "View Details",
+      "deleteConfirm": "Are you sure you want to delete this video?"
+    }
+  },
+  "videoDetail": {
+    "backToGallery": "Back to Gallery",
+    "backToMyVideos": "Back to My Videos",
+    "title": "Video Details",
+    "showOriginal": "Show Original",
+    "showVideo": "Show Video",
+    "prompt": "Prompt (English/Chinese)",
+    "noPrompt": "No prompt provided",
+    "tags": "Tags",
+    "actions": "Actions",
+    "like": "Like",
+    "unlike": "Unlike",
+    "download": "Download Video",
+    "info": "Info",
+    "author": "Author",
+    "created": "Created",
+    "status": "Status",
+    "noVideoAvailable": "No video available",
+    "unknownAuthor": "Unknown author",
+    "publish": "Publish to Gallery",
+    "unpublish": "Unpublish",
+    "publishInfo": "Share your video with the community in the gallery",
+    "relatedVideos": "Related Videos",
+    "processing": "Processing...",
+    "publishSuccess": "Video published successfully",
+    "unpublishSuccess": "Video unpublished successfully",
+    "publishError": "Failed to update publish status"
+  },
+  "newVideo": {
+    "title": "Create a new Image→Video job",
+    "selectImage": "Select Image",
+    "maxSize": "Max 5MB",
+    "preview": "Preview",
+    "startProcessing": "Start Processing",
+    "uploading": "Uploading...",
+    "errors": {
+      "fileTooLarge": "File is too large. Maximum size is {size} MB.",
+      "notImage": "Selected file does not appear to be an image.",
+      "invalidImage": "The file could not be parsed as an image.",
+      "uploadFailed": "Upload failed: {error}",
+      "unexpectedError": "An unexpected error occurred"
+    },
+    "success": "Image uploaded.",
+    "nextSteps": "Next Steps",
+    "nextStepsMessage": "After upload, you'll be able to add prompts and generate your video."
+  },
+  "review": {
+    "title": "Review: Suggested tags & prompts",
+    "imagePreview": "Image Preview",
+    "tags": "Tags",
+    "addTag": "Add",
+    "tagPlaceholder": "Type and press Enter...",
+    "aiSuggestions": "AI Suggestions",
+    "suggestedPrompts": "Suggested Prompts:",
+    "noSuggestions": "No AI suggestions available",
+    "yourPrompt": "Your Prompt",
+    "promptHelp": "Edit or enter your custom prompt. Click a suggestion above to use it.",
+    "promptPlaceholder": "Describe how you want your video to look...",
+    "advancedSettings": "Advanced Settings",
+    "loraWeights": "LoRA Weights",
+    "loraWeightsHelp": "Tune how strongly each LoRA influences the generation.",
+    "reset": "Reset",
+    "generateVideo": "Generate Video",
+    "submitting": "Submitting...",
+    "queued": "Queued...",
+    "processing": "Processing...",
+    "retryGeneration": "Retry Generation",
+    "continueSetup": "Continue Setup",
+    "viewStatus": "View Status",
+    "jobSubmitted": "Job submitted — processing.",
+    "jobResubmitted": "Job resubmitted — processing.",
+    "failedToSubmit": "Failed to submit: {error}",
+    "failedToRetry": "Failed to retry: {error}",
+    "deleteConfirm": "Are you sure you want to delete this video?",
+    "serverBusy": {
+      "title": "Server is Busy! 🐢",
+      "queueFull": "Our servers are working hard right now! Please try again in a few minutes.",
+      "userLimit": "You have too many videos processing right now. Please wait for some to complete before starting new ones.",
+      "highDemand": "Our servers are experiencing high demand right now. Please try again in a few minutes.",
+      "okButton": "OK, I'll Try Later"
+    },
+    "warnings": {
+      "noTags": {
+        "title": "Image Recognition Failed",
+        "message": "You can still generate a video, but you won't be able to publish it to the gallery. Consider re-uploading the image or try a different image."
+      },
+      "nsfwRealistic": {
+        "title": "Publishing Restricted",
+        "message": "This image is detected as NSFW and photo-realistic. You can generate a video, but it cannot be published to the gallery."
+      }
+    }
+  },
+  "admin": {
+    "title": "Admin Dashboard",
+    "settings": {
+      "title": "Settings",
+      "save": "Save Settings",
+      "saving": "Saving...",
+      "saved": "✓ Settings saved successfully",
+      "error": "✗ Error: {error}",
+      "registration": "Registration",
+      "enableRegistration": "Enable Registration",
+      "registrationHelp": "Allow new users to register for accounts",
+      "pagination": "Pagination",
+      "videosPerPage": "Videos Per Page",
+      "videosPerPageHelp": "Number of videos displayed per page in gallery and user video lists",
+      "usersPerPage": "Users Per Page",
+      "usersPerPageHelp": "Number of users displayed per page in admin user list",
+      "loraPresets": "LoRA Presets",
+      "loraPresetsHelp": "Configure LoRA model presets available to users during video generation",
+      "addPreset": "Add Preset",
+      "presetId": "Preset ID",
+      "label": "Label",
+      "nodeId": "Node ID",
+      "default": "Default",
+      "min": "Min",
+      "max": "Max",
+      "step": "Step",
+      "remove": "Remove"
+    },
+    "queue": {
+      "title": "Queue Status",
+      "refresh": "Refresh Queue Status",
+      "loading": "Loading...",
+      "currentQueue": "Current Queue",
+      "queueLength": "Queue Length",
+      "status": "Status",
+      "running": "Running",
+      "pending": "Pending",
+      "history": "History",
+      "completed": "Completed",
+      "interrupted": "Interrupted",
+      "noData": "No queue data available"
+    },
+    "users": {
+      "title": "User Management",
+      "search": "Search users...",
+      "searchButton": "Search",
+      "clearSearch": "Clear",
+      "total": "Total Users: {count}",
+      "table": {
+        "username": "Username",
+        "email": "Email",
+        "roles": "Roles",
+        "videos": "Videos",
+        "createdAt": "Created At",
+        "actions": "Actions"
+      },
+      "editRoles": "Edit Roles",
+      "viewVideos": "View Videos",
+      "unpublish": "Unpublish",
+      "noUsers": "No users found",
+      "roleModal": {
+        "title": "Edit Roles for {username}",
+        "help": "Enter roles separated by commas (e.g., admin, moderator)",
+        "save": "Save Roles",
+        "cancel": "Cancel"
+      },
+      "unpublishConfirm": "Unpublish video from {username}?",
+      "videoUnpublished": "✓ Video unpublished",
+      "unpublishError": "✗ Error: {error}"
+    }
+  },
+  "language": {
+    "select": "Language",
+    "english": "English",
+    "chinese": "中文"
+  }
+}

@@ -66,6 +66,10 @@ export async function updateVideo(id: string, patch: Partial<VideoEntry>) {
   return db.updateVideo(id, patch);
 }
 
+export async function deleteVideo(id: string) {
+  return db.deleteVideo(id);
+}
+
 export async function toggleLike(videoId: string, userId: string) {
   return db.toggleLike(videoId, userId);
 }
