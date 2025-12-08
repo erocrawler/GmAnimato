@@ -3,12 +3,30 @@
   
   export let data: PageData;
   
-  let settings = data.settings;
+  let settings = {
+    ...data.settings,
+    loraPresets: data.settings.loraPresets ?? [],
+  };
   let users = data.users;
   let queueStatus: any = null;
   let saving = false;
   let loadingQueue = false;
   let message = '';
+
+  function sanitizeLoraPresets(presets: any[]) {
+    if (!Array.isArray(presets)) return [];
+    return presets
+      .filter((p) => p && p.id && p.nodeId)
+      .map((p) => ({
+        id: p.id,
+        label: p.label || p.id,
+        nodeId: p.nodeId,
+        default: Number(p.default ?? 1),
+        min: p.min !== undefined ? Number(p.min) : 0,
+        max: p.max !== undefined ? Number(p.max) : 1.5,
+        step: p.step !== undefined ? Number(p.step) : 0.05,
+      }));
+  }
   
   // Role editor modal state
   let showRoleModal = false;
@@ -19,15 +37,20 @@
     saving = true;
     message = '';
     try {
+      const payload = {
+        ...settings,
+        loraPresets: sanitizeLoraPresets(settings.loraPresets),
+      };
       const response = await fetch('/api/admin/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(payload),
       });
       
       if (response.ok) {
         message = '✓ Settings saved successfully';
         setTimeout(() => message = '', 3000);
+        settings = await response.json();
       } else {
         const error = await response.json();
         message = '✗ Error: ' + (error.error || 'Failed to save settings');
@@ -132,6 +155,43 @@
     const roles = roleInput.split(',').map(r => r.trim()).filter(r => r);
     return roles.includes(role);
   }
+
+  function addLoraPreset() {
+    const next = {
+      id: 'new-lora.safetensors',
+      label: 'New LoRA',
+      nodeId: '61:dyn1',
+      default: 1,
+      min: 0,
+      max: 1.5,
+      step: 0.05,
+      chain: 'high' as const,
+      isConfigurable: true,
+    };
+    settings = {
+      ...settings,
+      loraPresets: [...(settings.loraPresets || []), next],
+    };
+  }
+
+  function removeLoraPreset(index: number) {
+    const list = [...(settings.loraPresets || [])];
+    list.splice(index, 1);
+    settings = { ...settings, loraPresets: list };
+  }
+
+  function updateLoraPreset(index: number, field: string, value: string | number) {
+    const list = [...(settings.loraPresets || [])];
+    if (!list[index]) return;
+    const preset = { ...list[index] } as any;
+    if (['default', 'min', 'max', 'step'].includes(field)) {
+      preset[field] = Number(value);
+    } else {
+      preset[field] = value;
+    }
+    list[index] = preset;
+    settings = { ...settings, loraPresets: list };
+  }
   
   // Load queue status on mount
   $: if (typeof window !== 'undefined') {
@@ -155,38 +215,38 @@
       
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="form-control">
-          <label class="label cursor-pointer">
+          <label class="label cursor-pointer" for="registration-enabled">
             <span class="label-text text-lg">Registration Enabled</span>
-            <input type="checkbox" bind:checked={settings.registrationEnabled} class="toggle toggle-primary" />
+            <input id="registration-enabled" type="checkbox" bind:checked={settings.registrationEnabled} class="toggle toggle-primary" />
           </label>
         </div>
         
         <div class="form-control">
-          <label class="label">
+          <label class="label" for="free-quota">
             <span class="label-text">Free User Quota (per day)</span>
           </label>
-          <input type="number" bind:value={settings.freeUserQuotaPerDay} class="input input-bordered" min="0" />
+          <input id="free-quota" type="number" bind:value={settings.freeUserQuotaPerDay} class="input input-bordered" min="0" />
         </div>
         
         <div class="form-control">
-          <label class="label">
+          <label class="label" for="paid-quota">
             <span class="label-text">Paid User Quota (per day)</span>
           </label>
-          <input type="number" bind:value={settings.paidUserQuotaPerDay} class="input input-bordered" min="0" />
+          <input id="paid-quota" type="number" bind:value={settings.paidUserQuotaPerDay} class="input input-bordered" min="0" />
         </div>
         
         <div class="form-control">
-          <label class="label">
+          <label class="label" for="max-concurrent">
             <span class="label-text">Max Concurrent Jobs</span>
           </label>
-          <input type="number" bind:value={settings.maxConcurrentJobs} class="input input-bordered" min="1" />
+          <input id="max-concurrent" type="number" bind:value={settings.maxConcurrentJobs} class="input input-bordered" min="1" />
         </div>
         
         <div class="form-control">
-          <label class="label">
+          <label class="label" for="max-queue">
             <span class="label-text">Max Queue Threshold</span>
           </label>
-          <input type="number" bind:value={settings.maxQueueThreshold} class="input input-bordered" min="100" />
+          <input id="max-queue" type="number" bind:value={settings.maxQueueThreshold} class="input input-bordered" min="100" />
         </div>
       </div>
       
@@ -195,6 +255,149 @@
           {saving ? 'Saving...' : 'Save Settings'}
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- LoRA Presets -->
+  <div class="card bg-base-200 shadow-xl mb-6">
+    <div class="card-body">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="card-title text-2xl">LoRA Presets</h2>
+        <button class="btn btn-sm btn-outline" onclick={addLoraPreset}>Add LoRA</button>
+      </div>
+      <p class="text-sm opacity-70 mb-4">Manage available LoRAs and their default weights used in generation.</p>
+
+      {#if settings.loraPresets && settings.loraPresets.length > 0}
+        <div class="mb-4 text-sm text-base-content/70">
+          <strong>Note:</strong> Base LoRAs (Light X2V) are always required and cannot be removed. Dynamic LoRAs are chained automatically per group.
+        </div>
+        <div class="overflow-x-auto">
+          <table class="table table-zebra whitespace-normal">
+            <thead>
+              <tr>
+                <th style="min-width: 220px;">ID / Filename</th>
+                <th style="min-width: 200px;">Label</th>
+                <th>Chain</th>
+                <th>Default</th>
+                <th>Min</th>
+                <th>Max</th>
+                <th>Step</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each settings.loraPresets as preset, i}
+                <tr class:opacity-60={!preset.isConfigurable}>
+                  <td>
+                    {#if preset.isConfigurable}
+                      <input
+                        type="text"
+                        class="input input-bordered w-full"
+                        value={preset.id}
+                        oninput={(e) => updateLoraPreset(i, 'id', e.currentTarget.value)}
+                        placeholder="lora-file.safetensors"
+                      />
+                    {:else}
+                      <span class="font-mono text-sm">{preset.id}</span>
+                      <span class="badge badge-sm badge-ghost ml-2">base</span>
+                    {/if}
+                  </td>
+                  <td>
+                    {#if preset.isConfigurable}
+                      <input
+                        type="text"
+                        class="input input-bordered w-full"
+                        value={preset.label}
+                        oninput={(e) => updateLoraPreset(i, 'label', e.currentTarget.value)}
+                        placeholder="Display name"
+                      />
+                    {:else}
+                      {preset.label}
+                    {/if}
+                  </td>
+                  <td>
+                    {#if preset.isConfigurable}
+                      <select
+                        class="select select-bordered select-sm w-full max-w-[100px]"
+                        value={preset.chain}
+                        onchange={(e) => updateLoraPreset(i, 'chain', e.currentTarget.value)}
+                      >
+                        <option value="high">High</option>
+                        <option value="low">Low</option>
+                      </select>
+                    {:else}
+                      <span class="text-sm capitalize">{preset.chain}</span>
+                    {/if}
+                  </td>
+                  <td>
+                    {#if preset.isConfigurable}
+                      <input
+                        type="number"
+                        class="input input-bordered w-24"
+                        value={preset.default}
+                        min="0"
+                        step="0.01"
+                        oninput={(e) => updateLoraPreset(i, 'default', Number(e.currentTarget.value))}
+                      />
+                    {:else}
+                      {preset.default}
+                    {/if}
+                  </td>
+                  <td>
+                    {#if preset.isConfigurable}
+                      <input
+                        type="number"
+                        class="input input-bordered w-20"
+                        value={preset.min ?? 0}
+                        step="0.01"
+                        oninput={(e) => updateLoraPreset(i, 'min', Number(e.currentTarget.value))}
+                      />
+                    {:else}
+                      {preset.min ?? 0}
+                    {/if}
+                  </td>
+                  <td>
+                    {#if preset.isConfigurable}
+                      <input
+                        type="number"
+                        class="input input-bordered w-20"
+                        value={preset.max ?? 1.5}
+                        step="0.01"
+                        oninput={(e) => updateLoraPreset(i, 'max', Number(e.currentTarget.value))}
+                      />
+                    {:else}
+                      {preset.max ?? 1.5}
+                    {/if}
+                  </td>
+                  <td>
+                    {#if preset.isConfigurable}
+                      <input
+                        type="number"
+                        class="input input-bordered w-20"
+                        value={preset.step ?? 0.05}
+                        step="0.01"
+                        min="0.001"
+                        oninput={(e) => updateLoraPreset(i, 'step', Number(e.currentTarget.value))}
+                      />
+                    {:else}
+                      {preset.step ?? 0.05}
+                    {/if}
+                  </td>
+                  <td>
+                    {#if preset.isConfigurable}
+                      <button class="btn btn-xs btn-outline btn-error" onclick={() => removeLoraPreset(i)}>Remove</button>
+                    {:else}
+                      <span class="text-xs text-base-content/50">—</span>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {:else}
+        <p class="text-base-content/70">No LoRAs configured yet. Click "Add LoRA" to create one.</p>
+      {/if}
     </div>
   </div>
   
@@ -392,11 +595,9 @@
           placeholder="admin, paid-tier, free-tier"
           class="input input-bordered w-full"
         />
-        <label class="label">
-          <span class="label-text-alt text-base-content/60">
-            Available: admin, paid-tier, free-tier
-          </span>
-        </label>
+        <p class="label-text-alt text-base-content/60">
+          Available: admin, paid-tier, free-tier
+        </p>
       </div>
       
       <div class="modal-action">
@@ -404,7 +605,7 @@
         <button class="btn btn-primary" onclick={saveUserRole}>Save</button>
       </div>
     </div>
-    <div class="modal-backdrop" onclick={closeRoleModal}></div>
+    <button class="modal-backdrop" type="button" onclick={closeRoleModal} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && closeRoleModal()} aria-label="Close modal"></button>
   </div>
 {/if}
 

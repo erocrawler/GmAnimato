@@ -37,6 +37,8 @@ export type Session = {
   created_at: string;
 };
 
+import type { LoraPreset } from './loraPresets';
+
 export type AdminSettings = {
   id: string;
   registrationEnabled: boolean;
@@ -44,6 +46,7 @@ export type AdminSettings = {
   paidUserQuotaPerDay: number;
   maxConcurrentJobs: number;
   maxQueueThreshold: number;
+  loraPresets?: LoraPreset[];
   updatedAt?: string;
 };
 

@@ -82,6 +82,7 @@ model AdminSettings {
   paidUserQuotaPerDay Int      @default(50) @map("paid_user_quota_per_day")
   maxConcurrentJobs   Int      @default(5) @map("max_concurrent_jobs")
   maxQueueThreshold   Int      @default(5000) @map("max_queue_threshold")
+  loraPresets         Json?    @map("lora_presets")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
   @@map("admin_settings")

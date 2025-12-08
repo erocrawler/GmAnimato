@@ -1,11 +1,14 @@
 <script lang="ts">
   import { goto, invalidateAll } from '$app/navigation';
 
+  export let data;
+
   let username = '';
   let password = '';
   let error = '';
   let loading = false;
   let isRegister = false;
+  let registrationEnabled = data.registrationEnabled ?? true;
 
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
@@ -41,6 +44,7 @@
   }
 
   function toggleMode() {
+    if (isRegister && !registrationEnabled) return; // Prevent toggling to register mode if disabled
     isRegister = !isRegister;
     error = '';
   }
@@ -63,10 +67,19 @@
     </div>
     
     <div class="card flex-shrink-0 w-full max-w-sm shadow-2xl bg-base-100">
-      <form class="card-body" on:submit={handleSubmit}>
+      <form class="card-body" on:submit={handleSubmit} class:opacity-50={isRegister && !registrationEnabled} class:pointer-events-none={isRegister && !registrationEnabled}>
         <div class="text-center mb-4">
           <h2 class="text-2xl font-bold">{isRegister ? 'Create Account' : 'Login'}</h2>
         </div>
+
+        {#if isRegister && !registrationEnabled}
+          <div class="alert alert-warning shadow-lg mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4v2m0 0v2m0-6V9m6 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>Registration is currently disabled. Please login with an existing account.</span>
+          </div>
+        {/if}
 
         {#if error}
           <div class="alert alert-error shadow-lg mb-4">
@@ -136,8 +149,12 @@
             <p class="text-sm">Already have an account?</p>
             <button type="button" class="btn btn-link btn-sm" on:click={toggleMode}>Login</button>
           {:else}
-            <p class="text-sm">Don't have an account?</p>
-            <button type="button" class="btn btn-link btn-sm" on:click={toggleMode}>Register</button>
+            {#if registrationEnabled}
+              <p class="text-sm">Don't have an account?</p>
+              <button type="button" class="btn btn-link btn-sm" on:click={toggleMode}>Register</button>
+            {:else}
+              <p class="text-sm text-gray-500">Registration is currently disabled</p>
+            {/if}
           {/if}
         </div>
       </form>

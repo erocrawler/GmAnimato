@@ -1,5 +1,5 @@
 <script lang="ts">
-  let { data } = $props<{ data: { video: any; user?: any; relatedVideos: any[] } }>();
+  let { data } = $props<{ data: { video: any; user?: any; relatedVideos: any[]; author?: { id: string; username: string } | null } }>();
   let video = $state(data.video);
   let showOriginal = $state(false);
 
@@ -20,6 +20,7 @@
 
   const isLiked = $derived(data.user && video.likes?.includes(data.user.id));
   const likesCount = $derived(video.likes?.length || 0);
+  const authorName = $derived(data.author?.username ?? 'Unknown author');
 </script>
 
 <div class="max-w-5xl mx-auto">
@@ -41,7 +42,7 @@
         <div class="flex justify-end">
           <button 
             class="btn btn-sm gap-2" 
-            on:click={() => showOriginal = !showOriginal}
+            onclick={() => showOriginal = !showOriginal}
           >
             {#if showOriginal}
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -114,7 +115,7 @@
               class="btn" 
               class:btn-error={isLiked}
               class:btn-outline={!isLiked}
-              on:click={toggleLike}
+              onclick={toggleLike}
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill={isLiked ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
@@ -143,6 +144,7 @@
         <div class="card-body">
           <h2 class="card-title">Info</h2>
           <div class="text-sm space-y-1">
+            <p><strong>Author:</strong> {authorName}</p>
             <p><strong>Created:</strong> {new Date(video.created_at).toLocaleString()}</p>
             <p><strong>Status:</strong> {video.status}</p>
           </div>

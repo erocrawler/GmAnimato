@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic } from './IDatabase';
+import { DEFAULT_LORA_PRESETS, normalizeLoraPresets } from './loraPresets';
 import { PrismaPg } from '@prisma/adapter-pg'
 
 export class PostgresDatabase implements IDatabase {
@@ -366,6 +367,7 @@ export class PostgresDatabase implements IDatabase {
           paidUserQuotaPerDay: 50,
           maxConcurrentJobs: 5,
           maxQueueThreshold: 5000,
+          loraPresets: DEFAULT_LORA_PRESETS,
         },
       });
     }
@@ -381,6 +383,7 @@ export class PostgresDatabase implements IDatabase {
     if (patch.paidUserQuotaPerDay !== undefined) data.paidUserQuotaPerDay = patch.paidUserQuotaPerDay;
     if (patch.maxConcurrentJobs !== undefined) data.maxConcurrentJobs = patch.maxConcurrentJobs;
     if (patch.maxQueueThreshold !== undefined) data.maxQueueThreshold = patch.maxQueueThreshold;
+    if (patch.loraPresets !== undefined) data.loraPresets = normalizeLoraPresets(patch.loraPresets);
 
     const settings = await this.prisma.adminSettings.upsert({
       where: { id: 'default' },
@@ -392,6 +395,7 @@ export class PostgresDatabase implements IDatabase {
         paidUserQuotaPerDay: patch.paidUserQuotaPerDay ?? 50,
         maxConcurrentJobs: patch.maxConcurrentJobs ?? 5,
         maxQueueThreshold: patch.maxQueueThreshold ?? 5000,
+        loraPresets: normalizeLoraPresets(patch.loraPresets) ?? DEFAULT_LORA_PRESETS,
       },
     });
 
@@ -456,6 +460,7 @@ export class PostgresDatabase implements IDatabase {
       paidUserQuotaPerDay: settings.paidUserQuotaPerDay,
       maxConcurrentJobs: settings.maxConcurrentJobs,
       maxQueueThreshold: settings.maxQueueThreshold,
+      loraPresets: normalizeLoraPresets(settings.loraPresets ?? DEFAULT_LORA_PRESETS),
       updatedAt: settings.updatedAt.toISOString(),
     };
   }

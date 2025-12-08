@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic } from './IDatabase';
+import { DEFAULT_LORA_PRESETS, normalizeLoraPresets } from './loraPresets';
 
 const DATA_DIR = path.resolve('data');
 const DB_FILE = path.join(DATA_DIR, 'videos.json');
@@ -239,6 +240,7 @@ export class JsonFileDatabase implements IDatabase {
         paidUserQuotaPerDay: 50,
         maxConcurrentJobs: 5,
         maxQueueThreshold: 5000,
+        loraPresets: DEFAULT_LORA_PRESETS,
         updatedAt: new Date().toISOString(),
       };
       await fs.writeFile(SETTINGS_FILE, JSON.stringify(defaultSettings, null, 2), 'utf-8');
@@ -248,7 +250,11 @@ export class JsonFileDatabase implements IDatabase {
   async getAdminSettings(): Promise<AdminSettings> {
     await this.ensureSettingsDB();
     const txt = await fs.readFile(SETTINGS_FILE, 'utf-8');
-    return JSON.parse(txt) as AdminSettings;
+    const parsed = JSON.parse(txt) as AdminSettings;
+    return {
+      ...parsed,
+      loraPresets: normalizeLoraPresets(parsed.loraPresets),
+    };
   }
 
   async updateAdminSettings(patch: Partial<Omit<AdminSettings, 'id'>>): Promise<AdminSettings> {
@@ -257,6 +263,7 @@ export class JsonFileDatabase implements IDatabase {
     const updated: AdminSettings = {
       ...settings,
       ...patch,
+      loraPresets: normalizeLoraPresets(patch.loraPresets ?? settings.loraPresets),
       id: 'default',
       updatedAt: new Date().toISOString(),
     };

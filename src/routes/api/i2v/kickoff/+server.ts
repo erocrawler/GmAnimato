@@ -21,9 +21,10 @@ export const POST: RequestHandler = async ({ request }) => {
       return new Response(JSON.stringify({ error: 'already processing' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
-    // Extract prompt and tags from request body
+    // Extract prompt, tags, and optional LoRA weights from request body
     const prompt = body?.prompt;
     const tags = body?.tags;
+    const loraWeights = body?.loraWeights;
 
     // Get admin settings for thresholds
     const settings = await getAdminSettings();
@@ -131,9 +132,11 @@ export const POST: RequestHandler = async ({ request }) => {
     const payload = await buildWorkflow({
       image_name: `${id}.png`,
       image_url: existing.original_image_url,
-      input_prompt: existing.prompt || 'A beautiful video',
+      input_prompt: prompt ?? existing.prompt ?? 'A beautiful video',
       seed: Math.floor(Math.random() * 1000000),
-      callback_url: callbackUrl
+      callback_url: callbackUrl,
+      loraWeights: typeof loraWeights === 'object' && loraWeights !== null ? loraWeights : undefined,
+      loraPresets: settings.loraPresets,
     });
 
     let jobId: string | undefined;

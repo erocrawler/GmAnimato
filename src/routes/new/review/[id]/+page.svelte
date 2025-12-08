@@ -3,6 +3,8 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { createTagsInput, melt } from '@melt-ui/svelte';
+  import { DEFAULT_LORA_PRESETS } from '$lib/loraPresets';
+  import type { LoraPreset } from '$lib/loraPresets';
 
   export let data: any;
   let entry = data.entry as any;
@@ -16,6 +18,15 @@
   let showBusyModal = false;
   let busyModalMessage = "";
   let pollInterval: ReturnType<typeof setInterval> | null = null;
+  let showAdvancedSettings = false;
+
+  const LORA_PRESETS: LoraPreset[] = (data.loraPresets && data.loraPresets.length > 0)
+    ? data.loraPresets
+    : DEFAULT_LORA_PRESETS;
+
+  let loraWeights: Record<string, number> = Object.fromEntries(
+    LORA_PRESETS.map((lora) => [lora.id, lora.default])
+  );
 
   $: isEditable = entry.status !== 'processing' && entry.status !== 'completed' && entry.status !== 'in_queue' && entry.status !== 'failed';
 
@@ -91,6 +102,18 @@
     }
   });
 
+  function updateLoraWeight(id: string, value: number) {
+    const preset = LORA_PRESETS.find((p) => p.id === id);
+    const min = preset?.min ?? 0;
+    const max = preset?.max ?? 1.5;
+    const clamped = Math.max(min, Math.min(max, value));
+    loraWeights = { ...loraWeights, [id]: clamped };
+  }
+
+  function resetLoraWeights() {
+    loraWeights = Object.fromEntries(LORA_PRESETS.map((lora) => [lora.id, lora.default]));
+  }
+
   const {
     elements: { root, input, tag, deleteTrigger, edit },
     states: { tags },
@@ -128,7 +151,8 @@
         body: JSON.stringify({ 
           id: entry.id, 
           prompt, 
-          tags: $tags.map(t => t.value) 
+          tags: $tags.map(t => t.value),
+          loraWeights
         }),
       });
       
@@ -290,6 +314,42 @@
           class="textarea textarea-bordered textarea-lg h-32 w-full"
           disabled={!isEditable}
         ></textarea>
+      </div>
+
+      <!-- Advanced Settings (LoRA Weights) -->
+      <div class="divider mt-6 mb-2"></div>
+      <div class="collapse collapse-arrow bg-base-200">
+        <input type="checkbox" bind:checked={showAdvancedSettings} />
+        <div class="collapse-title text-lg font-medium">
+          Advanced Settings
+        </div>
+        <div class="collapse-content">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-semibold">LoRA Weights</h3>
+            <button class="btn btn-ghost btn-sm" on:click={resetLoraWeights} disabled={!isEditable}>Reset</button>
+          </div>
+          <p class="text-sm opacity-70 mb-4">Tune how strongly each LoRA influences the generation.</p>
+          <div class="space-y-4">
+            {#each LORA_PRESETS as lora}
+              <div class="space-y-1">
+                <div class="flex items-center justify-between text-sm">
+                  <span>{lora.label}</span>
+                  <span class="opacity-70">{(loraWeights[lora.id] ?? lora.default).toFixed(2)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={lora.min ?? 0}
+                  max={lora.max ?? 1.5}
+                  step={lora.step ?? 0.05}
+                  value={loraWeights[lora.id] ?? lora.default}
+                  on:input={(event) => updateLoraWeight(lora.id, +event.currentTarget.value)}
+                  disabled={!isEditable}
+                  class="range range-sm"
+                />
+              </div>
+            {/each}
+          </div>
+        </div>
       </div>
       
       <div class="card-actions justify-between mt-4">

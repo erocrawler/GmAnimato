@@ -30,5 +30,4 @@ vite.config.ts.timestamp-*
 test-*
 
 # Prisma
-/prisma/migrations
 node_modules/.prisma

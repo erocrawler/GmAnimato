@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { getVideoById, getPublishedVideos } from '$lib/db';
+import { getVideoById, getPublishedVideos, getUserById } from '$lib/db';
 import { error } from '@sveltejs/kit';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
@@ -22,10 +22,20 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     status: 'completed'
   });
   const relatedVideos = relatedVideosPage.videos;
+
+  // Fetch author basic info
+  const author = video.user_id ? await getUserById(video.user_id) : undefined;
+  const authorPublic = author
+    ? {
+        id: author.id,
+        username: author.username,
+      }
+    : null;
   
   return {
     video,
     user: locals.user || null,
-    relatedVideos
+    relatedVideos,
+    author: authorPublic,
   };
 };
