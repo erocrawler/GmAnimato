@@ -105,7 +105,6 @@ export const handle: Handle = async ({ event, resolve }) => {
 
   // Check if route is public
   const isPublic = publicRoutes.some((route) => pathname === route || pathname.startsWith(route + '/'));
-  console.log(`[Request] ${pathname} | Public: ${isPublic} | User: ${event.locals.user ? event.locals.user.username : 'Guest'}`);
   // Redirect to login if trying to access protected route without auth
   if (!isPublic && !event.locals.user) {
     throw redirect(303, '/login');

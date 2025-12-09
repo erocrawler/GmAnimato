@@ -1,11 +1,15 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { _ } from 'svelte-i18n';
+  import { createStatusTranslations, getTranslatedStatus } from '$lib/videoStatus';
   
   let { data } = $props<{ data: { video: any; user: any } }>();
   let video = $state(data.video);
   let publishing = $state(false);
   let showOriginal = $state(false);
+
+  const statusMap = $derived(createStatusTranslations((key) => $_(key)));
+  const translatedStatus = $derived(getTranslatedStatus(video.status, statusMap));
 
   async function togglePublish() {
     publishing = true;
@@ -22,10 +26,10 @@
       if (res.ok) {
         video.is_published = !video.is_published;
       } else {
-        alert('Failed to update publish status');
+        alert($_('videoDetail.publishUpdateError'));
       }
     } catch (err) {
-      alert('Error: ' + err);
+      alert($_('videoDetail.publishUpdateError') + ': ' + err);
     } finally {
       publishing = false;
     }
@@ -51,7 +55,7 @@
   }
 
   async function deleteVideo() {
-    if (!confirm('Are you sure you want to delete this video?')) {
+    if (!confirm($_('videoDetail.deleteConfirm'))) {
       return;
     }
     
@@ -63,10 +67,10 @@
       if (res.ok) {
         await goto('/videos');
       } else {
-        alert('Failed to delete video');
+        alert($_('videoDetail.deleteError'));
       }
     } catch (err) {
-      alert('Error deleting video: ' + err);
+      alert($_('videoDetail.deleteError') + ': ' + err);
     }
   }
 </script>
@@ -88,7 +92,7 @@
       class:badge-info={video.status === 'uploaded'}
       class:badge-error={video.status === 'failed'}
     >
-      {video.status}
+      {translatedStatus}
     </div>
   </div>
 
@@ -177,9 +181,9 @@
                 />
               </label>
               {#if video.is_nsfw && video.is_photo_realistic}
-                <p class="text-xs text-error mt-1">NSFW photo-realistic content cannot be published</p>
+                <p class="text-xs text-error mt-1">{$_('videoDetail.nsfw')}</p>
               {:else if !video.suggested_prompts || video.suggested_prompts.length === 0}
-                <p class="text-xs text-warning mt-1">⚠️ Image recognition failed - cannot publish to gallery. Please try uploading again.</p>
+                <p class="text-xs text-warning mt-1">{$_('videoDetail.recognitionFailed')}</p>
               {/if}
             </div>
 
@@ -189,7 +193,7 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                 </svg>
-                View in Gallery
+                {$_('gallery.title')}
               </a>
             {/if}
 
@@ -225,7 +229,7 @@
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
-            {$_('common.delete')} {$_('videos.title')}
+            {$_('common.delete')}
           </button>
         </div>
       </div>
@@ -236,9 +240,9 @@
           <h2 class="card-title">{$_('videoDetail.info')}</h2>
           <div class="text-sm space-y-1">
             <p><strong>{$_('videoDetail.created')}:</strong> {new Date(video.created_at).toLocaleString()}</p>
-            <p><strong>{$_('videoDetail.status')}:</strong> {video.status}</p>
+            <p><strong>{$_('videoDetail.status')}:</strong> {translatedStatus}</p>
             {#if video.is_published}
-              <p><strong>Published:</strong> Yes</p>
+              <p><strong>{$_('videoDetail.published')}:</strong> {$_('common.yes')}</p>
             {/if}
           </div>
         </div>

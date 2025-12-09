@@ -1,7 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { getVideoById, updateVideo } from '$lib/db';
+import { deleteVideo } from '$lib/db';
 
-export const POST: RequestHandler = async ({ params, locals }) => {
+export const DELETE: RequestHandler = async ({ params, locals }) => {
   // Check if user is admin
   if (!locals.user?.roles?.includes('admin')) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -11,6 +11,7 @@ export const POST: RequestHandler = async ({ params, locals }) => {
   }
 
   const videoId = params.id;
+  
   if (!videoId) {
     return new Response(JSON.stringify({ error: 'Video ID is required' }), {
       status: 400,
@@ -18,17 +19,16 @@ export const POST: RequestHandler = async ({ params, locals }) => {
     });
   }
   
-  const video = await getVideoById(videoId);
-  if (!video) {
-    return new Response(JSON.stringify({ error: 'Video not found' }), {
+  const deleted = await deleteVideo(videoId);
+  
+  if (!deleted) {
+    return new Response(JSON.stringify({ error: 'Video not found or failed to delete' }), {
       status: 404,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  const updated = await updateVideo(videoId, { is_published: false });
-  
-  return new Response(JSON.stringify({ success: true, video: updated }), {
+  return new Response(JSON.stringify({ success: true }), {
     headers: { 'Content-Type': 'application/json' },
   });
 };

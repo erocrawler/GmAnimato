@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { _ } from 'svelte-i18n';
+  import { createStatusTranslations, getTranslatedStatus } from '$lib/videoStatus';
 
   let { data } = $props<{ data: { videos: any[]; page: number; totalPages: number; total: number; pageSize: number } }>();
   let videos = $state(data.videos);
@@ -75,15 +76,10 @@
     await goto(url.toString());
   }
 
+  const statusMap = $derived(createStatusTranslations((key) => $_(key)));
+
   function getStatusText(status: string): string {
-    const statusMap: Record<string, string> = {
-      'uploaded': $_('videos.status.uploaded'),
-      'in_queue': $_('videos.status.inQueue'),
-      'processing': $_('videos.status.processing'),
-      'completed': $_('videos.status.completed'),
-      'failed': $_('videos.status.failed')
-    };
-    return statusMap[status] || status;
+    return getTranslatedStatus(status, statusMap);
   }
 </script>
 

@@ -62,7 +62,7 @@
 							</svg>
 							{$locale === 'zh' ? '中文' : 'EN'}
 						</div>
-						<ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-32">
+						<ul class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-32">
 							<li><button onclick={() => switchLanguage('en')} class:active={$locale === 'en'}>English</button></li>
 							<li><button onclick={() => switchLanguage('zh')} class:active={$locale === 'zh'}>中文</button></li>
 						</ul>
@@ -87,6 +87,13 @@
 		<label for="main-drawer" aria-label="close sidebar" class="drawer-overlay"></label>
 		<div class="w-80 min-h-full bg-base-200 p-4">
 			<NavMenu user={data?.user} {isAdmin} orientation="vertical" {drawerToggle} />
+			<!-- Language Switcher for Mobile -->
+			<div class="divider"></div>
+			<div class="menu">
+				<li class="menu-title">{$_('language.select')}</li>
+				<li><button onclick={() => switchLanguage('en')} class:active={$locale === 'en'}>English</button></li>
+				<li><button onclick={() => switchLanguage('zh')} class:active={$locale === 'zh'}>中文</button></li>
+			</div>
 		</div>
 	</div>
 </div>

@@ -22,7 +22,11 @@
     "uploading": "上传中",
     "processing": "处理中",
     "completed": "已完成",
-    "failed": "失败"
+    "failed": "失败",
+    "view": "查看",
+    "unpublish": "取消发布",
+    "apply": "应用",
+    "clear": "清除"
   },
   "nav": {
     "home": "首页",
@@ -125,6 +129,9 @@
   "videos": {
     "title": "我的视频",
     "createNew": "创建新视频",
+    "filters": {
+      "status": "状态"
+    },
     "empty": {
       "title": "还没有视频",
       "message": "开始从您的图像创建精彩视频吧！",
@@ -132,7 +139,7 @@
     },
     "status": {
       "uploaded": "已上传",
-      "inQueue": "排队中",
+      "in_queue": "排队中",
       "processing": "处理中",
       "completed": "已完成",
       "failed": "失败"
@@ -171,7 +178,15 @@
     "processing": "处理中...",
     "publishSuccess": "视频发布成功",
     "unpublishSuccess": "视频取消发布成功",
-    "publishError": "更新发布状态失败"
+    "publishError": "更新发布状态失败",
+    "nsfw": "NSFW 照片级真实内容无法发布",
+    "recognitionFailed": "⚠️ 图像识别失败 - 无法发布到视频库。请尝试重新上传。",
+    "deleteConfirm": "确定要删除此视频吗?",
+    "deleteSuccess": "视频删除成功",
+    "deleteError": "删除视频失败",
+    "publishUpdateError": "无法更新发布状态",
+    "likeError": "无法切换喜欢状态",
+    "published": "已发布"
   },
   "newVideo": {
     "title": "创建新的图像→视频任务",
@@ -244,10 +259,13 @@
         "message": "您仍可以生成视频，但无法将其发布到视频库。考虑重新上传图像或尝试其他图像。"
       },
       "nsfwRealistic": {
-        "title": "发布受限",
-        "message": "此图像被检测为NSFW和真实照片。您可以生成视频，但无法将其发布到视频库。"
+        "title": "发布受限制",
+        "message": "该图像被检测为 NSFW 和照片级真实性。您可以生成视频，但无法将其发布到美术馆。"
       }
     }
+  },
+  "users": {
+    "username": "用户名"
   },
   "admin": {
     "title": "管理仪表板",
@@ -315,10 +333,49 @@
         "save": "保存角色",
         "cancel": "取消"
       },
-      "unpublishConfirm": "取消发布{username}的视频？",
-      "videoUnpublished": "✓ 视频已取消发布",
-      "unpublishError": "✗ 错误：{error}"
+      "unpublishConfirm": "取消发布来自 {username} 的视频吗?",
+      "videoUnpublished": "✓ 已取消发布视频",
+      "unpublishError": "✗ 错误: {error}"
+    },
+    "videos": {
+      "title": "视频管理",
+      "filters": "筛选",
+      "total": "总计：{count} 个视频",
+      "noVideos": "未找到视频",
+      "deleteConfirm": "删除来自 {username} 的视频?此操作无法撤销。",
+      "videoDeleted": "✓ 已删除视频",
+      "unpublishConfirm": "取消发布来自 {username} 的视频吗?",
+      "videoUnpublished": "✓ 已取消发布视频",
+      "unpublishError": "✗ 错误: {error}"
     }
+  },
+  "profile": {
+    "title": "个人资料设置",
+    "accountInformation": "账户信息",
+    "changePassword": "更改密码",
+    "username": "用户名",
+    "usernameCannotChange": "用户名无法更改",
+    "email": "电子邮件",
+    "userId": "用户ID",
+    "memberSince": "成员时间",
+    "roles": "角色",
+    "saveChanges": "保存更改",
+    "saving": "保存中...",
+    "currentPassword": "当前密码",
+    "currentPasswordPlaceholder": "输入当前密码",
+    "newPassword": "新密码",
+    "newPasswordPlaceholder": "输入新密码（至少6个字符）",
+    "confirmPassword": "确认新密码",
+    "confirmPasswordPlaceholder": "重新输入新密码",
+    "changePasswordButton": "更改密码",
+    "changingPassword": "更改中...",
+    "passwordMismatch": "新密码不匹配",
+    "passwordTooShort": "密码必须至少6个字符",
+    "accountUpdated": "✓ 账户信息更新成功",
+    "passwordChanged": "✓ 密码更改成功",
+    "updateError": "无法更新账户",
+    "changePasswordError": "无法更改密码",
+    "gmgardOAuthMessage": "此账户通过 GmGard OAuth 登录；密码更改在此处被禁用。"
   },
   "language": {
     "select": "语言",

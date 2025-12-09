@@ -13,8 +13,9 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     throw error(404, 'Video not found');
   }
 
-  // Only allow owner to view their video
-  if (video.user_id !== locals.user.id) {
+  // Only allow owner or admin to view the video
+  const isAdmin = locals.user.roles?.includes('admin');
+  if (video.user_id !== locals.user.id && !isAdmin) {
     throw error(403, 'Forbidden');
   }
 
