@@ -25,6 +25,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const prompt = body?.prompt;
     const tags = body?.tags;
     const loraWeights = body?.loraWeights;
+    const iterationStepsRaw = body?.iterationSteps;
+    const parsedSteps = Number(iterationStepsRaw);
+    const allowedSteps = [4, 6, 8] as const;
+    type IterationSteps = (typeof allowedSteps)[number];
+    let iterationSteps: IterationSteps = 4;
+
+    if (Number.isFinite(parsedSteps) && allowedSteps.includes(parsedSteps as IterationSteps)) {
+      iterationSteps = parsedSteps as IterationSteps;
+    }
 
     // Get admin settings for thresholds
     const settings = await getAdminSettings();
@@ -37,6 +46,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
           error: `You have reached your daily limit of ${quotaCheck.limit} videos. You've created ${quotaCheck.used} videos today. Please try again tomorrow.` 
         }), { 
           status: 429, 
+          headers: { 'Content-Type': 'application/json' } 
+        });
+      }
+    }
+
+    // Enforce role requirement for detailed (8-step) runs
+    if (iterationSteps === 8) {
+      const roles = locals.user?.roles || [];
+      if (!roles.includes('paid-user')) {
+        return new Response(JSON.stringify({ 
+          error: 'Detailed mode (8 steps) is available to paid users only.' 
+        }), { 
+          status: 403, 
           headers: { 'Content-Type': 'application/json' } 
         });
       }
@@ -148,6 +170,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       input_prompt: prompt ?? existing.prompt ?? 'A beautiful video',
       seed: Math.floor(Math.random() * 1000000),
       callback_url: callbackUrl,
+      iterationSteps,
       loraWeights: typeof loraWeights === 'object' && loraWeights !== null ? loraWeights : undefined,
       loraPresets: settings.loraPresets,
     });

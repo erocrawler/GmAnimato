@@ -3,11 +3,24 @@
 	import NavMenu from '$lib/components/NavMenu.svelte';
 	import { setLocale, waitLocale } from '$lib/i18n';
 	import { locale, _, isLoading } from 'svelte-i18n';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
+	import { onMount } from 'svelte';
 	
 	let { children, data }: { children: any; data: any } = $props();
 	
 	const isAdmin = $derived(data?.user?.roles?.includes('admin') || false);
 	let drawerToggle: HTMLInputElement | null = $state(null);
+
+	// Protected routes that require authentication
+	const protectedRoutes = ['/new', '/videos', '/profile'];
+
+	onMount(() => {
+		// Guard protected routes on client-side navigation
+		if (protectedRoutes.some((route) => $page.url.pathname.startsWith(route)) && !data?.user) {
+			goto('/login');
+		}
+	});
 	
 	function switchLanguage(lang: string) {
 		setLocale(lang);

@@ -9,5 +9,9 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   // Basic ownership check if user is available
   if (locals.user && entry.user_id !== locals.user.id) return { status: 403 } as any;
   const adminSettings = await getAdminSettings();
-  return { entry, loraPresets: normalizeLoraPresets(adminSettings.loraPresets) } as any;
+  return { 
+    entry, 
+    loraPresets: normalizeLoraPresets(adminSettings.loraPresets),
+    userRoles: locals.user?.roles || []
+  } as any;
 };

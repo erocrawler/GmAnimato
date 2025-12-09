@@ -1,5 +1,5 @@
-import type { Actions } from './$types';
-import path from 'path';
+import type { Actions, PageServerLoad } from './$types';
+import { redirect } from '@sveltejs/kit';
 import { createVideoEntry } from '$lib/db';
 import { annotateImage } from '$lib/imageRecognition';
 import { uploadBufferToS3 } from '$lib/s3';
@@ -7,6 +7,13 @@ import { Buffer } from 'buffer';
 import { validateAndConvertImage } from '$lib/imageValidation';
 import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
 import { env } from '$env/dynamic/private';
+
+export const load: PageServerLoad = async ({ locals }) => {
+  if (!locals.user) {
+    throw redirect(303, '/login');
+  }
+  return {};
+};
 
 export const actions: Actions = {
   default: async ({ request, locals }) => {

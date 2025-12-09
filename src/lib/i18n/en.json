@@ -151,7 +151,7 @@
     "title": "Video Details",
     "showOriginal": "Show Original",
     "showVideo": "Show Video",
-    "prompt": "Prompt (English/Chinese)",
+    "prompt": "Prompt",
     "noPrompt": "No prompt provided",
     "tags": "Tags",
     "actions": "Actions",
@@ -204,6 +204,18 @@
     "promptHelp": "Edit or enter your custom prompt in English or Chinese. Click a suggestion above to use it.",
     "promptPlaceholder": "Describe how you want your video to look...",
     "advancedSettings": "Advanced Settings",
+    "iteration": {
+      "title": "Iteration steps (fast, balanced, quality)",
+      "help": "Choose speed vs. detail",
+      "fast": "Fast",
+      "balanced": "Balanced",
+      "quality": "Quality",
+      "steps": {
+        "fast": "4 steps",
+        "balanced": "6 steps",
+        "quality": "8 steps"
+      }
+    },
     "loraWeights": "LoRA Weights",
     "loraWeightsHelp": "Tune how strongly each LoRA influences the generation.",
     "reset": "Reset",

@@ -9,6 +9,7 @@ interface WorkflowParams {
   input_prompt: string;
   seed: number;
   callback_url?: string;
+  iterationSteps?: 4 | 6 | 8;
   loraWeights?: Record<string, number>;
   loraPresets?: LoraPreset[];
 }
@@ -28,6 +29,12 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
   // Add callback_url to input if provided
   if (params.callback_url) {
     workflow.input.callback_url = params.callback_url;
+  }
+
+  // Configure iteration steps (default 6)
+  const steps = params.iterationSteps ?? 6;
+  if (workflow?.input?.workflow?.['44']?.inputs) {
+    workflow.input.workflow['44'].inputs.steps = steps;
   }
 
   // Override LoRA strengths when provided and dynamically build chains

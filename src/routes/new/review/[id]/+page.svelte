@@ -26,6 +26,22 @@
     ? data.loraPresets
     : DEFAULT_LORA_PRESETS;
 
+  const userRoles: string[] = data.userRoles || [];
+
+  type IterationSteps = 4 | 6 | 8;
+  let stepOptions: { value: IterationSteps; label: string; description: string; requiresPaid?: boolean }[] = [];
+
+  let iterationSteps: IterationSteps = 4;
+
+  $: canUseQuality = userRoles.includes('paid-user');
+  $: visibleStepOptions = canUseQuality ? stepOptions : stepOptions.filter((o) => !o.requiresPaid);
+  $: if (!canUseQuality && iterationSteps === 8) iterationSteps = 4;
+  $: stepOptions = [
+    { value: 4, label: get(_)('review.iteration.fast'), description: get(_)('review.iteration.steps.fast'), requiresPaid: false },
+    { value: 6, label: get(_)('review.iteration.balanced'), description: get(_)('review.iteration.steps.balanced'), requiresPaid: false },
+    { value: 8, label: get(_)('review.iteration.quality'), description: get(_)('review.iteration.steps.quality'), requiresPaid: true },
+  ];
+
   let loraWeights: Record<string, number> = Object.fromEntries(
     LORA_PRESETS.map((lora) => [lora.id, lora.default])
   );
@@ -156,7 +172,8 @@
           id: entry.id, 
           prompt, 
           tags: $tags.map(t => t.value),
-          loraWeights
+          loraWeights,
+          iterationSteps
         }),
       });
       
@@ -328,6 +345,30 @@
           {$_('review.advancedSettings')}
         </div>
         <div class="collapse-content">
+          <div class="space-y-4 mb-6">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold">{$_('review.iteration.title')}</h3>
+              <span class="text-xs opacity-70">{$_('review.iteration.help')}</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {#each visibleStepOptions as option}
+                <label class="btn btn-outline flex items-center gap-3 justify-start" class:btn-active={iterationSteps === option.value}>
+                  <input
+                    type="radio"
+                    name="iteration-steps"
+                    value={option.value}
+                    checked={iterationSteps === option.value}
+                    on:change={() => iterationSteps = option.value}
+                    disabled={!isEditable}
+                  />
+                  <div>
+                    <div class="font-semibold">{option.label}</div>
+                    <div class="text-xs opacity-70">{option.description}</div>
+                  </div>
+                </label>
+              {/each}
+            </div>
+          </div>
           <div class="flex items-center justify-between mb-2">
             <h3 class="font-semibold">{$_('review.loraWeights')}</h3>
             <button class="btn btn-ghost btn-sm" on:click={resetLoraWeights} disabled={!isEditable}>{$_('review.reset')}</button>

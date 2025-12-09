@@ -151,7 +151,7 @@
     "title": "视频详情",
     "showOriginal": "显示原图",
     "showVideo": "显示视频",
-    "prompt": "提示词（支持中英文）",
+    "prompt": "提示词",
     "noPrompt": "未提供提示词",
     "tags": "标签",
     "actions": "操作",
@@ -204,6 +204,18 @@
     "promptHelp": "编辑或输入您的自定义提示词（支持中英文）。点击上方建议即可使用。",
     "promptPlaceholder": "描述您希望视频的样子...",
     "advancedSettings": "高级设置",
+    "iteration": {
+      "title": "迭代步数（快速、均衡、精细）",
+      "help": "在速度和细节之间选择",
+      "fast": "快速",
+      "balanced": "均衡",
+      "quality": "精细",
+      "steps": {
+        "fast": "4步",
+        "balanced": "6步",
+        "quality": "8步"
+      }
+    },
     "loraWeights": "LoRA权重",
     "loraWeightsHelp": "调整每个LoRA对生成的影响强度。",
     "reset": "重置",
