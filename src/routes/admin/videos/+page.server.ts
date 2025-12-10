@@ -22,7 +22,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   
   // Collect all videos from all users
   const allVideosPromises = allUsers.map(async (user) => {
-    const result = await getVideosByUser(user.id, 1, 1000); // Get up to 1000 videos per user
+    const result = await getVideosByUser(user.id, 1, 1000, { includeDeleted: true }); // Count and show deleted videos too
     return result.videos.map(v => ({
       ...v,
       username: user.username,

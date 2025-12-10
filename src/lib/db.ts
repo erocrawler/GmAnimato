@@ -1,11 +1,11 @@
 // Main database module - exports interface and provides factory for database implementation
-import type { IDatabase, VideoEntry, User, UserPublic, AdminSettings, Session, GetPublishedVideosOptions } from './IDatabase';
+import type { IDatabase, VideoEntry, User, UserPublic, AdminSettings, Session, GetPublishedVideosOptions, GetVideosByUserOptions } from './IDatabase';
 import { JsonFileDatabase } from './db-json';
 import { PostgresDatabase } from './db-postgres';
 import { env } from '$env/dynamic/private';
 
 // Re-export types for backward compatibility
-export type { VideoEntry, IDatabase, User, UserPublic, AdminSettings, Session, PaginatedVideos, GetPublishedVideosOptions } from './IDatabase';
+export type { VideoEntry, IDatabase, User, UserPublic, AdminSettings, Session, PaginatedVideos, GetPublishedVideosOptions, GetVideosByUserOptions } from './IDatabase';
 
 // Database instance (singleton)
 let dbInstance: IDatabase | null = null;
@@ -46,8 +46,8 @@ export async function createVideoEntry(entry: Omit<VideoEntry, 'id' | 'created_a
   return db.createVideoEntry(entry);
 }
 
-export async function getVideosByUser(user_id: string, page?: number, pageSize?: number) {
-  return db.getVideosByUser(user_id, page, pageSize);
+export async function getVideosByUser(user_id: string, page?: number, pageSize?: number, options?: GetVideosByUserOptions) {
+  return db.getVideosByUser(user_id, page, pageSize, options);
 }
 
 export async function getActiveJobsByUser(user_id: string) {
@@ -164,16 +164,26 @@ export async function checkDailyQuota(user: User, settings: AdminSettings): Prom
     }
   }
   
-  // Get user's videos from today
-  const userVideos = await db.getVideosByUser(user.id, 1, 1000); // Get up to 1000 videos to count
+  // Get user's videos from today (include deleted to count toward quota)
+  const userVideos = await db.getVideosByUser(user.id, 1, 1000, { includeDeleted: true });
   
-  // Count videos created today
+  // Count videos created today that consumed quota
+  // Count: completed, in_queue, processing, or deleted (if it has final_video_url = was successfully processed)
+  // Exclude: uploaded (never queued), failed, deleted without final_video_url
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   
   const todayVideos = userVideos.videos.filter(v => {
     const createdAt = new Date(v.created_at);
-    return createdAt >= today;
+    if (createdAt < today) return false;
+    
+    if (v.status === 'deleted') {
+      // Only count deleted if it was successfully processed (has final_video_url)
+      return !!v.final_video_url;
+    }
+    
+    // Count if in: completed, in_queue, processing
+    return ['completed', 'in_queue', 'processing'].includes(v.status);
   });
   
   return {

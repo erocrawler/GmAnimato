@@ -36,17 +36,23 @@ export class PostgresDatabase implements IDatabase {
     return this.mapToVideoEntry(video);
   }
 
-  async getVideosByUser(user_id: string, page: number = 1, pageSize: number = 12): Promise<import('./IDatabase').PaginatedVideos> {
+  async getVideosByUser(user_id: string, page: number = 1, pageSize: number = 12, options?: import('./IDatabase').GetVideosByUserOptions): Promise<import('./IDatabase').PaginatedVideos> {
     const skip = (page - 1) * pageSize;
+    const includeDeleted = options?.includeDeleted ?? false;
+
+    const where: any = { userId: user_id };
+    if (!includeDeleted) {
+      where.status = { not: 'deleted' };
+    }
     
     const [videos, total] = await Promise.all([
       this.prisma.video.findMany({
-        where: { userId: user_id },
+        where,
         orderBy: { createdAt: 'desc' },
         skip,
         take: pageSize,
       }),
-      this.prisma.video.count({ where: { userId: user_id } })
+      this.prisma.video.count({ where })
     ]);
 
     return {
@@ -76,7 +82,7 @@ export class PostgresDatabase implements IDatabase {
     const { page = 1, pageSize = 12, likedBy, currentUserId, excludeId, status, isNsfw } = options || {};
     const skip = (page - 1) * pageSize;
     
-    const where: any = { isPublished: true };
+    const where: any = { isPublished: true, status: { not: 'deleted' } };
     
     // Filter by liked videos if likedBy is provided (for "My Liked" filter)
     if (likedBy) {
@@ -171,8 +177,12 @@ export class PostgresDatabase implements IDatabase {
 
   async deleteVideo(id: string): Promise<boolean> {
     try {
-      await this.prisma.video.delete({
+      await this.prisma.video.update({
         where: { id },
+        data: {
+          status: 'deleted',
+          isPublished: false,
+        },
       });
       return true;
     } catch (error) {

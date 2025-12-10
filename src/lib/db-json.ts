@@ -41,9 +41,10 @@ export class JsonFileDatabase implements IDatabase {
     return row;
   }
 
-  async getVideosByUser(user_id: string, page: number = 1, pageSize: number = 12): Promise<import('./IDatabase').PaginatedVideos> {
+  async getVideosByUser(user_id: string, page: number = 1, pageSize: number = 12, options?: import('./IDatabase').GetVideosByUserOptions): Promise<import('./IDatabase').PaginatedVideos> {
     const rows = await this.readAll();
-    let filtered = rows.filter((r) => r.user_id === user_id);
+    const includeDeleted = options?.includeDeleted ?? false;
+    let filtered = rows.filter((r) => r.user_id === user_id && (includeDeleted || r.status !== 'deleted'));
     
     // Sort by created_at descending (newest first)
     filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -122,6 +123,15 @@ export class JsonFileDatabase implements IDatabase {
     rows[idx] = { ...rows[idx], ...patch } as VideoEntry;
     await this.writeAll(rows);
     return rows[idx];
+  }
+
+  async deleteVideo(id: string): Promise<boolean> {
+    const rows = await this.readAll();
+    const idx = rows.findIndex((r) => r.id === id);
+    if (idx === -1) return false;
+    rows[idx] = { ...rows[idx], status: 'deleted', is_published: false } as VideoEntry;
+    await this.writeAll(rows);
+    return true;
   }
 
   async toggleLike(videoId: string, userId: string): Promise<VideoEntry | null> {

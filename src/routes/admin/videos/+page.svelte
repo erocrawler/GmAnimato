@@ -86,6 +86,7 @@
       case 'processing':
       case 'in_queue': return 'badge-warning';
       case 'failed': return 'badge-error';
+      case 'deleted': return 'badge-neutral';
       default: return 'badge-info';
     }
   }
@@ -124,6 +125,7 @@
             <option value="processing">{$_('videos.status.processing')}</option>
             <option value="completed">{$_('videos.status.completed')}</option>
             <option value="failed">{$_('videos.status.failed')}</option>
+            <option value="deleted">Deleted</option>
           </select>
         </div>
 
@@ -193,7 +195,9 @@
               {#if v.is_published}
                 <button class="btn btn-xs btn-warning" onclick={() => unpublishVideo(v.id, v.username)}>{$_('common.unpublish')}</button>
               {/if}
-              <button class="btn btn-xs btn-error" onclick={() => deleteVideo(v.id, v.username)}>{$_('common.delete')}</button>
+              {#if v.status !== 'deleted'}
+                <button class="btn btn-xs btn-error" onclick={() => deleteVideo(v.id, v.username)}>{$_('common.delete')}</button>
+              {/if}
             </div>
           </div>
         </div>

@@ -7,7 +7,7 @@ export type VideoEntry = {
   suggested_prompts?: string[];
   is_photo_realistic?: boolean;
   is_nsfw?: boolean;
-  status: 'uploaded' | 'in_queue' | 'processing' | 'completed' | 'failed';
+  status: 'uploaded' | 'in_queue' | 'processing' | 'completed' | 'failed' | 'deleted';
   job_id?: string; // RunPod job ID for status polling
   final_video_url?: string;
   is_published?: boolean;
@@ -57,6 +57,10 @@ export type PaginatedVideos = {
   totalPages: number;
 };
 
+export type GetVideosByUserOptions = {
+  includeDeleted?: boolean;
+};
+
 export type GetPublishedVideosOptions = {
   page?: number;
   pageSize?: number;
@@ -70,7 +74,7 @@ export type GetPublishedVideosOptions = {
 export interface IDatabase {
   // Video methods
   createVideoEntry(entry: Omit<VideoEntry, 'id' | 'created_at'> & { id?: string }): Promise<VideoEntry>;
-  getVideosByUser(user_id: string, page?: number, pageSize?: number): Promise<PaginatedVideos>;
+  getVideosByUser(user_id: string, page?: number, pageSize?: number, options?: GetVideosByUserOptions): Promise<PaginatedVideos>;
   getActiveJobsByUser(user_id: string): Promise<VideoEntry[]>;
   getPublishedVideos(options?: GetPublishedVideosOptions): Promise<PaginatedVideos>;
   getVideoById(id: string): Promise<VideoEntry | undefined>;
