@@ -46,10 +46,10 @@
     LORA_PRESETS.map((lora) => [lora.id, lora.default])
   );
 
-  $: isEditable = entry.status !== 'processing' && entry.status !== 'completed' && entry.status !== 'in_queue' && entry.status !== 'failed';
+  $: isEditable = entry.status !== 'processing' && entry.status !== 'completed' && entry.status !== 'in_queue' && entry.status !== 'failed' && entry.status !== 'deleted';
 
   async function pollStatus() {
-    if (entry.status === 'completed' || entry.status === 'failed') {
+    if (entry.status === 'completed' || entry.status === 'failed' || entry.status === 'deleted') {
       return; // Stop polling if completed or failed
     }
 
@@ -84,8 +84,12 @@
         const result = await res.json();
         console.log('Retry initiated:', result);
         message = get(_)('review.jobResubmitted');
-        // Update status and start polling again
-        entry = { ...entry, status: 'in_queue' };
+        // Update status from server response
+        if (result.status) {
+          entry = { ...entry, status: result.status, job_id: result.job_id };
+        } else {
+          entry = { ...entry, status: 'in_queue' };
+        }
         pollStatus();
         if (!pollInterval) {
           pollInterval = setInterval(pollStatus, 10000);
@@ -251,6 +255,7 @@
       class:badge-warning={entry.status === 'processing' || entry.status === 'in_queue'}
       class:badge-info={entry.status === 'uploaded'}
       class:badge-error={entry.status === 'failed'}
+      class:badge-neutral={entry.status === 'deleted'}
     >
       {$_(`videos.status.${entry.status}`) || entry.status}
     </div>
@@ -419,6 +424,13 @@
               </svg>
               {$_('review.retryGeneration')}
             </button>
+          {:else if entry.status === "deleted"}
+            <div class="alert alert-info">
+              <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>{$_('review.videoDeleted')}</span>
+            </div>
           {:else}
             {#if !entry.tags || entry.tags.length === 0}
               <div class="alert alert-warning mb-4">

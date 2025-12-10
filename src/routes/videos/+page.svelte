@@ -129,6 +129,7 @@
                 class:badge-warning={v.status === 'processing' || v.status === 'in_queue'}
                 class:badge-info={v.status === 'uploaded'}
                 class:badge-error={v.status === 'failed'}
+                class:badge-neutral={v.status === 'deleted'}
               >
                 {getStatusText(v.status)}
               </div>
@@ -152,10 +153,14 @@
                 <a href="/new/review/{v.id}" class="btn btn-sm btn-primary">{$_('review.continueSetup')}</a>
                 <button class="btn btn-sm btn-error" onclick={() => deleteVideo(v.id)}>{$_('common.delete')}</button>
               </div>
-            {:else}
+            {:else if v.status === 'failed'}
               <div class="card-actions justify-end mt-auto">
-                <a href="/new/review/{v.id}" class="btn btn-sm btn-error">{$_('videos.actions.retry')}</a>
+                <a href="/new/review/{v.id}" class="btn btn-sm btn-warning">{$_('videos.actions.retry')}</a>
                 <button class="btn btn-sm btn-error" onclick={() => deleteVideo(v.id)}>{$_('common.delete')}</button>
+              </div>
+            {:else if v.status === 'deleted'}
+              <div class="card-actions justify-end mt-auto">
+                <span class="text-sm opacity-60">{$_('videos.deleted')}</span>
               </div>
             {/if}
           </div>

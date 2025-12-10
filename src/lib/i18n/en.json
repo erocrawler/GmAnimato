@@ -142,7 +142,8 @@
       "in_queue": "Queued",
       "processing": "Processing",
       "completed": "Completed",
-      "failed": "Failed"
+      "failed": "Failed",
+      "deleted": "Deleted"
     },
     "actions": {
       "view": "View",
@@ -150,7 +151,8 @@
       "retry": "Retry",
       "viewDetails": "View Details",
       "deleteConfirm": "Are you sure you want to delete this video?"
-    }
+    },
+    "deleted": "This video has been deleted"
   },
   "videoDetail": {
     "backToGallery": "Back to Gallery",
@@ -262,7 +264,8 @@
         "title": "Publishing Restricted",
         "message": "This image is detected as NSFW and photo-realistic. You can generate a video, but it cannot be published to the gallery."
       }
-    }
+    },
+    "videoDeleted": "This video has been deleted."
   },
   "users": {
     "username": "Username"
