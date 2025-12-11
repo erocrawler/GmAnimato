@@ -24,12 +24,28 @@
     }
   }
   const authorName = $derived(data.author?.username ?? $_('videoDetail.unknownAuthor'));
+
+  function buildGalleryUrl() {
+    if (typeof window === 'undefined') return '/gallery';
+    
+    const params = new URLSearchParams(window.location.search);
+    const sort = params.get('sort');
+    const page = params.get('page');
+    const filter = params.get('filter');
+    
+    const galleryParams = new URLSearchParams();
+    if (sort) galleryParams.set('sort', sort);
+    if (page) galleryParams.set('page', page);
+    if (filter) galleryParams.set('filter', filter);
+    
+    return galleryParams.toString() ? `/gallery?${galleryParams.toString()}` : '/gallery';
+  }
 </script>
 
 <div class="max-w-5xl mx-auto">
   <div class="flex justify-between items-center mb-8">
     <div>
-      <a href="/gallery" class="btn btn-ghost btn-sm mb-2">
+      <a href={buildGalleryUrl()} class="btn btn-ghost btn-sm mb-2">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
         </svg>

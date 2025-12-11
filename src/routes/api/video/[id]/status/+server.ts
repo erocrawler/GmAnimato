@@ -34,19 +34,21 @@ export const GET: RequestHandler = async ({ params }) => {
     // If video is in_queue or processing and we have a job_id, poll RunPod
     if ((video.status === 'in_queue' || video.status === 'processing') && video.job_id) {
       // Check if processing has timed out (longer than 1 hour)
-      const createdAt = new Date(video.created_at).getTime();
-      const now = Date.now();
-      const elapsedMs = now - createdAt;
-      
-      if (elapsedMs > PROCESSING_TIMEOUT_MS) {
-        console.log(`[Status Poll] Video ${video.id} has timed out after ${Math.floor(elapsedMs / 1000 / 60)} minutes`);
-        await updateVideo(video.id, { status: 'failed' });
-        return new Response(JSON.stringify({ 
-          status: 'failed',
-          reason: 'processing_timeout'
-        }), { 
-          headers: { 'Content-Type': 'application/json' } 
-        });
+      if (video.processing_started_at) {
+        const processingStartedAt = new Date(video.processing_started_at).getTime();
+        const now = Date.now();
+        const elapsedMs = now - processingStartedAt;
+        
+        if (elapsedMs > PROCESSING_TIMEOUT_MS) {
+          console.log(`[Status Poll] Video ${video.id} has timed out after ${Math.floor(elapsedMs / 1000 / 60)} minutes`);
+          await updateVideo(video.id, { status: 'failed' });
+          return new Response(JSON.stringify({ 
+            status: 'failed',
+            reason: 'processing_timeout'
+          }), { 
+            headers: { 'Content-Type': 'application/json' } 
+          });
+        }
       }
       
       const runpodConfig = getRunPodConfig({

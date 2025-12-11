@@ -240,6 +240,13 @@
           <h2 class="card-title">{$_('videoDetail.info')}</h2>
           <div class="text-sm space-y-1">
             <p><strong>{$_('videoDetail.created')}:</strong> {new Date(video.created_at).toLocaleString()}</p>
+            {#if video.processing_started_at}
+              <p><strong>{$_('videoDetail.processingStarted')}:</strong> {new Date(video.processing_started_at).toLocaleString()}</p>
+            {/if}
+            {#if video.processing_started_at && video.processing_time_ms}
+              {@const completedAt = new Date(new Date(video.processing_started_at).getTime() + video.processing_time_ms)}
+              <p><strong>{$_('videoDetail.processingCompleted')}:</strong> {completedAt.toLocaleString()}</p>
+            {/if}
             <p><strong>{$_('videoDetail.status')}:</strong> {translatedStatus}</p>
             {#if video.is_published}
               <p><strong>{$_('videoDetail.published')}:</strong> {$_('common.yes')}</p>

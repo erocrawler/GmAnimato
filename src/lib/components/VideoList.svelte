@@ -15,6 +15,7 @@
     emptyMessage?: string;
     emptyIcon?: string;
     emptyAction?: { label: string; href: string } | null;
+    queryParams?: string;
     onDelete?: (id: string) => void;
     onUnpublish?: (id: string) => void;
     onToggleLike?: (id: string, event: MouseEvent) => void;
@@ -29,6 +30,7 @@
     emptyMessage,
     emptyIcon,
     emptyAction = null,
+    queryParams = '',
     onDelete,
     onUnpublish,
     onToggleLike
@@ -104,7 +106,7 @@
     {#each videos as v}
       {#if type === 'gallery'}
         <!-- Gallery card -->
-        <a href="/gallery/{v.id}" class="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow cursor-pointer">
+        <a href="/gallery/{v.id}{queryParams ? `?${queryParams}` : ''}" class="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow cursor-pointer">
           {#if v.original_image_url}
             <figure class="{layout === 'compact' ? 'h-32' : 'aspect-video'} bg-base-200">
               <img src={v.original_image_url} alt={v.prompt || 'Video thumbnail'} class="w-full h-full object-cover" />
