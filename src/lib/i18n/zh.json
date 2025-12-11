@@ -113,6 +113,10 @@
       "all": "全部视频",
       "liked": "我喜欢的"
     },
+    "sort": {
+      "date": "最新",
+      "likes": "最受欢迎"
+    },
     "empty": {
       "noVideos": "还没有发布的视频",
       "noLiked": "还没有喜欢的视频",
@@ -233,6 +237,23 @@
         "quality": "8步"
       }
     },
+    "duration": {
+      "title": "视频时长",
+      "help": "选择视频长度",
+      "short": "4秒",
+      "shortDesc": "81帧",
+      "long": "6秒",
+      "longDesc": "121帧"
+    },
+    "resolution": {
+      "title": "视频分辨率",
+      "help": "选择输出质量",
+      "standard": "480p",
+      "standardDesc": "标准质量",
+      "hd": "720p",
+      "hdDesc": "高清"
+    },
+    "paidOnly": "付费",
     "loraWeights": "LoRA权重",
     "loraWeightsHelp": "调整每个LoRA对生成的影响强度。",
     "reset": "重置",

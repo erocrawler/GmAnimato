@@ -71,7 +71,7 @@ export class JsonFileDatabase implements IDatabase {
   }
 
   async getPublishedVideos(options?: import('./IDatabase').GetPublishedVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
-    const { page = 1, pageSize = 12, likedBy, excludeId, status, isNsfw } = options || {};
+    const { page = 1, pageSize = 12, likedBy, excludeId, status, isNsfw, sortBy = 'date' } = options || {};
     const rows = await this.readAll();
     let filtered = rows.filter((r) => r.is_published);
     
@@ -95,8 +95,12 @@ export class JsonFileDatabase implements IDatabase {
       filtered = filtered.filter((r) => r.is_nsfw === isNsfw);
     }
     
-    // Sort by created_at descending
-    filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    // Sort by likes or date
+    if (sortBy === 'likes') {
+      filtered.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+    } else {
+      filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
     
     const total = filtered.length;
     const skip = (page - 1) * pageSize;
@@ -154,6 +158,29 @@ export class JsonFileDatabase implements IDatabase {
   async isVideoLikedByUser(videoId: string, userId: string): Promise<boolean> {
     console.warn('[JSON DB] isVideoLikedByUser not supported - use SQL Server for like functionality');
     return false;
+  }
+
+  async getDailyQuotaUsage(userId: string, date: Date): Promise<number> {
+    const rows = await this.readAll();
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    
+    const todayVideos = rows.filter(v => {
+      if (v.user_id !== userId) return false;
+      
+      const createdAt = new Date(v.created_at);
+      if (createdAt < startOfDay) return false;
+      
+      if (v.status === 'deleted') {
+        // Only count deleted if it was successfully processed (has final_video_url)
+        return !!v.final_video_url;
+      }
+      
+      // Count if in: completed, in_queue, processing
+      return ['completed', 'in_queue', 'processing'].includes(v.status);
+    });
+    
+    return todayVideos.length;
   }
 
   // ==================== User Methods ====================

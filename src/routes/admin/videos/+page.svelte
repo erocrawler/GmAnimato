@@ -2,11 +2,15 @@
   import { goto } from '$app/navigation';
   import { _ } from 'svelte-i18n';
   import type { PageData } from './$types';
+  import VideoList from '$lib/components/VideoList.svelte';
+  import Pagination from '$lib/components/Pagination.svelte';
+  import LayoutToggle from '$lib/components/LayoutToggle.svelte';
 
   let { data } = $props<{ data: PageData }>();
   let statusFilter = $state(data.statusFilter || '');
   let userFilter = $state(data.userFilter || '');
   let message = $state('');
+  let layout = $state<'grid' | 'compact'>('grid');
 
   async function setPage(newPage: number) {
     const url = new URL(window.location.href);
@@ -36,7 +40,9 @@
     await goto('/admin/videos');
   }
 
-  async function unpublishVideo(videoId: string, username: string) {
+  async function unpublishVideo(videoId: string) {
+    const video = data.videos.find((v: any) => v.id === videoId);
+    const username = video?.username || 'Unknown';
     const message_confirm = $_('admin.videos.unpublishConfirm', { values: { username } });
     if (!confirm(message_confirm)) return;
 
@@ -58,7 +64,9 @@
     }
   }
 
-  async function deleteVideo(videoId: string, username: string) {
+  async function deleteVideo(videoId: string) {
+    const video = data.videos.find((v: any) => v.id === videoId);
+    const username = video?.username || 'Unknown';
     const message_confirm = $_('admin.videos.deleteConfirm', { values: { username } });
     if (!confirm(message_confirm)) return;
 
@@ -77,17 +85,6 @@
       }
     } catch (err) {
       message = $_('admin.videos.unpublishError', { values: { error: String(err) } });
-    }
-  }
-
-  function getStatusBadgeClass(status: string) {
-    switch (status) {
-      case 'completed': return 'badge-success';
-      case 'processing':
-      case 'in_queue': return 'badge-warning';
-      case 'failed': return 'badge-error';
-      case 'deleted': return 'badge-neutral';
-      default: return 'badge-info';
     }
   }
 </script>
@@ -112,7 +109,10 @@
   <!-- Filters -->
   <div class="card bg-base-200 shadow-xl mb-6">
     <div class="card-body">
-      <h2 class="card-title">{$_('admin.videos.filters')}</h2>
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="card-title">{$_('admin.videos.filters')}</h2>
+        <LayoutToggle layout={layout} onChange={(l) => layout = l} />
+      </div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="form-control">
           <label class="label" for="status-filter">
@@ -151,92 +151,19 @@
     {$_('admin.videos.total', { values: { count: data.total } })}
   </div>
 
-  {#if data.videos.length === 0}
-    <div class="alert">
-      <span>{$_('admin.videos.noVideos')}</span>
-    </div>
-  {:else}
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
-      {#each data.videos as v}
-        <div class="card bg-base-100 shadow-xl image-full">
-          {#if v.original_image_url}
-            <figure>
-              <img src={v.original_image_url} alt="thumbnail" class="w-full h-full object-cover" />
-            </figure>
-          {:else}
-            <figure class="bg-base-300">
-              <div class="w-full h-full flex items-center justify-center">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-24 w-24 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-              </div>
-            </figure>
-          {/if}
-          <div class="card-body">
-            <div class="flex items-center gap-2 mb-2">
-              <div class="badge badge-lg {getStatusBadgeClass(v.status)}">
-                {v.status}
-              </div>
-              {#if v.is_published}
-                <div class="badge badge-info">Published</div>
-              {/if}
-            </div>
+  <VideoList
+    videos={data.videos}
+    type="admin"
+    bind:layout={layout}
+    pageSize={data.pageSize}
+    emptyMessage={$_('admin.videos.noVideos')}
+    onDelete={deleteVideo}
+    onUnpublish={unpublishVideo}
+  />
 
-            <p class="text-sm font-semibold mb-1">By: {v.username}</p>
-            
-            {#if v.prompt}
-              <p class="text-sm line-clamp-2 mb-2">{v.prompt}</p>
-            {/if}
-
-            <div class="card-actions justify-end mt-auto gap-1">
-              {#if v.status === 'completed'}
-                <a href="/videos/{v.id}" class="btn btn-xs btn-primary" target="_blank">{$_('common.view')}</a>
-              {/if}
-              {#if v.is_published}
-                <button class="btn btn-xs btn-warning" onclick={() => unpublishVideo(v.id, v.username)}>{$_('common.unpublish')}</button>
-              {/if}
-              {#if v.status !== 'deleted'}
-                <button class="btn btn-xs btn-error" onclick={() => deleteVideo(v.id, v.username)}>{$_('common.delete')}</button>
-              {/if}
-            </div>
-          </div>
-        </div>
-      {/each}
-    </div>
-
-    <!-- Pagination -->
-    {#if data.totalPages > 1}
-      <div class="flex justify-center">
-        <div class="join">
-          <button 
-            class="join-item btn" 
-            disabled={data.page === 1}
-            onclick={() => setPage(data.page - 1)}
-          >
-            «
-          </button>
-          {#each Array.from({ length: data.totalPages }, (_, i) => i + 1) as pageNum}
-            {#if pageNum === 1 || pageNum === data.totalPages || Math.abs(pageNum - data.page) <= 2}
-              <button 
-                class="join-item btn" 
-                class:btn-active={pageNum === data.page}
-                onclick={() => setPage(pageNum)}
-              >
-                {pageNum}
-              </button>
-            {:else if pageNum === data.page - 3 || pageNum === data.page + 3}
-              <button class="join-item btn btn-disabled">...</button>
-            {/if}
-          {/each}
-          <button 
-            class="join-item btn" 
-            disabled={data.page === data.totalPages}
-            onclick={() => setPage(data.page + 1)}
-          >
-            »
-          </button>
-        </div>
-      </div>
-    {/if}
-  {/if}
+  <Pagination
+    currentPage={data.page}
+    totalPages={data.totalPages}
+    onPageChange={setPage}
+  />
 </div>

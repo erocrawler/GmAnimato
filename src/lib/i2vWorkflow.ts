@@ -10,6 +10,8 @@ interface WorkflowParams {
   seed: number;
   callback_url?: string;
   iterationSteps?: 4 | 6 | 8;
+  videoDuration?: 4 | 6;
+  videoResolution?: '480p' | '720p';
   loraWeights?: Record<string, number>;
   loraPresets?: LoraPreset[];
 }
@@ -35,6 +37,24 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
   const steps = params.iterationSteps ?? 6;
   if (workflow?.input?.workflow?.['44']?.inputs) {
     workflow.input.workflow['44'].inputs.steps = steps;
+  }
+
+  // Configure video duration (default 4 seconds = 81 frames)
+  const duration = params.videoDuration ?? 4;
+  const frames = duration === 6 ? 121 : 81;
+  if (workflow?.input?.workflow?.['10']?.inputs) {
+    workflow.input.workflow['10'].inputs.length = frames;
+  }
+
+  // Configure video resolution (default 480p)
+  const resolution = params.videoResolution ?? '480p';
+  const longSide = resolution === '720p' ? 1280 : 832;
+  const shortSide = resolution === '720p' ? 720 : 480;
+  if (workflow?.input?.workflow?.['26']?.inputs) {
+    workflow.input.workflow['26'].inputs.value = longSide;
+  }
+  if (workflow?.input?.workflow?.['27']?.inputs) {
+    workflow.input.workflow['27'].inputs.value = shortSide;
   }
 
   // Override LoRA strengths when provided and dynamically build chains

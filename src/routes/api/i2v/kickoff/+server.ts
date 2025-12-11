@@ -35,6 +35,27 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       iterationSteps = parsedSteps as IterationSteps;
     }
 
+    // Extract video duration (4 or 6 seconds)
+    const videoDurationRaw = body?.videoDuration;
+    const parsedDuration = Number(videoDurationRaw);
+    const allowedDurations = [4, 6] as const;
+    type VideoDuration = (typeof allowedDurations)[number];
+    let videoDuration: VideoDuration | undefined;
+
+    if (Number.isFinite(parsedDuration) && allowedDurations.includes(parsedDuration as VideoDuration)) {
+      videoDuration = parsedDuration as VideoDuration;
+    }
+
+    // Extract video resolution (480p or 720p)
+    const videoResolution = body?.videoResolution;
+    const allowedResolutions = ['480p', '720p'] as const;
+    type VideoResolution = (typeof allowedResolutions)[number];
+    let resolution: VideoResolution | undefined;
+
+    if (videoResolution && allowedResolutions.includes(videoResolution)) {
+      resolution = videoResolution as VideoResolution;
+    }
+
     // Get admin settings for thresholds
     const settings = await getAdminSettings();
 
@@ -51,12 +72,26 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
+    // Get user roles for feature enforcement
+    const roles = locals.user?.roles || [];
+
     // Enforce role requirement for detailed (8-step) runs
     if (iterationSteps === 8) {
-      const roles = locals.user?.roles || [];
       if (!roles.includes('paid-user')) {
         return new Response(JSON.stringify({ 
           error: 'Detailed mode (8 steps) is available to paid users only.' 
+        }), { 
+          status: 403, 
+          headers: { 'Content-Type': 'application/json' } 
+        });
+      }
+    }
+
+    // Enforce role requirement for 720p resolution
+    if (resolution === '720p') {
+      if (!roles.includes('paid-user')) {
+        return new Response(JSON.stringify({ 
+          error: '720p resolution is available to paid users only.' 
         }), { 
           status: 403, 
           headers: { 'Content-Type': 'application/json' } 
@@ -171,6 +206,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       seed: Math.floor(Math.random() * 1000000),
       callback_url: callbackUrl,
       iterationSteps,
+      videoDuration,
+      videoResolution: resolution,
       loraWeights: typeof loraWeights === 'object' && loraWeights !== null ? loraWeights : undefined,
       loraPresets: settings.loraPresets,
     });

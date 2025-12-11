@@ -32,10 +32,26 @@
   let stepOptions: { value: IterationSteps; label: string; description: string; requiresPaid?: boolean }[] = [];
 
   let iterationSteps: IterationSteps = 4;
+  
+  type VideoDuration = 4 | 6;
+  type VideoResolution = '480p' | '720p';
+  let videoDuration: VideoDuration = 4;
+  let videoResolution: VideoResolution = '480p';
+  
+  let resolutionOptions: { value: VideoResolution; label: string; description: string; requiresPaid?: boolean }[] = [
+    { value: '480p', label: '', description: '', requiresPaid: false },
+    { value: '720p', label: '', description: '', requiresPaid: true },
+  ];
 
   $: canUseQuality = userRoles.includes('paid-user');
   $: visibleStepOptions = canUseQuality ? stepOptions : stepOptions.filter((o) => !o.requiresPaid);
+  $: visibleResolutionOptions = canUseQuality ? resolutionOptions : resolutionOptions.filter((o) => !o.requiresPaid);
   $: if (!canUseQuality && iterationSteps === 8) iterationSteps = 4;
+  $: if (!canUseQuality && videoResolution === '720p') videoResolution = '480p';
+  $: resolutionOptions = [
+    { value: '480p', label: get(_)('review.resolution.standard'), description: get(_)('review.resolution.standardDesc'), requiresPaid: false },
+    { value: '720p', label: get(_)('review.resolution.hd'), description: get(_)('review.resolution.hdDesc'), requiresPaid: true },
+  ];
   $: stepOptions = [
     { value: 4, label: get(_)('review.iteration.fast'), description: get(_)('review.iteration.steps.fast'), requiresPaid: false },
     { value: 6, label: get(_)('review.iteration.balanced'), description: get(_)('review.iteration.steps.balanced'), requiresPaid: false },
@@ -144,8 +160,7 @@
   } = createTagsInput({
     defaultTags: entry.tags || [],
     unique: true,
-    trim: true,
-    disabled: !isEditable
+    trim: true
   });
 
   async function generate() {
@@ -177,7 +192,9 @@
           prompt, 
           tags: $tags.map(t => t.value),
           loraWeights,
-          iterationSteps
+          iterationSteps,
+          videoDuration,
+          videoResolution
         }),
       });
       
@@ -374,6 +391,76 @@
               {/each}
             </div>
           </div>
+          
+          <div class="divider"></div>
+          
+          <!-- Video Duration -->
+          <div class="space-y-4 mb-6">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold">{$_('review.duration.title')}</h3>
+              <span class="text-xs opacity-70">{$_('review.duration.help')}</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label class="btn btn-outline flex items-center gap-3 justify-start" class:btn-active={videoDuration === 4}>
+                <input
+                  type="radio"
+                  name="video-duration"
+                  value={4}
+                  checked={videoDuration === 4}
+                  on:change={() => videoDuration = 4}
+                  disabled={!isEditable}
+                />
+                <div>
+                  <div class="font-semibold">{$_('review.duration.short')}</div>
+                  <div class="text-xs opacity-70">{$_('review.duration.shortDesc')}</div>
+                </div>
+              </label>
+              <label class="btn btn-outline flex items-center gap-3 justify-start" class:btn-active={videoDuration === 6}>
+                <input
+                  type="radio"
+                  name="video-duration"
+                  value={6}
+                  checked={videoDuration === 6}
+                  on:change={() => videoDuration = 6}
+                  disabled={!isEditable}
+                />
+                <div>
+                  <div class="font-semibold">{$_('review.duration.long')}</div>
+                  <div class="text-xs opacity-70">{$_('review.duration.longDesc')}</div>
+                </div>
+              </label>
+            </div>
+          </div>
+          
+          <div class="divider"></div>
+          
+          <!-- Video Resolution -->
+          <div class="space-y-4 mb-6">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold">{$_('review.resolution.title')}</h3>
+              <span class="text-xs opacity-70">{$_('review.resolution.help')}</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {#each visibleResolutionOptions as option}
+                <label class="btn btn-outline flex items-center gap-3 justify-start" class:btn-active={videoResolution === option.value}>
+                  <input
+                    type="radio"
+                    name="video-resolution"
+                    value={option.value}
+                    checked={videoResolution === option.value}
+                    on:change={() => videoResolution = option.value}
+                    disabled={!isEditable}
+                  />
+                  <div>
+                    <div class="font-semibold">{option.label}</div>
+                    <div class="text-xs opacity-70">{option.description}</div>
+                  </div>
+                </label>
+              {/each}
+            </div>
+          </div>
+          
+          <div class="divider"></div>
           <div class="flex items-center justify-between mb-2">
             <h3 class="font-semibold">{$_('review.loraWeights')}</h3>
             <button class="btn btn-ghost btn-sm" on:click={resetLoraWeights} disabled={!isEditable}>{$_('review.reset')}</button>

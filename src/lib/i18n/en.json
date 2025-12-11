@@ -113,6 +113,10 @@
       "all": "All Videos",
       "liked": "My Liked"
     },
+    "sort": {
+      "date": "Latest",
+      "likes": "Most Liked"
+    },
     "empty": {
       "noVideos": "No published videos yet",
       "noLiked": "No liked videos yet",
@@ -233,6 +237,23 @@
         "quality": "8 steps"
       }
     },
+    "duration": {
+      "title": "Video Duration",
+      "help": "Choose video length",
+      "short": "4 seconds",
+      "shortDesc": "81 frames",
+      "long": "6 seconds",
+      "longDesc": "121 frames"
+    },
+    "resolution": {
+      "title": "Video Resolution",
+      "help": "Choose output quality",
+      "standard": "480p",
+      "standardDesc": "Standard quality",
+      "hd": "720p",
+      "hdDesc": "High definition"
+    },
+    "paidOnly": "Paid",
     "loraWeights": "LoRA Weights",
     "loraWeightsHelp": "Tune how strongly each LoRA influences the generation.",
     "reset": "Reset",

@@ -79,7 +79,7 @@ export class PostgresDatabase implements IDatabase {
   }
 
   async getPublishedVideos(options?: import('./IDatabase').GetPublishedVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
-    const { page = 1, pageSize = 12, likedBy, currentUserId, excludeId, status, isNsfw } = options || {};
+    const { page = 1, pageSize = 12, likedBy, currentUserId, excludeId, status, isNsfw, sortBy = 'date' } = options || {};
     const skip = (page - 1) * pageSize;
     
     const where: any = { isPublished: true, status: { not: 'deleted' } };
@@ -108,16 +108,25 @@ export class PostgresDatabase implements IDatabase {
       where.isNsfw = isNsfw;
     }
     
+    // Determine sort order
+    const orderBy = sortBy === 'likes' 
+      ? { likes: { _count: 'desc' as const } }
+      : { createdAt: 'desc' as const };
+    
     const [videos, total] = await Promise.all([
       this.prisma.video.findMany({
         where,
         include: {
-          likes: true,
+          // Only include likes from the current user to check isLiked status
+          likes: currentUserId ? {
+            where: { userId: currentUserId },
+            select: { userId: true }
+          } : false,
           _count: {
             select: { likes: true }
           }
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take: pageSize,
       }),
@@ -128,7 +137,7 @@ export class PostgresDatabase implements IDatabase {
       videos: videos.map((v) => ({
         ...this.mapToVideoEntry(v),
         likesCount: v._count.likes,
-        isLiked: currentUserId ? v.likes.some(like => like.userId === currentUserId) : false
+        isLiked: currentUserId ? v.likes.length > 0 : false
       })),
       total,
       page,
@@ -258,6 +267,35 @@ export class PostgresDatabase implements IDatabase {
       },
     });
     return !!like;
+  }
+
+  async getDailyQuotaUsage(userId: string, date: Date): Promise<number> {
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+    
+    // Count videos that consumed quota:
+    // 1. Status is completed, in_queue, or processing
+    // 2. Status is deleted AND finalVideoUrl is not null (was successfully processed before deletion)
+    const count = await this.prisma.video.count({
+      where: {
+        userId,
+        createdAt: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+        OR: [
+          { status: { in: ['completed', 'in_queue', 'processing'] } },
+          { 
+            status: 'deleted',
+            finalVideoUrl: { not: null }
+          }
+        ]
+      }
+    });
+    
+    return count;
   }
 
   // ==================== User Methods ====================
@@ -410,7 +448,7 @@ export class PostgresDatabase implements IDatabase {
         data: {
           id: 'default',
           registrationEnabled: true,
-          quotaPerDay: { "free": 10, "gmgard-user": 50, "paid": 100, "premium": 100 },
+          quotaPerDay: { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 },
           maxConcurrentJobs: 5,
           maxQueueThreshold: 5000,
           loraPresets: DEFAULT_LORA_PRESETS,
@@ -436,7 +474,7 @@ export class PostgresDatabase implements IDatabase {
       create: {
         id: 'default',
         registrationEnabled: patch.registrationEnabled ?? true,
-        quotaPerDay: patch.quotaPerDay ?? { "free": 10, "gmgard-user": 50, "paid": 100, "premium": 100 },
+        quotaPerDay: patch.quotaPerDay ?? { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 },
         maxConcurrentJobs: patch.maxConcurrentJobs ?? 5,
         maxQueueThreshold: patch.maxQueueThreshold ?? 5000,
         loraPresets: normalizeLoraPresets(patch.loraPresets) ?? DEFAULT_LORA_PRESETS,
@@ -500,7 +538,7 @@ export class PostgresDatabase implements IDatabase {
     // Parse quotaPerDay if it's a string, otherwise use as-is
     const quotaPerDay = typeof settings.quotaPerDay === 'string' 
       ? JSON.parse(settings.quotaPerDay) 
-      : (settings.quotaPerDay || { "free": 10, "gmgard-user": 50, "paid": 100, "premium": 100 });
+      : (settings.quotaPerDay || { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 });
     
     return {
       id: settings.id,

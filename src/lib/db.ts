@@ -82,6 +82,10 @@ export async function isVideoLikedByUser(videoId: string, userId: string) {
   return db.isVideoLikedByUser(videoId, userId);
 }
 
+export async function getDailyQuotaUsage(userId: string, date: Date) {
+  return db.getDailyQuotaUsage(userId, date);
+}
+
 // ==================== User Functions ====================
 
 export async function createUser(username: string, password_hash: string, email?: string, roles?: string[]) {
@@ -148,13 +152,13 @@ export async function deleteUserSessions(userId: string) {
 
 /**
  * Check if a user has exceeded their daily video generation quota
- * @param user The user to check
+ * @param user The user to check (only id and roles needed)
  * @param settings Admin settings containing quota limits
  * @returns {exceeded: boolean, limit: number, used: number}
  */
-export async function checkDailyQuota(user: User, settings: AdminSettings): Promise<{exceeded: boolean, limit: number, used: number}> {
+export async function checkDailyQuota(user: Pick<User, 'id' | 'roles'>, settings: AdminSettings): Promise<{exceeded: boolean, limit: number, used: number}> {
   // Determine quota limit based on user roles
-  let dailyLimit = settings.quotaPerDay['free'] || 10; // Default for free users
+  let dailyLimit = settings.quotaPerDay['free-tier'] || 10; // Default for free tier
   
   // Check roles in priority order: paid/premium > gmgard-user > free
   for (const role of user.roles) {
@@ -164,31 +168,13 @@ export async function checkDailyQuota(user: User, settings: AdminSettings): Prom
     }
   }
   
-  // Get user's videos from today (include deleted to count toward quota)
-  const userVideos = await db.getVideosByUser(user.id, 1, 1000, { includeDeleted: true });
-  
-  // Count videos created today that consumed quota
-  // Count: completed, in_queue, processing, or deleted (if it has final_video_url = was successfully processed)
-  // Exclude: uploaded (never queued), failed, deleted without final_video_url
+  // Get quota usage for today
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  
-  const todayVideos = userVideos.videos.filter(v => {
-    const createdAt = new Date(v.created_at);
-    if (createdAt < today) return false;
-    
-    if (v.status === 'deleted') {
-      // Only count deleted if it was successfully processed (has final_video_url)
-      return !!v.final_video_url;
-    }
-    
-    // Count if in: completed, in_queue, processing
-    return ['completed', 'in_queue', 'processing'].includes(v.status);
-  });
+  const used = await db.getDailyQuotaUsage(user.id, today);
   
   return {
-    exceeded: todayVideos.length >= dailyLimit,
+    exceeded: used >= dailyLimit,
     limit: dailyLimit,
-    used: todayVideos.length
+    used
   };
 }

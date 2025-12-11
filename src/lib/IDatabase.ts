@@ -42,7 +42,7 @@ import type { LoraPreset } from './loraPresets';
 export type AdminSettings = {
   id: string;
   registrationEnabled: boolean;
-  quotaPerDay: Record<string, number>; // Role-based quota map, e.g. { "free": 10, "gmgard-user": 50, "paid": 100 }
+  quotaPerDay: Record<string, number>; // Role-based quota map, e.g. { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 }
   maxConcurrentJobs: number;
   maxQueueThreshold: number;
   loraPresets?: LoraPreset[];
@@ -69,6 +69,7 @@ export type GetPublishedVideosOptions = {
   excludeId?: string;
   status?: VideoEntry['status'];
   isNsfw?: boolean;
+  sortBy?: 'date' | 'likes'; // Sort by creation date or like count
 };
 
 export interface IDatabase {
@@ -83,6 +84,7 @@ export interface IDatabase {
   toggleLike(videoId: string, userId: string): Promise<VideoEntry | null>;
   getLikeCount(videoId: string): Promise<number>;
   isVideoLikedByUser(videoId: string, userId: string): Promise<boolean>;
+  getDailyQuotaUsage(userId: string, date: Date): Promise<number>;
   
   // User methods
   createUser(username: string, password_hash: string, email?: string, roles?: string[]): Promise<User>;

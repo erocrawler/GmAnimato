@@ -59,6 +59,7 @@ model Video {
   @@index([userId])
   @@index([status])
   @@index([isPublished])
+  @@index([isPublished, createdAt])
   @@map("videos")
 }
 
