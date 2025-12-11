@@ -72,7 +72,7 @@ export class PostgresDatabase implements IDatabase {
           in: ['in_queue', 'processing'],
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { processingStartedAt: 'desc' },
     });
 
     return videos.map(this.mapToVideoEntry);
@@ -111,7 +111,7 @@ export class PostgresDatabase implements IDatabase {
     // Determine sort order
     const orderBy = sortBy === 'likes' 
       ? { likes: { _count: 'desc' as const } }
-      : { createdAt: 'desc' as const };
+      : [{ processingStartedAt: 'desc' as const }, { createdAt: 'desc' as const }];
     
     const [videos, total] = await Promise.all([
       this.prisma.video.findMany({
@@ -278,10 +278,11 @@ export class PostgresDatabase implements IDatabase {
     // Count videos that consumed quota:
     // 1. Status is completed, in_queue, or processing
     // 2. Status is deleted AND finalVideoUrl is not null (was successfully processed before deletion)
+    // Count by processingStartedAt (when job was submitted)
     const count = await this.prisma.video.count({
       where: {
         userId,
-        createdAt: {
+        processingStartedAt: {
           gte: startOfDay,
           lte: endOfDay,
         },
