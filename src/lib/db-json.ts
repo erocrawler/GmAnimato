@@ -41,6 +41,55 @@ export class JsonFileDatabase implements IDatabase {
     return row;
   }
 
+  async getAllVideos(options?: import('./IDatabase').GetAllVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
+    const { page = 1, pageSize = 30, userId, username, status, includeDeleted = false } = options || {};
+    const rows = await this.readAll();
+    
+    // Get all users to add username to videos
+    const users = await this.readAllUsers();
+    const usersMap = new Map(users.map(u => [u.id, { username: u.username }]));
+    
+    // Filter videos
+    let filtered = rows.filter((r) => {
+      // Filter by deleted status
+      if (!includeDeleted && r.status === 'deleted') return false;
+      
+      // Filter by userId
+      if (userId && r.user_id !== userId) return false;
+      
+      // Filter by username (partial match, case-insensitive)
+      if (username) {
+        const user = usersMap.get(r.user_id);
+        if (!user || !user.username.toLowerCase().includes(username.toLowerCase())) {
+          return false;
+        }
+      }
+      
+      // Filter by status
+      if (status && r.status !== status) return false;
+      
+      return true;
+    });
+    
+    // Sort by created_at descending (newest first)
+    filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    
+    const total = filtered.length;
+    const skip = (page - 1) * pageSize;
+    const videos = filtered.slice(skip, skip + pageSize).map(v => ({
+      ...v,
+      username: usersMap.get(v.user_id)?.username || 'Unknown'
+    }));
+    
+    return {
+      videos,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize)
+    };
+  }
+
   async getVideosByUser(user_id: string, page: number = 1, pageSize: number = 12, options?: import('./IDatabase').GetVideosByUserOptions): Promise<import('./IDatabase').PaginatedVideos> {
     const rows = await this.readAll();
     const includeDeleted = options?.includeDeleted ?? false;

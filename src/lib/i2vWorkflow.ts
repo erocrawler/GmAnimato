@@ -21,11 +21,12 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
   const templatePath = params.templatePath || path.resolve('data/api_template.json.tmpl');
   let template = await fs.readFile(templatePath, 'utf-8');
 
-  // Replace placeholders
-  template = template.replace(/{image_name}/g, params.image_name);
-  template = template.replace(/{image_url}/g, params.image_url);
-  template = template.replace(/{input_prompt}/g, params.input_prompt);
-  template = template.replace(/{seed}/g, String(params.seed));
+  // Sanitize and replace placeholders using JSON.stringify to properly escape values
+  // slice(1, -1) removes the outer quotes that JSON.stringify adds
+  template = template.replace(/{image_name}/g, JSON.stringify(params.image_name).slice(1, -1));
+  template = template.replace(/{image_url}/g, JSON.stringify(params.image_url).slice(1, -1));
+  template = template.replace(/{input_prompt}/g, JSON.stringify(params.input_prompt).slice(1, -1));
+  template = template.replace(/{seed}/g, String(Math.floor(params.seed))); // Ensure seed is a valid integer
 
   const workflow = JSON.parse(template);
   

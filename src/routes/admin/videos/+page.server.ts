@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
-import { getAllUsers, getVideosByUser } from '$lib/db';
+import { getAllVideos } from '$lib/db';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
   // Check if user is logged in and is admin
@@ -14,50 +14,25 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
   const page = parseInt(url.searchParams.get('page') || '1');
   const pageSize = 30;
-  const statusFilter = url.searchParams.get('status') || '';
-  const userFilter = url.searchParams.get('user') || '';
+  const statusFilter = url.searchParams.get('status') || undefined;
+  const userFilter = url.searchParams.get('user') || undefined;
 
-  // Get all users to build video list
-  const allUsers = await getAllUsers();
-  
-  // Collect all videos from all users
-  const allVideosPromises = allUsers.map(async (user) => {
-    const result = await getVideosByUser(user.id, 1, 1000, { includeDeleted: true }); // Count and show deleted videos too
-    return result.videos.map(v => ({
-      ...v,
-      username: user.username,
-    }));
+  // Use the optimized getAllVideos function with filters
+  const result = await getAllVideos({
+    page,
+    pageSize,
+    status: statusFilter as any,
+    username: userFilter,
+    includeDeleted: true
   });
-  
-  const allVideosNested = await Promise.all(allVideosPromises);
-  let allVideos = allVideosNested.flat();
-
-  // Filter by status
-  if (statusFilter) {
-    allVideos = allVideos.filter(v => v.status === statusFilter);
-  }
-
-  // Filter by user
-  if (userFilter) {
-    allVideos = allVideos.filter(v => v.username.toLowerCase().includes(userFilter.toLowerCase()));
-  }
-
-  // Sort by created_at descending
-  allVideos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-  const total = allVideos.length;
-  const totalPages = Math.ceil(total / pageSize);
-  const start = (page - 1) * pageSize;
-  const end = start + pageSize;
-  const videos = allVideos.slice(start, end);
 
   return {
-    videos,
-    page,
-    totalPages,
-    total,
-    pageSize,
-    statusFilter,
-    userFilter,
+    videos: result.videos,
+    page: result.page,
+    totalPages: result.totalPages,
+    total: result.total,
+    pageSize: result.pageSize,
+    statusFilter: statusFilter || '',
+    userFilter: userFilter || '',
   };
 };

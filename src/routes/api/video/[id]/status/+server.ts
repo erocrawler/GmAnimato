@@ -31,6 +31,17 @@ export const GET: RequestHandler = async ({ params }) => {
         headers: { 'Content-Type': 'application/json' } 
       });
     }
+    // If video is in_queue or processing but has no job_id, reset to uploaded
+    if ((video.status === 'in_queue' || video.status === 'processing') && !video.job_id) {
+      console.log(`[Status Poll] Video ${video.id} is ${video.status} but has no job_id, resetting to uploaded`);
+      await updateVideo(video.id, { status: 'uploaded', processing_started_at: undefined });
+      return new Response(JSON.stringify({ 
+        status: 'uploaded'
+      }), { 
+        headers: { 'Content-Type': 'application/json' } 
+      });
+    }
+
     // If video is in_queue or processing and we have a job_id, poll RunPod
     if ((video.status === 'in_queue' || video.status === 'processing') && video.job_id) {
       // Check if processing has timed out (longer than 1 hour)

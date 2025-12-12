@@ -17,6 +17,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const existing = await getVideoById(id);
     if (!existing) return new Response(JSON.stringify({ error: 'not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
+    // Check ownership (admins can kickoff any video)
+    const isAdmin = locals.user?.roles?.includes('admin');
+    if (locals.user && existing.user_id !== locals.user.id && !isAdmin) {
+      return new Response(JSON.stringify({ error: 'access denied' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    }
+
     if (existing.status === 'processing' || existing.status === 'in_queue') {
       return new Response(JSON.stringify({ error: 'already processing' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }

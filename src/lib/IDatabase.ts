@@ -72,9 +72,19 @@ export type GetPublishedVideosOptions = {
   sortBy?: 'date' | 'likes'; // Sort by creation date or like count
 };
 
+export type GetAllVideosOptions = {
+  page?: number;
+  pageSize?: number;
+  userId?: string; // Filter by user ID
+  username?: string; // Filter by username (partial match)
+  status?: VideoEntry['status']; // Filter by status
+  includeDeleted?: boolean; // Include deleted videos
+};
+
 export interface IDatabase {
   // Video methods
   createVideoEntry(entry: Omit<VideoEntry, 'id' | 'created_at'> & { id?: string }): Promise<VideoEntry>;
+  getAllVideos(options?: GetAllVideosOptions): Promise<PaginatedVideos>;
   getVideosByUser(user_id: string, page?: number, pageSize?: number, options?: GetVideosByUserOptions): Promise<PaginatedVideos>;
   getActiveJobsByUser(user_id: string): Promise<VideoEntry[]>;
   getPublishedVideos(options?: GetPublishedVideosOptions): Promise<PaginatedVideos>;

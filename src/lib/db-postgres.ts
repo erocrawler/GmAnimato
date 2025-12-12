@@ -36,6 +36,66 @@ export class PostgresDatabase implements IDatabase {
     return this.mapToVideoEntry(video);
   }
 
+  async getAllVideos(options?: import('./IDatabase').GetAllVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
+    const { page = 1, pageSize = 30, userId, username, status, includeDeleted = false } = options || {};
+    const skip = (page - 1) * pageSize;
+    
+    const where: any = {};
+    
+    // Filter by deleted status
+    if (!includeDeleted) {
+      where.status = { not: 'deleted' };
+    }
+    
+    // Filter by userId
+    if (userId) {
+      where.userId = userId;
+    }
+    
+    // Filter by username (partial match, case-insensitive)
+    if (username) {
+      where.user = {
+        username: {
+          contains: username,
+          mode: 'insensitive'
+        }
+      };
+    }
+    
+    // Filter by status
+    if (status) {
+      where.status = status;
+    }
+    
+    const [videos, total] = await Promise.all([
+      this.prisma.video.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              username: true
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.video.count({ where })
+    ]);
+
+    return {
+      videos: videos.map((v) => ({
+        ...this.mapToVideoEntry(v),
+        username: v.user.username
+      })),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize)
+    };
+  }
+
   async getVideosByUser(user_id: string, page: number = 1, pageSize: number = 12, options?: import('./IDatabase').GetVideosByUserOptions): Promise<import('./IDatabase').PaginatedVideos> {
     const skip = (page - 1) * pageSize;
     const includeDeleted = options?.includeDeleted ?? false;
