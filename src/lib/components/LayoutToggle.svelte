@@ -1,19 +1,13 @@
+
 <script lang="ts">
-  type LayoutMode = 'grid' | 'compact';
-
-  interface Props {
-    layout: LayoutMode;
-    onChange: (layout: LayoutMode) => void;
-  }
-
-  let { layout, onChange }: Props = $props();
+  import { layoutMode, type LayoutMode } from '$lib/stores/layoutMode';
 </script>
 
 <div class="btn-group">
   <button 
     class="btn btn-sm" 
-    class:btn-active={layout === 'grid'}
-    onclick={() => onChange('grid')}
+    class:btn-active={$layoutMode === 'grid'}
+    onclick={() => layoutMode.set('grid')}
     aria-label="Grid view"
     title="Grid view"
   >
@@ -23,8 +17,8 @@
   </button>
   <button 
     class="btn btn-sm" 
-    class:btn-active={layout === 'compact'}
-    onclick={() => onChange('compact')}
+    class:btn-active={$layoutMode === 'compact'}
+    onclick={() => layoutMode.set('compact')}
     aria-label="Compact view"
     title="Compact view"
   >

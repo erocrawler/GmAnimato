@@ -92,7 +92,7 @@
   <div class="flex justify-between items-center mb-8">
     <h1 class="text-4xl font-bold">{$_('videos.title')}</h1>
     <div class="flex gap-4 items-center">
-      <LayoutToggle layout={layout} onChange={(l) => layout = l} />
+      <LayoutToggle />
       <a href="/new" class="btn btn-primary">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -105,7 +105,7 @@
   <VideoList
     videos={videos}
     type="user"
-    bind:layout={layout}
+
     loading={loading}
     pageSize={data.pageSize}
     emptyMessage={$_('videos.empty.message')}

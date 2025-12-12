@@ -14,10 +14,11 @@ interface WorkflowParams {
   videoResolution?: '480p' | '720p';
   loraWeights?: Record<string, number>;
   loraPresets?: LoraPreset[];
+  templatePath?: string;
 }
 
 export async function buildWorkflow(params: WorkflowParams): Promise<object> {
-  const templatePath = path.resolve('data/api_template.json.tmpl');
+  const templatePath = params.templatePath || path.resolve('data/api_template.json.tmpl');
   let template = await fs.readFile(templatePath, 'utf-8');
 
   // Replace placeholders

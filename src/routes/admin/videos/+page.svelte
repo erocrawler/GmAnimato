@@ -111,7 +111,7 @@
     <div class="card-body">
       <div class="flex justify-between items-center mb-4">
         <h2 class="card-title">{$_('admin.videos.filters')}</h2>
-        <LayoutToggle layout={layout} onChange={(l) => layout = l} />
+        <LayoutToggle />
       </div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="form-control">
@@ -154,7 +154,7 @@
   <VideoList
     videos={data.videos}
     type="admin"
-    bind:layout={layout}
+
     pageSize={data.pageSize}
     emptyMessage={$_('admin.videos.noVideos')}
     onDelete={deleteVideo}

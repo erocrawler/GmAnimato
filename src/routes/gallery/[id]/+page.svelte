@@ -3,10 +3,14 @@
   
   let { data } = $props<{ data: { video: any; user?: any; relatedVideos: any[]; author?: { id: string; username: string } | null } }>();
   let video = $state(data.video);
+  $effect(() => {
+    video = data.video;
+  });
+  const likesCount = $derived(video.likesCount || 0);
+  const isLiked = $derived(video.isLiked || false);
   let showOriginal = $state(false);
 
-  let likesCount = $state(video.likesCount || 0);
-  let isLiked = $state(video.isLiked || false);
+  // ...existing code...
 
   async function toggleLike() {
     try {
@@ -16,8 +20,7 @@
       
       if (res.ok) {
         const result = await res.json();
-        likesCount = result.likesCount;
-        isLiked = result.isLiked;
+        video = { ...video, likesCount: result.likesCount, isLiked: result.isLiked };
       }
     } catch (err) {
       console.error('Failed to toggle like:', err);
@@ -25,20 +28,21 @@
   }
   const authorName = $derived(data.author?.username ?? $_('videoDetail.unknownAuthor'));
 
-  function buildGalleryUrl() {
-    if (typeof window === 'undefined') return '/gallery';
-    
+  function buildGalleryUrl(id?: string) {
+    if (typeof window === 'undefined') return id ? `/gallery/${id}` : '/gallery';
+
     const params = new URLSearchParams(window.location.search);
     const sort = params.get('sort');
     const page = params.get('page');
     const filter = params.get('filter');
-    
+
     const galleryParams = new URLSearchParams();
     if (sort) galleryParams.set('sort', sort);
     if (page) galleryParams.set('page', page);
     if (filter) galleryParams.set('filter', filter);
-    
-    return galleryParams.toString() ? `/gallery?${galleryParams.toString()}` : '/gallery';
+
+    const base = id ? `/gallery/${id}` : '/gallery';
+    return galleryParams.toString() ? `${base}?${galleryParams.toString()}` : base;
   }
 </script>
 
@@ -175,10 +179,10 @@
   <!-- More Videos -->
   {#if data.relatedVideos && data.relatedVideos.length > 0}
     <div class="mt-12">
-      <h2 class="text-2xl font-bold mb-6">More Videos</h2>
+      <h2 class="text-2xl font-bold mb-6">{$_('videoDetail.moreVideos')}</h2>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {#each data.relatedVideos as v}
-          <a href="/gallery/{v.id}" class="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow cursor-pointer">
+          <a href={buildGalleryUrl(v.id)} class="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow cursor-pointer">
             {#if v.original_image_url}
               <figure class="aspect-video bg-base-200">
                 <img src={v.original_image_url} alt={v.prompt || 'Video thumbnail'} class="w-full h-full object-cover" />

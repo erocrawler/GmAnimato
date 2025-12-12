@@ -2,13 +2,11 @@ import type { PageServerLoad } from './$types';
 import { getVideoById, getPublishedVideos, getUserById, getLikeCount, isVideoLikedByUser } from '$lib/db';
 import { error } from '@sveltejs/kit';
 
-export const load: PageServerLoad = async ({ params, locals }) => {
+export const load: PageServerLoad = async ({ params, locals, url }) => {
   const video = await getVideoById(params.id);
-  
   if (!video) {
     throw error(404, 'Video not found');
   }
-
   // Only show published videos in gallery
   if (!video.is_published) {
     throw error(404, 'Video not found');
@@ -18,14 +16,27 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   const likesCount = await getLikeCount(video.id);
   const isLiked = locals.user ? await isVideoLikedByUser(video.id, locals.user.id) : false;
 
-  // Get other published videos for "More Videos" section (exclude current video, only completed)
-  const relatedVideosPage = await getPublishedVideos({
-    page: 1,
-    pageSize: 4,
-    excludeId: params.id,
-    status: 'completed'
+  // Determine sort order and page from query or default
+  const sortBy = (url?.searchParams?.get('sort') as 'date' | 'likes') || 'date';
+  const page = parseInt(url?.searchParams?.get('page') || '1', 10);
+  const pageSize = 12; // match your gallery page size
+
+  // Fetch current and next page
+  const videosPage1 = await getPublishedVideos({
+    page,
+    pageSize,
+    status: 'completed',
+    sortBy
   });
-  const relatedVideos = relatedVideosPage.videos;
+  const videosPage2 = await getPublishedVideos({
+    page: page + 1,
+    pageSize,
+    status: 'completed',
+    sortBy
+  });
+  const allVideos = [...videosPage1.videos, ...videosPage2.videos];
+  const currentIdx = allVideos.findIndex(v => v.id === params.id);
+  const relatedVideos = currentIdx !== -1 ? allVideos.slice(currentIdx + 1, currentIdx + 5) : allVideos.slice(0, 4);
 
   // Fetch author basic info
   const author = video.user_id ? await getUserById(video.user_id) : undefined;
@@ -35,7 +46,6 @@ export const load: PageServerLoad = async ({ params, locals }) => {
         username: author.username,
       }
     : null;
-  
   return {
     video: { ...video, likesCount, isLiked },
     user: locals.user || null,

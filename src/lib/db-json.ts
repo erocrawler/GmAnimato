@@ -71,7 +71,7 @@ export class JsonFileDatabase implements IDatabase {
   }
 
   async getPublishedVideos(options?: import('./IDatabase').GetPublishedVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
-    const { page = 1, pageSize = 12, likedBy, excludeId, status, isNsfw, sortBy = 'date' } = options || {};
+    const { page = 1, pageSize = 12, likedBy, excludeId, status, isNsfw, sortBy = 'date', afterValue } = options || {};
     const rows = await this.readAll();
     let filtered = rows.filter((r) => r.is_published);
     
@@ -100,6 +100,14 @@ export class JsonFileDatabase implements IDatabase {
       filtered.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
     } else {
       filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+
+    // Cursor-based pagination: skip up to and including afterValue (video id)
+    if (afterValue) {
+      const idx = filtered.findIndex((v) => v.id === afterValue);
+      if (idx !== -1) {
+        filtered = filtered.slice(idx + 1);
+      }
     }
     
     const total = filtered.length;

@@ -9,7 +9,6 @@
   let { data } = $props<{ data: { videos: any[]; user?: any; page: number; totalPages: number; total: number; filter: string; sortBy: 'date' | 'likes' } }>();
   let videos = $state(data.videos);
   let loading = $state(false);
-  let layout = $state<'grid' | 'compact'>('grid');
 
   const queryParams = $derived(() => {
     const params = new URLSearchParams();
@@ -81,7 +80,7 @@
       </div>
       <div class="flex gap-4 items-center">
         <!-- Layout toggle -->
-        <LayoutToggle layout={layout} onChange={(l) => layout = l} />
+        <LayoutToggle />
         
         <!-- Sort selector -->
         <div class="form-control">
@@ -123,7 +122,7 @@
   <VideoList
     videos={videos}
     type="gallery"
-    bind:layout={layout}
+
     loading={loading}
     pageSize={data.pageSize}
     queryParams={queryParams()}

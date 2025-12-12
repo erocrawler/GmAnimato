@@ -210,6 +210,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       videoResolution: resolution,
       loraWeights: typeof loraWeights === 'object' && loraWeights !== null ? loraWeights : undefined,
       loraPresets: settings.loraPresets,
+      templatePath: env.I2V_WORKFLOW_TEMPLATE_PATH,
     });
 
     let jobId: string | undefined;
