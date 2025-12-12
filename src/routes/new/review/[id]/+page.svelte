@@ -58,6 +58,18 @@
     { value: 8, label: get(_)('review.iteration.quality'), description: get(_)('review.iteration.steps.quality'), requiresPaid: true },
   ];
 
+
+  // Track enabled state for each LoRA
+  let loraEnabled: Record<string, boolean> = Object.fromEntries(
+    LORA_PRESETS.map((lora) => [
+      lora.id,
+      lora.isConfigurable === false
+        ? true
+        : lora.enabled !== undefined
+          ? lora.enabled
+          : true
+    ])
+  );
   let loraWeights: Record<string, number> = Object.fromEntries(
     LORA_PRESETS.map((lora) => [lora.id, lora.default])
   );
@@ -141,6 +153,7 @@
     }
   });
 
+
   function updateLoraWeight(id: string, value: number) {
     const preset = LORA_PRESETS.find((p) => p.id === id);
     const min = preset?.min ?? 0;
@@ -149,8 +162,25 @@
     loraWeights = { ...loraWeights, [id]: clamped };
   }
 
+  function toggleLoraEnabled(id: string) {
+    const preset = LORA_PRESETS.find((p) => p.id === id);
+    if (preset && preset.isConfigurable !== false) {
+      loraEnabled = { ...loraEnabled, [id]: !loraEnabled[id] };
+    }
+  }
+
   function resetLoraWeights() {
     loraWeights = Object.fromEntries(LORA_PRESETS.map((lora) => [lora.id, lora.default]));
+    loraEnabled = Object.fromEntries(
+      LORA_PRESETS.map((lora) => [
+        lora.id,
+        lora.isConfigurable === false
+          ? true
+          : lora.enabled !== undefined
+            ? lora.enabled
+            : true
+      ])
+    );
   }
 
   const {
@@ -184,6 +214,10 @@
       }
       
       // Kickoff the I2V job with updated prompt and tags
+      // Only include enabled LoRAs
+      const filteredLoraWeights = Object.fromEntries(
+        Object.entries(loraWeights).filter(([id]) => loraEnabled[id])
+      );
       const res = await fetch("/api/i2v/kickoff", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -191,7 +225,7 @@
           id: entry.id, 
           prompt, 
           tags: $tags.map(t => t.value),
-          loraWeights,
+          loraWeights: filteredLoraWeights,
           iterationSteps,
           videoDuration,
           videoResolution
@@ -472,6 +506,20 @@
                 <div class="flex items-center justify-between text-sm">
                   <span>{lora.label}</span>
                   <span class="opacity-70">{(loraWeights[lora.id] ?? lora.default).toFixed(2)}</span>
+                  {#if lora.isConfigurable !== false}
+                    <label class="flex items-center gap-2 ml-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        class="toggle toggle-primary toggle-xs"
+                        checked={loraEnabled[lora.id]}
+                        on:change={() => toggleLoraEnabled(lora.id)}
+                        disabled={!isEditable}
+                      />
+                      <span class="text-xs select-none">{$_('review.loraEnabled')}</span>
+                    </label>
+                  {:else}
+                    <span class="badge badge-xs badge-ghost ml-2">required</span>
+                  {/if}
                 </div>
                 <input
                   type="range"
@@ -480,7 +528,7 @@
                   step={lora.step ?? 0.05}
                   value={loraWeights[lora.id] ?? lora.default}
                   on:input={(event) => updateLoraWeight(lora.id, +event.currentTarget.value)}
-                  disabled={!isEditable}
+                  disabled={!isEditable || lora.isConfigurable !== false && !loraEnabled[lora.id]}
                   class="range range-sm"
                 />
               </div>

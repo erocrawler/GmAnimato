@@ -8,6 +8,7 @@ export type LoraPreset = {
   step?: number;
   chain?: 'high' | 'low'; // which model chain this LoRA belongs to
   isConfigurable?: boolean; // false for base LoRAs that must always be present
+  enabled?: boolean; // whether this LoRA is enabled by default (for review page)
 };
 
 export const DEFAULT_LORA_PRESETS: LoraPreset[] = [
@@ -33,5 +34,6 @@ export function normalizeLoraPresets(list?: LoraPreset[]): LoraPreset[] {
       step: typeof item.step === 'number' ? item.step : 0.05,
       chain: item.chain || 'high',
       isConfigurable: item.isConfigurable !== false,
+      enabled: typeof item.enabled === 'boolean' ? item.enabled : true,
     }));
 }

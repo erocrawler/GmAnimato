@@ -258,6 +258,7 @@
     "paidOnly": "付费",
     "loraWeights": "LoRA权重",
     "loraWeightsHelp": "调整每个LoRA对生成的影响强度。",
+    "loraEnabled": "启用",
     "reset": "重置",
     "generateVideo": "生成视频",
     "submitting": "提交中...",

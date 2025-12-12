@@ -84,6 +84,7 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
     // Build dynamic chains for configurable LoRAs
     const highChain = configurablePresets.filter((p) => p.chain === 'high');
     const lowChain = configurablePresets.filter((p) => p.chain === 'low');
+    console.log('Building LoRA chains:', { highChain, lowChain });
     
     // High noise chain: starts from node 67 output, feeds into node 21
     let highPrevNodeId = '67';
@@ -92,22 +93,23 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
       const nodeId = `61:dyn${highNodeCounter}`;
       highNodeCounter++;
       
-      const weight = params.loraWeights[preset.id];
-      const strength = typeof weight === 'number' && Number.isFinite(weight) ? weight : preset.default;
-      
-      workflow.input.workflow[nodeId] = {
-        inputs: {
-          lora_name: preset.id,
-          strength_model: strength,
-          model: [highPrevNodeId, 0],
-        },
-        class_type: 'LoraLoaderModelOnly',
-        _meta: {
-          title: preset.label || preset.id,
-        },
-      };
-      
-      highPrevNodeId = nodeId;
+      // Only add if present in loraWeights (enabled)
+      if (Object.prototype.hasOwnProperty.call(params.loraWeights, preset.id)) {
+        const weight = params.loraWeights[preset.id];
+        const strength = typeof weight === 'number' && Number.isFinite(weight) ? weight : preset.default;
+        workflow.input.workflow[nodeId] = {
+          inputs: {
+            lora_name: preset.id,
+            strength_model: strength,
+            model: [highPrevNodeId, 0],
+          },
+          class_type: 'LoraLoaderModelOnly',
+          _meta: {
+            title: preset.label || preset.id,
+          },
+        };
+        highPrevNodeId = nodeId;
+      }
     }
     
     // Update node 21 to consume the last high chain node
@@ -122,22 +124,23 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
       const nodeId = `60:dyn${lowNodeCounter}`;
       lowNodeCounter++;
       
-      const weight = params.loraWeights[preset.id];
-      const strength = typeof weight === 'number' && Number.isFinite(weight) ? weight : preset.default;
-      
-      workflow.input.workflow[nodeId] = {
-        inputs: {
-          lora_name: preset.id,
-          strength_model: strength,
-          model: [lowPrevNodeId, 0],
-        },
-        class_type: 'LoraLoaderModelOnly',
-        _meta: {
-          title: preset.label || preset.id,
-        },
-      };
-      
-      lowPrevNodeId = nodeId;
+      // Only add if present in loraWeights (enabled)
+      if (Object.prototype.hasOwnProperty.call(params.loraWeights, preset.id)) {
+        const weight = params.loraWeights[preset.id];
+        const strength = typeof weight === 'number' && Number.isFinite(weight) ? weight : preset.default;
+        workflow.input.workflow[nodeId] = {
+          inputs: {
+            lora_name: preset.id,
+            strength_model: strength,
+            model: [lowPrevNodeId, 0],
+          },
+          class_type: 'LoraLoaderModelOnly',
+          _meta: {
+            title: preset.label || preset.id,
+          },
+        };
+        lowPrevNodeId = nodeId;
+      }
     }
     
     // Update node 22 to consume the last low chain node

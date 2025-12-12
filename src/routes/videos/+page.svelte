@@ -105,7 +105,6 @@
   <VideoList
     videos={videos}
     type="user"
-
     loading={loading}
     pageSize={data.pageSize}
     emptyMessage={$_('videos.empty.message')}

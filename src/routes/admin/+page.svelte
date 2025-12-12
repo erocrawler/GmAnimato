@@ -40,6 +40,9 @@
         min: p.min !== undefined ? Number(p.min) : 0,
         max: p.max !== undefined ? Number(p.max) : 1.5,
         step: p.step !== undefined ? Number(p.step) : 0.05,
+        chain: p.chain === 'low' ? 'low' : 'high', // default to 'high' if missing or invalid
+        isConfigurable: p.isConfigurable !== false, // default to true
+        enabled: p.isConfigurable === false ? true : (p.enabled !== false), // default true for configurable, always true for base
       }));
   }
   
@@ -65,7 +68,12 @@
       if (response.ok) {
         message = '✓ Settings saved successfully';
         setTimeout(() => message = '', 3000);
-        settings = await response.json();
+        // Ensure loraPresets are sanitized after save (for dropdown)
+        const newSettings = await response.json();
+        settings = {
+          ...newSettings,
+          loraPresets: sanitizeLoraPresets(newSettings.loraPresets)
+        };
       } else {
         const error = await response.json();
         message = '✗ Error: ' + (error.error || 'Failed to save settings');
@@ -202,6 +210,7 @@
       step: 0.05,
       chain: 'high' as const,
       isConfigurable: true,
+      enabled: true,
     };
     settings = {
       ...settings,
@@ -215,12 +224,14 @@
     settings = { ...settings, loraPresets: list };
   }
 
-  function updateLoraPreset(index: number, field: string, value: string | number) {
+  function updateLoraPreset(index: number, field: string, value: string | number | boolean) {
     const list = [...(settings.loraPresets || [])];
     if (!list[index]) return;
     const preset = { ...list[index] } as any;
     if (['default', 'min', 'max', 'step'].includes(field)) {
       preset[field] = Number(value);
+    } else if (field === 'enabled') {
+      preset[field] = Boolean(value);
     } else {
       preset[field] = value;
     }
@@ -340,18 +351,18 @@
               <tr>
                 <th style="min-width: 220px;">ID / Filename</th>
                 <th style="min-width: 200px;">Label</th>
-                <th>Chain</th>
-                <th>Default</th>
-                <th>Min</th>
-                <th>Max</th>
-                <th>Step</th>
-                <th></th>
+                <th style="min-width: 120px;">Chain</th>
+                <th style="width: 40px;">Default</th>
+                <th style="width: 40px;">Min</th>
+                <th style="width: 40px;">Max</th>
+                <th style="width: 40px;">Step</th>
+                <th style="width: 80px;">Configurable</th>
               </tr>
             </thead>
             <tbody>
               {#each settings.loraPresets as preset, i}
                 <tr class:opacity-60={!preset.isConfigurable}>
-                  <td>
+                  <td style="max-width: 260px; word-break: break-all; white-space: normal;">
                     {#if preset.isConfigurable}
                       <input
                         type="text"
@@ -359,9 +370,10 @@
                         value={preset.id}
                         oninput={(e) => updateLoraPreset(i, 'id', e.currentTarget.value)}
                         placeholder="lora-file.safetensors"
+                        style="word-break: break-all; white-space: normal;"
                       />
                     {:else}
-                      <span class="font-mono text-sm">{preset.id}</span>
+                      <span class="font-mono text-sm break-all" style="word-break: break-all; white-space: normal;">{preset.id}</span>
                       <span class="badge badge-sm badge-ghost ml-2">base</span>
                     {/if}
                   </td>
@@ -381,7 +393,7 @@
                   <td>
                     {#if preset.isConfigurable}
                       <select
-                        class="select select-bordered select-sm w-full max-w-[100px]"
+                        class="select select-bordered select-sm w-full max-w-[140px]"
                         value={preset.chain}
                         onchange={(e) => updateLoraPreset(i, 'chain', e.currentTarget.value)}
                       >
@@ -396,7 +408,7 @@
                     {#if preset.isConfigurable}
                       <input
                         type="number"
-                        class="input input-bordered w-24"
+                        class="input input-bordered w-16"
                         value={preset.default}
                         min="0"
                         step="0.01"
@@ -410,7 +422,7 @@
                     {#if preset.isConfigurable}
                       <input
                         type="number"
-                        class="input input-bordered w-20"
+                        class="input input-bordered w-12"
                         value={preset.min ?? 0}
                         step="0.01"
                         oninput={(e) => updateLoraPreset(i, 'min', Number(e.currentTarget.value))}
@@ -423,7 +435,7 @@
                     {#if preset.isConfigurable}
                       <input
                         type="number"
-                        class="input input-bordered w-20"
+                        class="input input-bordered w-12"
                         value={preset.max ?? 1.5}
                         step="0.01"
                         oninput={(e) => updateLoraPreset(i, 'max', Number(e.currentTarget.value))}
@@ -436,7 +448,7 @@
                     {#if preset.isConfigurable}
                       <input
                         type="number"
-                        class="input input-bordered w-20"
+                        class="input input-bordered w-12"
                         value={preset.step ?? 0.05}
                         step="0.01"
                         min="0.001"
@@ -446,14 +458,25 @@
                       {preset.step ?? 0.05}
                     {/if}
                   </td>
-                  <td>
-                    {#if preset.isConfigurable}
-                      <button class="btn btn-xs btn-outline btn-error" onclick={() => removeLoraPreset(i)}>Remove</button>
-                    {:else}
-                      <span class="text-xs text-base-content/50">—</span>
-                    {/if}
-                  </td>
+                <td class="align-middle text-center">
+                  <label class="flex items-center gap-2 justify-center">
+                    <input type="checkbox" class="toggle toggle-primary toggle-xs" checked={preset.isConfigurable !== false} onchange={(e) => updateLoraPreset(i, 'isConfigurable', e.currentTarget.checked ? true : false)} />
+                  </label>
+                </td>
                 </tr>
+                {#if preset.isConfigurable}
+                  <tr class:opacity-60={!preset.isConfigurable}>
+                    <td colspan="6">
+                      <label class="flex items-center gap-2 mt-1">
+                        <input type="checkbox" class="toggle toggle-primary toggle-xs" checked={preset.enabled !== false} onchange={(e) => updateLoraPreset(i, 'enabled', e.currentTarget.checked ? true : false)} />
+                        <span class="text-xs select-none">Enabled by default</span>
+                      </label>
+                    </td>
+                  <td colspan="2">
+                    <button class="btn btn-xs btn-outline btn-error ml-2" onclick={() => removeLoraPreset(i)}>Remove</button>
+                  </td>
+                  </tr>
+                {/if}
               {/each}
             </tbody>
           </table>

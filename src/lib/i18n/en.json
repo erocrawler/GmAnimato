@@ -259,6 +259,7 @@
     "paidOnly": "Paid",
     "loraWeights": "LoRA Weights",
     "loraWeightsHelp": "Tune how strongly each LoRA influences the generation.",
+    "loraEnabled": "Enabled",
     "reset": "Reset",
     "generateVideo": "Generate Video",
     "submitting": "Submitting...",
