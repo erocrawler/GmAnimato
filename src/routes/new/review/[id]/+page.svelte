@@ -21,6 +21,7 @@
   let busyModalMessage = "";
   let pollInterval: ReturnType<typeof setInterval> | null = null;
   let showAdvancedSettings = false;
+  let progressPercentage: number | null = null;
 
   const LORA_PRESETS: LoraPreset[] = (data.loraPresets && data.loraPresets.length > 0)
     ? data.loraPresets
@@ -90,6 +91,13 @@
         // Update entry status from server response
         if (statusData.status && statusData.status !== entry.status) {
           entry = { ...entry, status: statusData.status };
+        }
+        
+        // Update progress information
+        if (typeof statusData.progress_percentage === 'number') {
+          progressPercentage = statusData.progress_percentage;
+        } else {
+          progressPercentage = null;
         }
 
         // If job is completed, redirect to videos page
@@ -311,6 +319,18 @@
       {$_(`videos.status.${entry.status}`) || entry.status}
     </div>
   </div>
+
+  {#if (entry.status === 'processing' || entry.status === 'in_queue') && progressPercentage !== null}
+    <div class="alert alert-info shadow-lg mb-6">
+      <div class="flex flex-col w-full gap-2">
+        <div class="flex justify-between items-center">
+          <span class="font-semibold">{$_('review.processing')}</span>
+          <span class="text-sm">{progressPercentage.toFixed(1)}%</span>
+        </div>
+        <progress class="progress progress-primary w-full" value={progressPercentage} max="100"></progress>
+      </div>
+    </div>
+  {/if}
 
   {#if message}
     <div class="alert alert-info shadow-lg mb-6">

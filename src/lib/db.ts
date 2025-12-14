@@ -90,6 +90,22 @@ export async function getDailyQuotaUsage(userId: string, date: Date) {
   return db.getDailyQuotaUsage(userId, date);
 }
 
+export async function getLocalQueueLength() {
+  return db.getLocalQueueLength();
+}
+
+export async function getOldestLocalJob() {
+  return db.getOldestLocalJob();
+}
+
+export async function claimLocalJob() {
+  return db.claimLocalJob();
+}
+
+export async function getLocalJobStats() {
+  return db.getLocalJobStats();
+}
+
 // ==================== User Functions ====================
 
 export async function createUser(username: string, password_hash: string, email?: string, roles?: string[]) {

@@ -187,6 +187,16 @@
               <p class="text-sm line-clamp-2 mb-2">{v.prompt}</p>
             {/if}
             
+            {#if (v.status === 'processing' || v.status === 'in_queue') && v.progress_percentage !== null && v.progress_percentage !== undefined}
+              <div class="mb-2">
+                <div class="flex justify-between text-xs mb-1">
+                  <span>{$_('review.processing')}</span>
+                  <span>{v.progress_percentage.toFixed(0)}%</span>
+                </div>
+                <progress class="progress progress-primary w-full {$layoutMode === 'compact' ? 'progress-sm' : ''}" value={v.progress_percentage} max="100"></progress>
+              </div>
+            {/if}
+            
             {#if v.status === "completed"}
               <div class="card-actions justify-end mt-auto gap-1">
                 <a href="{type === 'admin' ? '/videos/' : '/videos/'}{v.id}" class="btn {$layoutMode === 'compact' ? 'btn-xs' : 'btn-sm'} btn-primary">{$_('videos.actions.view')}</a>

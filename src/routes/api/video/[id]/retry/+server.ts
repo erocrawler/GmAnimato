@@ -1,9 +1,41 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { getVideoById, updateVideo } from '$lib/db';
+import { getVideoById, updateVideo, getAdminSettings } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { getRunPodConfig, retryRunPodJob, getRunPodJobStatus, mapRunPodStatus, submitRunPodJob } from '$lib/runpod';
+import { buildWorkflow } from '$lib/i2vWorkflow';
 
-export const POST: RequestHandler = async ({ params }) => {
+/**
+ * Helper to submit a new RunPod job for a video
+ * Uses stored workflow parameters from the original job submission
+ */
+async function submitNewRunPodJob(runpodConfig: any, video: any, origin: string) {
+  const settings = await getAdminSettings();
+  const callbackUrl = `${origin}/api/i2v-webhook/${video.id}`;
+
+  // Use stored parameters from the video, or defaults if not available
+  const iterationSteps = video.iteration_steps as (4 | 6 | 8) | undefined;
+  const videoDuration = video.video_duration as (4 | 6) | undefined;
+  const videoResolution = video.video_resolution as ('480p' | '720p') | undefined;
+
+  // Build the workflow from template with callback URL
+  const payload = await buildWorkflow({
+    image_name: `${video.id}.png`,
+    image_url: video.original_image_url,
+    input_prompt: video.prompt ?? 'A beautiful video',
+    seed: video.seed ?? Math.floor(Math.random() * 1000000),
+    callback_url: callbackUrl,
+    iterationSteps,
+    videoDuration,
+    videoResolution,
+    loraWeights: video.lora_weights,
+    loraPresets: settings.loraPresets,
+    templatePath: env.I2V_WORKFLOW_TEMPLATE_PATH,
+  });
+
+  return await submitRunPodJob(runpodConfig, payload);
+}
+
+export const POST: RequestHandler = async ({ params, request }) => {
   try {
     const id = params.id;
     if (!id) {
@@ -36,6 +68,8 @@ export const POST: RequestHandler = async ({ params }) => {
       });
     }
 
+    // Always use RunPod for retry, even if original was a local job
+    // This provides better reliability for failed jobs
     const runpodConfig = getRunPodConfig({
       RUNPOD_ENDPOINT_URL: env.RUNPOD_ENDPOINT_URL,
       RUNPOD_API_KEY: env.RUNPOD_API_KEY
@@ -48,6 +82,40 @@ export const POST: RequestHandler = async ({ params }) => {
       });
     }
 
+    const origin = new URL(request.url).origin;
+
+    // If this was a local job, we need to submit it as a new RunPod job
+    if (video.is_local_job) {
+      console.log(`[Retry] Converting failed local job ${video.job_id} to RunPod job`);
+      
+      try {
+        const newJob = await submitNewRunPodJob(runpodConfig, video, origin);
+        
+        // Update video with new job ID, set as remote job, and status
+        await updateVideo(id, { 
+          status: 'in_queue',
+          job_id: newJob.id,
+          is_local_job: false
+        });
+        
+        return new Response(JSON.stringify({ 
+          success: true, 
+          message: 'Failed local job submitted to RunPod',
+          job_id: newJob.id,
+          status: 'in_queue',
+          is_local: false
+        }), { 
+          headers: { 'Content-Type': 'application/json' } 
+        });
+      } catch (err) {
+        console.error('[Retry] Error submitting local job to RunPod:', err);
+        return new Response(JSON.stringify({ error: String(err) }), { 
+          status: 500, 
+          headers: { 'Content-Type': 'application/json' } 
+        });
+      }
+    }
+
     try {
       // Check current job status first
       let jobStatus;
@@ -58,21 +126,13 @@ export const POST: RequestHandler = async ({ params }) => {
         if (String(statusErr).includes('404')) {
           console.log(`[Retry] Job ${video.job_id} not found (404), submitting as new job`);
           
-          // Build payload from video data
-          const payload = {
-            input: {
-              image_url: video.original_image_url,
-              prompt: video.prompt || '',
-              // Add other fields if needed
-            }
-          };
+          const newJob = await submitNewRunPodJob(runpodConfig, video, origin);
           
-          const newJob = await submitRunPodJob(runpodConfig, payload);
-          
-          // Update video with new job ID and status
+          // Update video with new job ID, status, and ensure it's marked as remote
           await updateVideo(id, { 
             status: 'in_queue',
-            job_id: newJob.id 
+            job_id: newJob.id,
+            is_local_job: false
           });
           
           return new Response(JSON.stringify({ 

@@ -322,7 +322,17 @@
           </label>
           <input id="max-queue" type="number" bind:value={settings.maxQueueThreshold} class="input input-bordered" min="100" />
         </div>
+        
+        <div class="form-control">
+          <label class="label" for="local-queue-threshold">
+            <span class="label-text">Local Queue Threshold</span>
+            <span class="label-text-alt text-xs opacity-70">(0 = disabled, >0 = enabled)</span>
+          </label>
+          <input id="local-queue-threshold" type="number" bind:value={settings.localQueueThreshold} class="input input-bordered" min="0" />
+        </div>
       </div>
+      
+      <p class="text-xs opacity-60 mt-3">Jobs are routed to local workers when queue is below this threshold</p>
       
       <div class="card-actions justify-end mt-4">
         <button class="btn btn-primary" onclick={saveSettings} disabled={saving}>
@@ -497,8 +507,50 @@
           <span class="loading loading-spinner loading-lg"></span>
         </div>
       {:else if queueStatus}
+        <!-- Local Queue Status -->
+        {#if queueStatus.localQueue}
+          <div class="mb-4">
+            <h3 class="text-lg font-semibold mb-3">Local Queue Status</h3>
+            
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div class="stat bg-base-100 rounded-box">
+                <div class="stat-title text-xs">Queue Length</div>
+                <div class="stat-value text-lg text-primary">{queueStatus.localQueue.length}</div>
+              </div>
+              
+              <div class="stat bg-base-100 rounded-box">
+                <div class="stat-title text-xs">In Queue</div>
+                <div class="stat-value text-lg text-warning">{queueStatus.localQueue.inQueue || 0}</div>
+              </div>
+              
+              <div class="stat bg-base-100 rounded-box">
+                <div class="stat-title text-xs">Processing</div>
+                <div class="stat-value text-lg text-info">{queueStatus.localQueue.processing || 0}</div>
+              </div>
+              
+              <div class="stat bg-base-100 rounded-box">
+                <div class="stat-title text-xs">Completed</div>
+                <div class="stat-value text-lg text-success">{queueStatus.localQueue.completed || 0}</div>
+              </div>
+              
+              <div class="stat bg-base-100 rounded-box">
+                <div class="stat-title text-xs">Failed</div>
+                <div class="stat-value text-lg text-error">{queueStatus.localQueue.failed || 0}</div>
+              </div>
+            </div>
+          </div>
+          <div class="mb-4">
+            <div class="alert" class:alert-success={queueStatus.localQueue.enabled} class:alert-warning={!queueStatus.localQueue.enabled}>
+              <span>
+                Status: {queueStatus.localQueue.enabled ? '✓ Enabled' : '⚠ Disabled'}
+                <br /><small>Threshold: {queueStatus.localQueue.threshold}</small>
+              </span>
+            </div>
+          </div>
+        {/if}
+        
         <div class="mb-6">
-          <h3 class="text-lg font-semibold mb-3">Job Statistics</h3>
+          <h3 class="text-lg font-semibold mb-3">RunPod Job Statistics</h3>
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div class="stat bg-base-100 rounded-box">
               <div class="stat-title">In Queue</div>

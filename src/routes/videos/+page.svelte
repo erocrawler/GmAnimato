@@ -13,7 +13,7 @@
   let pollInterval: ReturnType<typeof setInterval> | null = null;
   
   async function pollActiveVideos() {
-    const activeVideos = videos.filter(v => v.status === 'in_queue' || v.status === 'processing');
+    const activeVideos = videos.filter((v: any) => v.status === 'in_queue' || v.status === 'processing');
     
     if (activeVideos.length === 0) {
       return;
@@ -26,10 +26,16 @@
           const statusData = await res.json();
           console.log(`[Video List Poll] Status for ${video.id}:`, statusData);
           
-          // Update the video in the list if status changed
-          if (statusData.status && statusData.status !== video.status) {
-            videos = videos.map(v => 
-              v.id === video.id ? { ...v, status: statusData.status } : v
+          // Update the video in the list if status or progress changed
+          if (statusData.status !== video.status || 
+              statusData.progress_percentage !== video.progress_percentage) {
+            videos = videos.map((v: any) => 
+              v.id === video.id ? { 
+                ...v, 
+                status: statusData.status,
+                progress_percentage: statusData.progress_percentage,
+                progress_details: statusData.progress_details
+              } : v
             );
           }
         }
@@ -40,7 +46,7 @@
   }
 
   onMount(() => {
-    const hasActiveVideos = videos.some(v => v.status === 'in_queue' || v.status === 'processing');
+    const hasActiveVideos = videos.some((v: any) => v.status === 'in_queue' || v.status === 'processing');
     if (hasActiveVideos) {
       pollActiveVideos(); // Initial poll
       pollInterval = setInterval(pollActiveVideos, 10000); // Poll every 10 seconds

@@ -1,7 +1,8 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { getVideoById, updateVideo } from '$lib/db';
 import { env } from '$env/dynamic/private';
-import { getRunPodConfig, getRunPodJobStatus, mapRunPodStatus, extractVideoUrl, PROCESSING_TIMEOUT_MS } from '$lib/runpod';
+import { getRunPodConfig, mapRunPodStatus, extractVideoUrl, PROCESSING_TIMEOUT_MS } from '$lib/runpod';
+import { getJobStatus } from '$lib/local-queue';
 
 export const GET: RequestHandler = async ({ params }) => {
   try {
@@ -42,9 +43,9 @@ export const GET: RequestHandler = async ({ params }) => {
       });
     }
 
-    // If video is in_queue or processing and we have a job_id, poll RunPod
+    // If video is in_queue or processing and we have a job_id, poll for status
     if ((video.status === 'in_queue' || video.status === 'processing') && video.job_id) {
-      // Check if processing has timed out (longer than 1 hour)
+      // Check if processing has timed out (longer than 30 minutes)
       if (video.processing_started_at) {
         const processingStartedAt = new Date(video.processing_started_at).getTime();
         const now = Date.now();
@@ -62,6 +63,21 @@ export const GET: RequestHandler = async ({ params }) => {
         }
       }
       
+      // For local jobs, just return the current DB status
+      if (video.is_local_job) {
+        console.log(`[Status Poll] Returning local job status for video ${video.id}: ${video.status}`);
+        return new Response(JSON.stringify({ 
+          status: video.status,
+          is_local: true,
+          final_video_url: video.final_video_url,
+          progress_percentage: video.progress_percentage,
+          progress_details: video.progress_details
+        }), { 
+          headers: { 'Content-Type': 'application/json' } 
+        });
+      }
+      
+      // For RunPod jobs, query the API
       const runpodConfig = getRunPodConfig({
         RUNPOD_ENDPOINT_URL: env.RUNPOD_ENDPOINT_URL,
         RUNPOD_API_KEY: env.RUNPOD_API_KEY
@@ -77,7 +93,7 @@ export const GET: RequestHandler = async ({ params }) => {
       }
 
       try {
-        const statusData = await getRunPodJobStatus(runpodConfig, video.job_id);
+        const statusData = await getJobStatus(runpodConfig, video);
         
         // Map RunPod status to internal status
         const mappedStatus = mapRunPodStatus(statusData.status);
@@ -100,11 +116,12 @@ export const GET: RequestHandler = async ({ params }) => {
           });
         }
 
-        // Return the RunPod status along with our video status
+        // Return the status along with our video status
         return new Response(JSON.stringify({ 
           status: mappedStatus,
           job_status: statusData.status,
-          job_data: statusData
+          job_data: statusData,
+          is_local: false
         }), { 
           headers: { 'Content-Type': 'application/json' } 
         });

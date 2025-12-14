@@ -36,6 +36,28 @@ export const POST: RequestHandler = async ({ request, params }) => {
 
     const patch: any = { status, job_id };
     
+    // Handle progress updates
+    const progress = body?.progress as any | undefined;
+    if (progress && typeof progress === 'object') {
+      if (typeof progress.percentage === 'number') {
+        patch.progress_percentage = progress.percentage;
+      }
+      // Store detailed progress info
+      patch.progress_details = {
+        completed_nodes: progress.completed_nodes,
+        total_nodes: progress.total_nodes,
+        current_node: progress.current_node,
+        current_node_progress: progress.current_node_progress
+      };
+      console.log(`[Webhook] Progress update for video ${id}: ${progress.percentage}% (${progress.completed_nodes}/${progress.total_nodes} nodes)`);
+    }
+    
+    // Clear progress when job completes or fails
+    if (status === 'completed' || status === 'failed') {
+      patch.progress_percentage = null;
+      patch.progress_details = null;
+    }
+    
     // Calculate processing time if we have a start time
     if (existing.processing_started_at && status.toLowerCase() === 'completed') {
       const startTime = new Date(existing.processing_started_at).getTime();

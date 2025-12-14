@@ -265,6 +265,7 @@
     "submitting": "Submitting...",
     "queued": "Queued...",
     "processing": "Processing...",
+    "progressDetails": "Node {completed} of {total}",
     "retryGeneration": "Retry Generation",
     "continueSetup": "Continue Setup",
     "viewStatus": "View Status",

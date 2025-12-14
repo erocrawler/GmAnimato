@@ -264,6 +264,7 @@
     "submitting": "提交中...",
     "queued": "排队中...",
     "processing": "处理中...",
+    "progressDetails": "节点 {completed} / {total}",
     "retryGeneration": "重试生成",
     "continueSetup": "继续设置",
     "viewStatus": "查看状态",

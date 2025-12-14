@@ -28,8 +28,14 @@ export class PostgresDatabase implements IDatabase {
         isNsfw: entry.is_nsfw,
         status: entry.status,
         jobId: entry.job_id,
+        isLocalJob: entry.is_local_job ?? false,
         finalVideoUrl: entry.final_video_url,
         isPublished: entry.is_published ?? false,
+        iterationSteps: entry.iteration_steps,
+        videoDuration: entry.video_duration,
+        videoResolution: entry.video_resolution,
+        loraWeights: entry.lora_weights,
+        seed: entry.seed,
       },
     });
 
@@ -227,10 +233,18 @@ export class PostgresDatabase implements IDatabase {
       if (patch.is_nsfw !== undefined) data.isNsfw = patch.is_nsfw;
       if (patch.status !== undefined) data.status = patch.status;
       if (patch.job_id !== undefined) data.jobId = patch.job_id;
+      if (patch.is_local_job !== undefined) data.isLocalJob = patch.is_local_job;
       if (patch.final_video_url !== undefined) data.finalVideoUrl = patch.final_video_url;
       if (patch.is_published !== undefined) data.isPublished = patch.is_published;
       if (patch.processing_time_ms !== undefined) data.processingTimeMs = patch.processing_time_ms;
       if (patch.processing_started_at !== undefined) data.processingStartedAt = patch.processing_started_at ? new Date(patch.processing_started_at) : null;
+      if (patch.progress_percentage !== undefined) data.progressPercentage = patch.progress_percentage;
+      if (patch.progress_details !== undefined) data.progressDetails = patch.progress_details;
+      if (patch.iteration_steps !== undefined) data.iterationSteps = patch.iteration_steps;
+      if (patch.video_duration !== undefined) data.videoDuration = patch.video_duration;
+      if (patch.video_resolution !== undefined) data.videoResolution = patch.video_resolution;
+      if (patch.lora_weights !== undefined) data.loraWeights = patch.lora_weights;
+      if (patch.seed !== undefined) data.seed = patch.seed;
       // Note: likes are handled via toggleLike method now
 
       const video = await this.prisma.video.update({
@@ -357,6 +371,101 @@ export class PostgresDatabase implements IDatabase {
     });
     
     return count;
+  }
+
+  async getLocalQueueLength(): Promise<number> {
+    const count = await this.prisma.video.count({
+      where: {
+        isLocalJob: true,
+        status: 'in_queue'
+      }
+    });
+    return count;
+  }
+
+  async getOldestLocalJob(): Promise<VideoEntry | null> {
+    const video = await this.prisma.video.findFirst({
+      where: {
+        isLocalJob: true,
+        status: 'in_queue'
+      },
+      orderBy: {
+        createdAt: 'asc'
+      }
+    });
+    return video ? this.mapToVideoEntry(video) : null;
+  }
+
+  async claimLocalJob(): Promise<VideoEntry | null> {
+    // Use a transaction to atomically find and update a job
+    // This prevents race conditions where two workers claim the same job
+    try {
+      const video = await this.prisma.$transaction(async (tx) => {
+        // Find the oldest job in queue with FOR UPDATE lock
+        const job = await tx.$queryRaw<Array<{id: string}>>`
+          SELECT id FROM videos 
+          WHERE is_local_job = true AND status = 'in_queue'
+          ORDER BY created_at ASC
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED
+        `;
+
+        if (!job || job.length === 0) {
+          return null;
+        }
+
+        const jobId = job[0].id;
+
+        // Update the job status to processing
+        const updated = await tx.video.update({
+          where: { id: jobId },
+          data: { status: 'processing' }
+        });
+
+        return updated;
+      });
+
+      return video ? this.mapToVideoEntry(video) : null;
+    } catch (error) {
+      console.error('[DB] Error claiming local job:', error);
+      return null;
+    }
+  }
+
+  async getLocalJobStats(): Promise<{ inQueue: number; processing: number; completed: number; failed: number }> {
+    try {
+      const stats = await this.prisma.$queryRaw<Array<{
+        status: string;
+        count: number;
+      }>>`
+        SELECT status, COUNT(*)::int as count
+        FROM videos
+        WHERE is_local_job = true AND status IN ('in_queue', 'processing', 'completed', 'failed')
+        GROUP BY status
+      `;
+
+      let inQueue = 0;
+      let processing = 0;
+      let completed = 0;
+      let failed = 0;
+
+      stats.forEach(stat => {
+        if (stat.status === 'in_queue') {
+          inQueue = stat.count;
+        } else if (stat.status === 'processing') {
+          processing = stat.count;
+        } else if (stat.status === 'completed') {
+          completed = stat.count;
+        } else if (stat.status === 'failed') {
+          failed = stat.count;
+        }
+      });
+
+      return { inQueue, processing, completed, failed };
+    } catch (error) {
+      console.error('[DB] Error getting local job stats:', error);
+      return { inQueue: 0, processing: 0, completed: 0, failed: 0 };
+    }
   }
 
   // ==================== User Methods ====================
@@ -527,6 +636,7 @@ export class PostgresDatabase implements IDatabase {
     if (patch.quotaPerDay !== undefined) data.quotaPerDay = patch.quotaPerDay;
     if (patch.maxConcurrentJobs !== undefined) data.maxConcurrentJobs = patch.maxConcurrentJobs;
     if (patch.maxQueueThreshold !== undefined) data.maxQueueThreshold = patch.maxQueueThreshold;
+    if (patch.localQueueThreshold !== undefined) data.localQueueThreshold = patch.localQueueThreshold;
     if (patch.loraPresets !== undefined) data.loraPresets = normalizeLoraPresets(patch.loraPresets);
 
     const settings = await this.prisma.adminSettings.upsert({
@@ -538,6 +648,7 @@ export class PostgresDatabase implements IDatabase {
         quotaPerDay: patch.quotaPerDay ?? { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 },
         maxConcurrentJobs: patch.maxConcurrentJobs ?? 5,
         maxQueueThreshold: patch.maxQueueThreshold ?? 5000,
+        localQueueThreshold: patch.localQueueThreshold ?? 0,
         loraPresets: normalizeLoraPresets(patch.loraPresets) ?? DEFAULT_LORA_PRESETS,
       },
     });
@@ -574,10 +685,18 @@ export class PostgresDatabase implements IDatabase {
       is_nsfw: video.isNsfw ?? undefined,
       status: video.status as VideoEntry['status'],
       job_id: video.jobId || undefined,
+      is_local_job: video.isLocalJob ?? undefined,
       final_video_url: video.finalVideoUrl || undefined,
       is_published: video.isPublished || undefined,
       processing_time_ms: video.processingTimeMs ?? undefined,
       processing_started_at: video.processingStartedAt ? video.processingStartedAt.toISOString() : undefined,
+      progress_percentage: video.progressPercentage ?? undefined,
+      progress_details: video.progressDetails || undefined,
+      iteration_steps: video.iterationSteps ?? undefined,
+      video_duration: video.videoDuration ?? undefined,
+      video_resolution: video.videoResolution || undefined,
+      lora_weights: video.loraWeights || undefined,
+      seed: video.seed ?? undefined,
       likes: [], // Deprecated - use getLikeCount() and isVideoLikedByUser() instead
       created_at: video.createdAt.toISOString(),
     };
@@ -607,6 +726,7 @@ export class PostgresDatabase implements IDatabase {
       quotaPerDay,
       maxConcurrentJobs: settings.maxConcurrentJobs,
       maxQueueThreshold: settings.maxQueueThreshold,
+      localQueueThreshold: settings.localQueueThreshold,
       loraPresets: normalizeLoraPresets(settings.loraPresets ?? DEFAULT_LORA_PRESETS),
       updatedAt: settings.updatedAt.toISOString(),
     };

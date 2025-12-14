@@ -9,10 +9,23 @@ export type VideoEntry = {
   is_nsfw?: boolean;
   status: 'uploaded' | 'in_queue' | 'processing' | 'completed' | 'failed' | 'deleted';
   job_id?: string; // RunPod job ID for status polling
+  is_local_job?: boolean; // Whether this is a local job or RunPod job
   final_video_url?: string;
   is_published?: boolean;
   processing_time_ms?: number; // Time taken to process in milliseconds
   processing_started_at?: string; // ISO timestamp when job was submitted
+  progress_percentage?: number; // Overall workflow progress (0-100)
+  progress_details?: {
+    completed_nodes?: number;
+    total_nodes?: number;
+    current_node?: string;
+    current_node_progress?: number;
+  };
+  iteration_steps?: number; // 4, 6, or 8 steps
+  video_duration?: number; // 4 or 6 seconds
+  video_resolution?: string; // '480p' or '720p'
+  lora_weights?: Record<string, number>; // LoRA weights for customization
+  seed?: number; // Random seed for reproducibility
   likes?: string[]; // Array of user_ids who liked this video
   created_at: string;
 };
@@ -45,6 +58,7 @@ export type AdminSettings = {
   quotaPerDay: Record<string, number>; // Role-based quota map, e.g. { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 }
   maxConcurrentJobs: number;
   maxQueueThreshold: number;
+  localQueueThreshold: number;
   loraPresets?: LoraPreset[];
   updatedAt?: string;
 };
@@ -95,6 +109,10 @@ export interface IDatabase {
   getLikeCount(videoId: string): Promise<number>;
   isVideoLikedByUser(videoId: string, userId: string): Promise<boolean>;
   getDailyQuotaUsage(userId: string, date: Date): Promise<number>;
+  getLocalQueueLength(): Promise<number>;
+  getOldestLocalJob(): Promise<VideoEntry | null>;
+  claimLocalJob(): Promise<VideoEntry | null>; // Atomically claim a job for processing
+  getLocalJobStats(): Promise<{ inQueue: number; processing: number; completed: number; failed: number }>;
   
   // User methods
   createUser(username: string, password_hash: string, email?: string, roles?: string[]): Promise<User>;

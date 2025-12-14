@@ -1,7 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
-import { getAdminSettings } from '$lib/db';
+import { getAdminSettings, getLocalQueueLength, getLocalJobStats } from '$lib/db';
 
 export const GET: RequestHandler = async ({ locals }) => {
   // Check if user is admin
@@ -14,6 +14,8 @@ export const GET: RequestHandler = async ({ locals }) => {
 
   try {
     const settings = await getAdminSettings();
+    const localQueueLength = await getLocalQueueLength();
+    const localJobStats = await getLocalJobStats();
     const runpodConfig = getRunPodConfig({
       RUNPOD_ENDPOINT_URL: env.RUNPOD_ENDPOINT_URL,
       RUNPOD_API_KEY: env.RUNPOD_API_KEY
@@ -34,7 +36,6 @@ export const GET: RequestHandler = async ({ locals }) => {
       
       const inQueueCount = health.jobs?.inQueue || 0;
       const queueFull = inQueueCount >= settings.maxQueueThreshold;
-      
       return new Response(JSON.stringify({ 
         available: !queueFull,
         queueFull,
@@ -53,6 +54,15 @@ export const GET: RequestHandler = async ({ locals }) => {
           unhealthy: 0
         },
         threshold: settings.maxQueueThreshold,
+        localQueue: {
+          length: localQueueLength,
+          threshold: settings.localQueueThreshold,
+          enabled: settings.localQueueThreshold > 0,
+          inQueue: localJobStats.inQueue,
+          processing: localJobStats.processing,
+          completed: localJobStats.completed,
+          failed: localJobStats.failed
+        },
         ...(queueFull && { 
           reason: `Queue is full (${inQueueCount}/${settings.maxQueueThreshold}). Please try again later.` 
         })

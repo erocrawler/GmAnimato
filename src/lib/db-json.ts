@@ -240,6 +240,54 @@ export class JsonFileDatabase implements IDatabase {
     return todayVideos.length;
   }
 
+  async getLocalQueueLength(): Promise<number> {
+    const rows = await this.readAll();
+    return rows.filter(v => v.is_local_job === true && v.status === 'in_queue').length;
+  }
+
+  async getOldestLocalJob(): Promise<VideoEntry | null> {
+    const rows = await this.readAll();
+    const localJobs = rows.filter(v => v.is_local_job === true && v.status === 'in_queue');
+    if (localJobs.length === 0) return null;
+    
+    // Sort by created_at ascending (oldest first)
+    localJobs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return localJobs[0];
+  }
+
+  async claimLocalJob(): Promise<VideoEntry | null> {
+    // For JSON file database, we use a simple approach
+    // Note: This is not truly atomic and is only suitable for single-worker scenarios
+    // For production with multiple workers, use PostgreSQL
+    const rows = await this.readAll();
+    const localJobs = rows.filter(v => v.is_local_job === true && v.status === 'in_queue');
+    
+    if (localJobs.length === 0) return null;
+    
+    // Sort by created_at ascending (oldest first)
+    localJobs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    const job = localJobs[0];
+    
+    // Update status to processing
+    const index = rows.findIndex(v => v.id === job.id);
+    if (index !== -1) {
+      rows[index].status = 'processing';
+      await this.writeAll(rows);
+      return rows[index];
+    }
+    
+    return null;
+  }
+
+  async getLocalJobStats(): Promise<{ inQueue: number; processing: number; completed: number; failed: number }> {
+    const rows = await this.readAll();
+    const inQueue = rows.filter(v => v.is_local_job === true && v.status === 'in_queue').length;
+    const processing = rows.filter(v => v.is_local_job === true && v.status === 'processing').length;
+    const completed = rows.filter(v => v.is_local_job === true && v.status === 'completed').length;
+    const failed = rows.filter(v => v.is_local_job === true && v.status === 'failed').length;
+    return { inQueue, processing, completed, failed };
+  }
+
   // ==================== User Methods ====================
 
   private async ensureUsersDB() {

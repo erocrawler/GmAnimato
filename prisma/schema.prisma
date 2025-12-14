@@ -47,12 +47,20 @@ model Video {
   isNsfw              Boolean?    @map("is_nsfw")
   status              String      @default("uploaded")
   jobId               String?     @map("job_id") @db.VarChar(200)
+  isLocalJob          Boolean     @default(false) @map("is_local_job")
   finalVideoUrl       String?     @map("final_video_url") @db.VarChar(500)
   isPublished         Boolean     @default(false) @map("is_published")
   createdAt           DateTime    @default(now()) @map("created_at")
   updatedAt           DateTime    @updatedAt @map("updated_at")
   processingStartedAt DateTime?   @map("processing_started_at")
   processingTimeMs    Int?        @map("processing_time_ms")
+  progressPercentage  Float?      @map("progress_percentage")
+  progressDetails     Json?       @map("progress_details")
+  iterationSteps      Int?        @map("iteration_steps")
+  videoDuration       Int?        @map("video_duration")
+  videoResolution     String?     @map("video_resolution") @db.VarChar(10)
+  loraWeights         Json?       @map("lora_weights")
+  seed                Int?
   likes               VideoLike[]
   user                User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -82,6 +90,7 @@ model AdminSettings {
   quotaPerDay            Json     @default("{\"free\": 10, \"gmgard-user\": 50, \"paid\": 100, \"premium\": 100}") @map("quota_per_day")
   maxConcurrentJobs      Int      @default(5) @map("max_concurrent_jobs")
   maxQueueThreshold      Int      @default(5000) @map("max_queue_threshold")
+  localQueueThreshold    Int      @default(0) @map("local_queue_threshold")
   loraPresets            Json?    @map("lora_presets")
   updatedAt              DateTime @updatedAt @map("updated_at")
 

@@ -1,8 +1,9 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { updateVideo, getVideoById, getActiveJobsByUser, getAdminSettings, checkDailyQuota } from '$lib/db';
+import { updateVideo, getVideoById, getActiveJobsByUser, getAdminSettings, checkDailyQuota, getLocalQueueLength } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { buildWorkflow } from '$lib/i2vWorkflow';
-import { getRunPodConfig, submitRunPodJob, getRunPodHealth } from '$lib/runpod';
+import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
+import { submitJob } from '$lib/local-queue';
 
 async function delay(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
@@ -179,10 +180,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       // Continue with job submission even if health check fails
     }
 
-    // Update video with status, prompt, tags, and processing start time
+    // Generate seed for reproducibility
+    const seed = Math.floor(Math.random() * 1000000);
+
+    // Update video with status, prompt, tags, processing start time, and workflow parameters
     const updatePayload: any = { 
       status: 'in_queue', 
-      processing_started_at: new Date().toISOString() 
+      processing_started_at: new Date().toISOString(),
+      iteration_steps: iterationSteps,
+      video_duration: videoDuration,
+      video_resolution: resolution,
+      lora_weights: loraWeights,
+      seed: seed
     };
     
     if (prompt !== undefined) {
@@ -209,7 +218,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       image_name: `${id}.png`,
       image_url: existing.original_image_url,
       input_prompt: prompt ?? existing.prompt ?? 'A beautiful video',
-      seed: Math.floor(Math.random() * 1000000),
+      seed: seed,
       callback_url: callbackUrl,
       iterationSteps,
       videoDuration,
@@ -220,15 +229,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     });
 
     let jobId: string | undefined;
+    let isLocal = false;
     try {
-      const apiResult = await submitRunPodJob(runpodConfig, payload);
+      // Use the new submitJob function that routes to local or RunPod
+      const result = await submitJob(runpodConfig, payload, id, settings.localQueueThreshold, getLocalQueueLength, updateVideo);
+      jobId = result.jobId;
+      isLocal = result.isLocal;
       
-      // Record the job ID from the response
-      if (apiResult.id) {
-        jobId = apiResult.id;
-        await updateVideo(id, { job_id: apiResult.id });
-        console.log(`[I2V] Recorded job ID ${apiResult.id} for video ${id}`);
-      }
+      console.log(`[I2V] Submitted job ${jobId} for video ${id} (local: ${isLocal})`);
     } catch (err) {
       console.error(`[I2V] Job submission failed:`, err);
       await updateVideo(id, { status: 'failed' });
@@ -241,7 +249,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     // Return the updated video status
     const finalVideo = await getVideoById(id);
     return new Response(
-      JSON.stringify({ success: true, job_id: jobId, video: finalVideo }), 
+      JSON.stringify({ success: true, job_id: jobId, is_local: isLocal, video: finalVideo }), 
       { headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
