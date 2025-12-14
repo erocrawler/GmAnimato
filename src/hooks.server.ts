@@ -98,6 +98,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     '/gallery',
     '/api/logout',
     '/api/i2v-webhook',
+    '/api/worker/task',
     '/auth/gmgard',
     '/auth/gmgard/callback'
   ];
