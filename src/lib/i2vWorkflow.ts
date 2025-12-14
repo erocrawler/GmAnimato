@@ -34,6 +34,15 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
   if (params.callback_url) {
     workflow.input.callback_url = params.callback_url;
   }
+  
+  // Add node weights for accurate progress calculation
+  // These weights reflect the actual compute cost of each node
+  workflow.input.node_weights = {
+    '44': 60.0,  // WanMoeKSampler - main generation (heavy)
+    '4': 20.0,   // VAEDecode - decode latents (moderate)
+    '16': 15.0,  // VHS_VideoCombine - video encoding (moderate)
+    // Other nodes use default weight of 1.0
+  };
 
   // Configure iteration steps (default 6)
   const steps = params.iterationSteps ?? 6;

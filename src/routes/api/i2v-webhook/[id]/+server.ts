@@ -26,10 +26,10 @@ export const POST: RequestHandler = async ({ request, params }) => {
       return new Response(JSON.stringify({ error: 'not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
     }
 
-    // Verify the webhook is for this video (handler sends the video ID)
+    // Verify the webhook is for this video
     if (webhook_job_id !== existing.job_id) {
-      console.error(`[Webhook] Video ID mismatch. URL param: ${id}, webhook body: ${webhook_job_id}`);
-      return new Response(JSON.stringify({ error: 'video id mismatch' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+      console.error(`[Webhook] Job ID mismatch for job. Expected: ${existing.job_id}, got: ${webhook_job_id}`);
+      return new Response(JSON.stringify({ error: 'job id mismatch' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
     }
 
     console.log(`[Webhook] Processing update for video ${id}. Current status: ${existing.status}`);
