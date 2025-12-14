@@ -27,7 +27,7 @@ export const POST: RequestHandler = async ({ request, params }) => {
     }
 
     // Verify the webhook is for this video (handler sends the video ID)
-    if (webhook_job_id !== id) {
+    if (webhook_job_id !== existing.job_id) {
       console.error(`[Webhook] Video ID mismatch. URL param: ${id}, webhook body: ${webhook_job_id}`);
       return new Response(JSON.stringify({ error: 'video id mismatch' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
     }
