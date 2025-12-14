@@ -7,22 +7,22 @@ import type { RunPodConfig, RunPodStatusResponse } from './runpod';
 import { submitRunPodJob, getRunPodJobStatus } from './runpod';
 
 /**
- * Submit a job - routes to local queue or RunPod based on local queue length
+ * Submit a job - routes to local queue or RunPod based on queue length
  * @param config RunPod configuration (only used if routing to RunPod)
- * @param payload Job payload
  * @param videoId Video ID for the job
  * @param localQueueThreshold Threshold from admin settings (0 = disabled, >0 = enabled)
  * @param getLocalQueueLength Function to get current local queue length
  * @param updateVideo Function to update video in database
+ * @param buildPayload Async function to build workflow payload - ONLY called if routing to RunPod. Local jobs build workflow on-demand in worker/task endpoint.
  * @returns {isLocal: boolean, jobId?: string} - indicates if job is local and the job ID
  */
 export async function submitJob(
   config: RunPodConfig | null,
-  payload: any,
   videoId: string,
   localQueueThreshold: number,
   getLocalQueueLength: () => Promise<number>,
-  updateVideo: (id: string, patch: any) => Promise<any>
+  updateVideo: (id: string, patch: any) => Promise<any>,
+  buildPayload: () => Promise<any>
 ): Promise<{ isLocal: boolean; jobId?: string }> {
   const localQueueLength = await getLocalQueueLength();
   
@@ -35,6 +35,7 @@ export async function submitJob(
       throw new Error('RunPod configuration is required when local queue is disabled');
     }
     console.log(`[Job Router] Routing video ${videoId} to RunPod`);
+    const payload = await buildPayload();
     const result = await submitRunPodJob(config, payload);
     await updateVideo(videoId, { 
       is_local_job: false, 
@@ -44,7 +45,7 @@ export async function submitJob(
   }
   
   if (localQueueLength < localQueueThreshold) {
-    // Route to local queue
+    // Route to local queue - workflow will be built on-demand by /api/worker/task endpoint
     console.log(`[Job Router] Routing video ${videoId} to local queue`);
     await updateVideo(videoId, { 
       is_local_job: true, 
@@ -57,6 +58,7 @@ export async function submitJob(
       throw new Error('RunPod configuration is required when local queue is full');
     }
     console.log(`[Job Router] Routing video ${videoId} to RunPod`);
+    const payload = await buildPayload();
     const result = await submitRunPodJob(config, payload);
     await updateVideo(videoId, { 
       is_local_job: false, 

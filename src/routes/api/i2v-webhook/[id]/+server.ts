@@ -10,15 +10,15 @@ export const POST: RequestHandler = async ({ request, params }) => {
     }
 
     const body = await request.json();
-    const job_id = body?.id as string | undefined; // handler.py sends 'id' not 'job_id'
+    const webhook_job_id = body?.id as string | undefined; // handler.py sends video id in 'id' field
     const status = body?.status as string | undefined;
     const files = body?.files as any[] | undefined;
 
-    if (!job_id || !status) {
+    if (!webhook_job_id || !status) {
       return new Response(JSON.stringify({ error: 'missing id or status' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
-    console.log(`[Webhook] Received callback for video ${id}, job_id: ${job_id}, status: ${status}, files count: ${files?.length || 0}`);
+    console.log(`[Webhook] Received callback for video ${id}, webhook_job_id: ${webhook_job_id}, status: ${status}, files count: ${files?.length || 0}`);
 
     const existing = await getVideoById(id);
     if (!existing) {
@@ -26,15 +26,15 @@ export const POST: RequestHandler = async ({ request, params }) => {
       return new Response(JSON.stringify({ error: 'not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
     }
 
-    // Verify job_id matches (skip for mock jobs)
-    if (existing.job_id && job_id !== 'mock-job-id' && existing.job_id !== job_id) {
-      console.error(`[Webhook] Job ID mismatch for video ${id}. Expected: ${existing.job_id}, Got: ${job_id}`);
-      return new Response(JSON.stringify({ error: 'job_id mismatch' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    // Verify the webhook is for this video (handler sends the video ID)
+    if (webhook_job_id !== id) {
+      console.error(`[Webhook] Video ID mismatch. URL param: ${id}, webhook body: ${webhook_job_id}`);
+      return new Response(JSON.stringify({ error: 'video id mismatch' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
     }
 
-    console.log(`[Webhook] Job ID verified for video ${id}. Current status: ${existing.status}`);
+    console.log(`[Webhook] Processing update for video ${id}. Current status: ${existing.status}`);
 
-    const patch: any = { status, job_id };
+    const patch: any = { status };
     
     // Handle progress updates
     const progress = body?.progress as any | undefined;
@@ -81,7 +81,6 @@ export const POST: RequestHandler = async ({ request, params }) => {
 
     // Validate field lengths before updating
     const validationErrors = validateVideoEntry({
-      job_id: patch.job_id,
       final_video_url: patch.final_video_url,
     });
 

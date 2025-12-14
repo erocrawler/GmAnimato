@@ -1,6 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { claimLocalJob } from '$lib/db';
+import { claimLocalJob, getAdminSettings } from '$lib/db';
+import { buildWorkflow } from '$lib/i2vWorkflow';
 
 /**
  * GET /api/worker/task
@@ -41,19 +42,30 @@ export const GET: RequestHandler = async ({ request }) => {
     
     console.log(`[Worker] Assigned task ${job.id} to worker (status automatically set to processing)`);
     
-    // Return job details needed by the worker
+    // Build the workflow for this job
+    const settings = await getAdminSettings();
+    const callbackUrl = `${new URL(request.url).origin}/api/i2v-webhook/${job.id}`;
+    
+    const payload = await buildWorkflow({
+      image_name: `${job.id}.png`,
+      image_url: job.original_image_url,
+      input_prompt: job.prompt ?? 'A beautiful video',
+      seed: job.seed ?? Math.floor(Math.random() * 1000000),
+      callback_url: callbackUrl,
+      iterationSteps: job.iteration_steps as 4 | 6 | 8 | undefined,
+      videoDuration: job.video_duration as 4 | 6 | undefined,
+      videoResolution: job.video_resolution as '480p' | '720p' | undefined,
+      loraWeights: typeof job.lora_weights === 'object' && job.lora_weights !== null ? job.lora_weights as Record<string, number> : undefined,
+      loraPresets: settings.loraPresets,
+      templatePath: env.I2V_WORKFLOW_TEMPLATE_PATH_LOCAL || env.I2V_WORKFLOW_TEMPLATE_PATH,
+    });
+    
+    // Return the complete workflow payload for the worker
+    // payload already contains everything: { input: { workflow: {...}, images: [...], callback_url: ... } }
     return new Response(
       JSON.stringify({
-        id: job.id,
-        job_id: job.job_id,
-        original_image_url: job.original_image_url,
-        prompt: job.prompt,
-        tags: job.tags,
-        is_photo_realistic: job.is_photo_realistic,
-        is_nsfw: job.is_nsfw,
-        processing_started_at: job.processing_started_at,
-        // Workers should POST results to this callback URL
-        callback_url: `${new URL(request.url).origin}/api/i2v-webhook/${job.id}`
+        id: job.job_id,
+        ...payload
       }), 
       { headers: { 'Content-Type': 'application/json' } }
     );
