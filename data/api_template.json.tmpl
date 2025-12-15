@@ -108,18 +108,17 @@
       },
       "15": {
         "inputs": {
-          "width": 832,
-          "height": 480,
-          "interpolation": "lanczos",
-          "method": "stretch",
-          "condition": "always",
-          "multiple_of": 16,
           "image": [
             "14",
             0
-          ]
+          ],
+          "width": 832,
+          "height": 480,
+          "upscale_method": "lanczos",
+          "keep_proportion": true,
+          "divisible_by": 16
         },
-        "class_type": "ImageResize+",
+        "class_type": "ImageResizeKJ",
         "_meta": {
           "title": "Resize Image"
         }

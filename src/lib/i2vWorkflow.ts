@@ -87,11 +87,11 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
       validationErrors.push('Node 10 missing required inputs (width, height, length)');
     }
     
-    // Validate node 15 (ImageResize+)
+    // Validate node 15 (ImageResizeKJ)
     if (!wf['15']) {
-      validationErrors.push('Node 15 (ImageResize+) not found in workflow');
-    } else if (wf['15'].class_type !== 'ImageResize+') {
-      validationErrors.push(`Node 15 expected class_type 'ImageResize+', got '${wf['15'].class_type}'`);
+      validationErrors.push('Node 15 (ImageResizeKJ) not found in workflow');
+    } else if (wf['15'].class_type !== 'ImageResizeKJ') {
+      validationErrors.push(`Node 15 expected class_type 'ImageResizeKJ', got '${wf['15'].class_type}'`);
     } else if (!wf['15'].inputs || typeof wf['15'].inputs.width === 'undefined' || typeof wf['15'].inputs.height === 'undefined') {
       validationErrors.push('Node 15 missing required inputs (width, height)');
     }
