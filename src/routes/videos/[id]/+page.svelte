@@ -4,7 +4,7 @@
   import { createStatusTranslations, getTranslatedStatus } from '$lib/videoStatus';
   
   let { data } = $props<{ data: { video: any; user: any } }>();
-  let video = $state(data.video);
+  let video = $derived(data.video);
   let publishing = $state(false);
   let showOriginal = $state(false);
 
@@ -35,8 +35,8 @@
     }
   }
 
-  let likesCount = $state(video.likesCount || 0);
-  let isLiked = $state(video.isLiked || false);
+  let likesCount = $derived(video.likesCount || 0);
+  let isLiked = $derived(video.isLiked || false);
 
   async function toggleLike() {
     try {

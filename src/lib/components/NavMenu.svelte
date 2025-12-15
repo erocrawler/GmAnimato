@@ -17,7 +17,7 @@
 		}
 	}
 	
-	const menuClass = orientation === 'horizontal' ? 'menu-horizontal' : '';
+	const menuClass = $derived(orientation === 'horizontal' ? 'menu-horizontal' : '');
 </script>
 
 {#if user}

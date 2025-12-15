@@ -58,14 +58,8 @@
       },
       "10": {
         "inputs": {
-          "width": [
-            "24",
-            0
-          ],
-          "height": [
-            "25",
-            0
-          ],
+          "width": 832,
+          "height": 480,
           "length": 81,
           "batch_size": 1,
           "positive": [
@@ -81,7 +75,7 @@
             0
           ],
           "start_image": [
-            "14",
+            "15",
             0
           ]
         },
@@ -110,6 +104,24 @@
         "class_type": "LoadImage",
         "_meta": {
           "title": "Load Image"
+        }
+      },
+      "15": {
+        "inputs": {
+          "width": 832,
+          "height": 480,
+          "interpolation": "lanczos",
+          "method": "stretch",
+          "condition": "always",
+          "multiple_of": 16,
+          "image": [
+            "14",
+            0
+          ]
+        },
+        "class_type": "ImageResize+",
+        "_meta": {
+          "title": "Resize Image"
         }
       },
       "16": {
@@ -160,93 +172,7 @@
           "title": "Patch Sage Attention KJ"
         }
       },
-      "23": {
-        "inputs": {
-          "operator": ">",
-          "a": [
-            "28",
-            1
-          ],
-          "b": [
-            "28",
-            2
-          ]
-        },
-        "class_type": "LayerUtility: BooleanOperator",
-        "_meta": {
-          "title": "LayerUtility: Boolean Operator"
-        }
-      },
-      "24": {
-        "inputs": {
-          "boolean": [
-            "23",
-            0
-          ],
-          "on_true": [
-            "26",
-            0
-          ],
-          "on_false": [
-            "27",
-            0
-          ]
-        },
-        "class_type": "Switch any [Crystools]",
-        "_meta": {
-          "title": "Width Switch"
-        }
-      },
-      "25": {
-        "inputs": {
-          "boolean": [
-            "23",
-            0
-          ],
-          "on_true": [
-            "27",
-            0
-          ],
-          "on_false": [
-            "26",
-            0
-          ]
-        },
-        "class_type": "Switch any [Crystools]",
-        "_meta": {
-          "title": "Height Switch"
-        }
-      },
-      "26": {
-        "inputs": {
-          "value": 832
-        },
-        "class_type": "INTConstant",
-        "_meta": {
-          "title": "Long Side"
-        }
-      },
-      "27": {
-        "inputs": {
-          "value": 480
-        },
-        "class_type": "INTConstant",
-        "_meta": {
-          "title": "Short Side"
-        }
-      },
-      "28": {
-        "inputs": {
-          "image": [
-            "14",
-            0
-          ]
-        },
-        "class_type": "GetImageSizeAndCount",
-        "_meta": {
-          "title": "Get Image Size & Count"
-        }
-      },
+
       "34": {
         "inputs": {
           "unet_name": "wan2.2_i2v_high_noise_14B_Q8_0.gguf"

@@ -2,10 +2,7 @@
   import { _ } from 'svelte-i18n';
   
   let { data } = $props<{ data: { video: any; user?: any; relatedVideos: any[]; author?: { id: string; username: string } | null } }>();
-  let video = $state(data.video);
-  $effect(() => {
-    video = data.video;
-  });
+  let video = $derived(data.video);
   const likesCount = $derived(video.likesCount || 0);
   const isLiked = $derived(video.isLiked || false);
   let showOriginal = $state(false);

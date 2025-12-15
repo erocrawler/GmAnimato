@@ -5,28 +5,20 @@
   
   let { data } = $props<{ data: PageData }>();
   
-  let settings = $state({
+  let settings = $derived({
     ...data.settings,
     loraPresets: data.settings.loraPresets ?? [],
     quotaPerDay: data.settings.quotaPerDay ?? { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 },
   });
-  let users = $state(data.users);
-  let userPage = $state(data.userPage || 1);
-  let userTotalPages = $state(data.userTotalPages || 1);
-  let userTotal = $state(data.userTotal || 0);
-  let userSearch = $state(data.userSearch || '');
+  let users = $derived(data.users);
+  let userPage = $derived(data.userPage || 1);
+  let userTotalPages = $derived(data.userTotalPages || 1);
+  let userTotal = $derived(data.userTotal || 0);
+  let userSearch = $derived(data.userSearch || '');
   let queueStatus: any = $state(null);
   let saving = $state(false);
   let loadingQueue = $state(false);
   let message = $state('');
-
-  $effect(() => {
-    users = data.users;
-    userPage = data.userPage || 1;
-    userTotalPages = data.userTotalPages || 1;
-    userTotal = data.userTotal || 0;
-    userSearch = data.userSearch || '';
-  });
 
   function sanitizeLoraPresets(presets: any[]) {
     if (!Array.isArray(presets)) return [];

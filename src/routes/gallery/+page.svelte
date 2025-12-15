@@ -10,7 +10,7 @@
   let videos = $state(data.videos);
   let loading = $state(false);
 
-  const queryParams = $derived(() => {
+  const queryParams = $derived.by(() => {
     const params = new URLSearchParams();
     if (data.sortBy !== 'date') params.set('sort', data.sortBy);
     if (data.page !== 1) params.set('page', data.page.toString());
@@ -125,7 +125,7 @@
 
     loading={loading}
     pageSize={data.pageSize}
-    queryParams={queryParams()}
+    queryParams={queryParams}
     emptyMessage={data.filter === 'liked' ? $_('gallery.empty.noLikedMessage') : $_('gallery.empty.noVideosMessage')}
     emptyIcon={data.filter === 'liked' ? '💔' : '🖼️'}
     emptyAction={data.filter === 'liked' 

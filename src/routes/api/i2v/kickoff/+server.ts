@@ -106,15 +106,23 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
-    // Check if RunPod is configured
+    // Determine RunPod and local queue availability
     const runpodConfig = getRunPodConfig({
       RUNPOD_ENDPOINT_URL: env.RUNPOD_ENDPOINT_URL,
       RUNPOD_API_KEY: env.RUNPOD_API_KEY
     });
 
-    if (!runpodConfig) {
-      // Fall back to mock I2V workflow
-      console.log(`[Mock I2V] RUNPOD_ENDPOINT_URL or RUNPOD_API_KEY not configured, using mock workflow`);
+    let localQueueAvailable = false;
+    try {
+      const localLen = await getLocalQueueLength();
+      localQueueAvailable = Number.isFinite(localLen);
+    } catch (e) {
+      localQueueAvailable = false;
+    }
+
+    if (!runpodConfig && !localQueueAvailable) {
+      // Fall back to mock I2V workflow only if neither local nor RunPod is configured
+      console.log(`[Mock I2V] Neither local queue nor RunPod configured, using mock workflow`);
       await updateVideo(id, { status: 'in_queue' });
       const origin = new URL(request.url).origin;
       (async () => {
@@ -161,23 +169,25 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       });
     }
 
-    // Check RunPod queue health
-    try {
-      const health = await getRunPodHealth(runpodConfig);
-      const inQueueCount = health.jobs?.inQueue || 0;
-      
-      if (inQueueCount >= settings.maxQueueThreshold) {
-        return new Response(JSON.stringify({ 
-          error: `We're experiencing high demand right now (${inQueueCount} jobs queued). Please try again in a few minutes. We apologize for the inconvenience.`,
-          queueFull: true
-        }), { 
-          status: 503, 
-          headers: { 'Content-Type': 'application/json' } 
-        });
+    // Check RunPod queue health only if RunPod is configured
+    if (runpodConfig) {
+      try {
+        const health = await getRunPodHealth(runpodConfig);
+        const inQueueCount = health.jobs?.inQueue || 0;
+        
+        if (inQueueCount >= settings.maxQueueThreshold) {
+          return new Response(JSON.stringify({ 
+            error: `We're experiencing high demand right now (${inQueueCount} jobs queued). Please try again in a few minutes. We apologize for the inconvenience.`,
+            queueFull: true
+          }), { 
+            status: 503, 
+            headers: { 'Content-Type': 'application/json' } 
+          });
+        }
+      } catch (err) {
+        console.error('[I2V] Failed to check RunPod health, proceeding anyway:', err);
+        // Continue with job submission even if health check fails
       }
-    } catch (err) {
-      console.error('[I2V] Failed to check RunPod health, proceeding anyway:', err);
-      // Continue with job submission even if health check fails
     }
 
     // Generate seed for reproducibility

@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import probe from 'probe-image-size';
 import type { LoraPreset } from './loraPresets';
 import { normalizeLoraPresets } from './loraPresets';
 
@@ -17,6 +18,45 @@ interface WorkflowParams {
   templatePath?: string;
 }
 
+/**
+ * Round to nearest multiple of 16
+ */
+function roundToMultipleOf16(value: number): number {
+  return Math.round(value / 16) * 16;
+}
+
+/**
+ * Calculate video dimensions based on image aspect ratio and resolution
+ * @param imageWidth Original image width
+ * @param imageHeight Original image height
+ * @param resolution Target resolution (480p or 720p)
+ * @returns {width, height} Video dimensions (both multiples of 16)
+ */
+function calculateVideoDimensions(
+  imageWidth: number,
+  imageHeight: number,
+  resolution: '480p' | '720p'
+): { width: number; height: number } {
+  const longSide = resolution === '720p' ? 1280 : 832;
+  const squareSide = resolution === '720p' ? 960 : 640;
+  const aspectRatio = imageWidth / imageHeight;
+  
+  // Portrait (taller than wide)
+  if (aspectRatio < 0.95) {
+    const width = roundToMultipleOf16(longSide * aspectRatio);
+    return { width, height: longSide };
+  }
+  // Landscape (wider than tall)
+  else if (aspectRatio > 1.05) {
+    const height = roundToMultipleOf16(longSide / aspectRatio);
+    return { width: longSide, height };
+  }
+  // Square (roughly 1:1 ratio, within 5% tolerance)
+  else {
+    return { width: squareSide, height: squareSide };
+  }
+}
+
 export async function buildWorkflow(params: WorkflowParams): Promise<object> {
   const templatePath = params.templatePath || path.resolve('data/api_template.json.tmpl');
   let template = await fs.readFile(templatePath, 'utf-8');
@@ -29,6 +69,61 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
   template = template.replace(/{seed}/g, String(Math.floor(params.seed))); // Ensure seed is a valid integer
 
   const workflow = JSON.parse(template);
+  
+  // Validate workflow structure matches our assumptions
+  const validationErrors: string[] = [];
+  
+  if (!workflow?.input?.workflow) {
+    validationErrors.push('Workflow missing input.workflow structure');
+  } else {
+    const wf = workflow.input.workflow;
+    
+    // Validate node 10 (WanImageToVideo)
+    if (!wf['10']) {
+      validationErrors.push('Node 10 (WanImageToVideo) not found in workflow');
+    } else if (wf['10'].class_type !== 'WanImageToVideo') {
+      validationErrors.push(`Node 10 expected class_type 'WanImageToVideo', got '${wf['10'].class_type}'`);
+    } else if (!wf['10'].inputs || typeof wf['10'].inputs.width === 'undefined' || typeof wf['10'].inputs.height === 'undefined' || typeof wf['10'].inputs.length === 'undefined') {
+      validationErrors.push('Node 10 missing required inputs (width, height, length)');
+    }
+    
+    // Validate node 15 (ImageResize+)
+    if (!wf['15']) {
+      validationErrors.push('Node 15 (ImageResize+) not found in workflow');
+    } else if (wf['15'].class_type !== 'ImageResize+') {
+      validationErrors.push(`Node 15 expected class_type 'ImageResize+', got '${wf['15'].class_type}'`);
+    } else if (!wf['15'].inputs || typeof wf['15'].inputs.width === 'undefined' || typeof wf['15'].inputs.height === 'undefined') {
+      validationErrors.push('Node 15 missing required inputs (width, height)');
+    }
+    
+    // Validate node 44 (WanMoeKSampler) - for iteration steps and node weights
+    if (!wf['44']) {
+      validationErrors.push('Node 44 (WanMoeKSampler) not found in workflow');
+    } else if (wf['44'].class_type !== 'WanMoeKSampler') {
+      validationErrors.push(`Node 44 expected class_type 'WanMoeKSampler', got '${wf['44'].class_type}'`);
+    } else if (!wf['44'].inputs || typeof wf['44'].inputs.steps === 'undefined') {
+      validationErrors.push('Node 44 missing required input (steps)');
+    }
+    
+    // Validate node 4 (VAEDecode) - for node weights
+    if (!wf['4']) {
+      validationErrors.push('Node 4 (VAEDecode) not found in workflow');
+    } else if (wf['4'].class_type !== 'VAEDecode') {
+      validationErrors.push(`Node 4 expected class_type 'VAEDecode', got '${wf['4'].class_type}'`);
+    }
+    
+    // Validate node 16 (VHS_VideoCombine) - for node weights
+    if (!wf['16']) {
+      validationErrors.push('Node 16 (VHS_VideoCombine) not found in workflow');
+    } else if (wf['16'].class_type !== 'VHS_VideoCombine') {
+      validationErrors.push(`Node 16 expected class_type 'VHS_VideoCombine', got '${wf['16'].class_type}'`);
+    }
+  }
+  
+  if (validationErrors.length > 0) {
+    console.error('Workflow validation errors:', validationErrors);
+    throw new Error(`Workflow template validation failed:\n${validationErrors.join('\n')}`);
+  }
   
   // Add callback_url to input if provided
   if (params.callback_url) {
@@ -57,15 +152,35 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
     workflow.input.workflow['10'].inputs.length = frames;
   }
 
-  // Configure video resolution (default 480p)
+  // Fetch image dimensions and calculate video dimensions
   const resolution = params.videoResolution ?? '480p';
-  const longSide = resolution === '720p' ? 1280 : 832;
-  const shortSide = resolution === '720p' ? 720 : 480;
-  if (workflow?.input?.workflow?.['26']?.inputs) {
-    workflow.input.workflow['26'].inputs.value = longSide;
-  }
-  if (workflow?.input?.workflow?.['27']?.inputs) {
-    workflow.input.workflow['27'].inputs.value = shortSide;
+  try {
+    const dimensions = await probe(params.image_url);
+    const { width, height } = calculateVideoDimensions(dimensions.width, dimensions.height, resolution);
+    console.log(`Image dimensions: ${dimensions.width}x${dimensions.height}, Video dimensions: ${width}x${height}`);
+    
+    // Set dimensions on the ImageResize node (15) and WanImageToVideo node (10)
+    if (workflow?.input?.workflow?.['15']?.inputs) {
+      workflow.input.workflow['15'].inputs.width = width;
+      workflow.input.workflow['15'].inputs.height = height;
+    }
+    if (workflow?.input?.workflow?.['10']?.inputs) {
+      workflow.input.workflow['10'].inputs.width = width;
+      workflow.input.workflow['10'].inputs.height = height;
+    }
+  } catch (error) {
+    console.error('Failed to probe image dimensions:', error);
+    // Fallback to default landscape dimensions
+    const longSide = resolution === '720p' ? 1280 : 832;
+    const shortSide = resolution === '720p' ? 720 : 480;
+    if (workflow?.input?.workflow?.['15']?.inputs) {
+      workflow.input.workflow['15'].inputs.width = longSide;
+      workflow.input.workflow['15'].inputs.height = shortSide;
+    }
+    if (workflow?.input?.workflow?.['10']?.inputs) {
+      workflow.input.workflow['10'].inputs.width = longSide;
+      workflow.input.workflow['10'].inputs.height = shortSide;
+    }
   }
 
   // Override LoRA strengths when provided and dynamically build chains

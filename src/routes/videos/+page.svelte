@@ -7,10 +7,14 @@
   import LayoutToggle from '$lib/components/LayoutToggle.svelte';
 
   let { data } = $props<{ data: { videos: any[]; page: number; totalPages: number; total: number; pageSize: number } }>();
-  let videos = $state(data.videos);
+  let videos = $state<any[]>([]);
   let loading = $state(false);
   let layout = $state<'grid' | 'compact'>('grid');
   let pollInterval: ReturnType<typeof setInterval> | null = null;
+  
+  $effect(() => {
+    videos = data.videos;
+  });
   
   async function pollActiveVideos() {
     const activeVideos = videos.filter((v: any) => v.status === 'in_queue' || v.status === 'processing');
