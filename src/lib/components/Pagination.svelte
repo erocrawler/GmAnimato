@@ -3,9 +3,10 @@
     currentPage: number;
     totalPages: number;
     onPageChange: (page: number) => void;
+    disabled?: boolean;
   }
 
-  let { currentPage, totalPages, onPageChange }: Props = $props();
+  let { currentPage, totalPages, onPageChange, disabled = false }: Props = $props();
 </script>
 
 {#if totalPages > 1}
@@ -13,7 +14,7 @@
     <div class="join">
       <button 
         class="join-item btn" 
-        disabled={currentPage === 1}
+        disabled={disabled || currentPage === 1}
         onclick={() => onPageChange(currentPage - 1)}
       >
         «
@@ -23,6 +24,7 @@
           <button 
             class="join-item btn" 
             class:btn-active={pageNum === currentPage}
+            disabled={disabled}
             onclick={() => onPageChange(pageNum)}
           >
             {pageNum}
@@ -33,7 +35,7 @@
       {/each}
       <button 
         class="join-item btn" 
-        disabled={currentPage === totalPages}
+        disabled={disabled || currentPage === totalPages}
         onclick={() => onPageChange(currentPage + 1)}
       >
         »

@@ -1,6 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { updateVideo, getVideoById } from '$lib/db';
 import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
+import { uploadBufferToS3 } from '$lib/s3';
 
 export const POST: RequestHandler = async ({ request, params }) => {
   try {
@@ -52,20 +53,6 @@ export const POST: RequestHandler = async ({ request, params }) => {
       console.log(`[Webhook] Progress update for video ${id}: ${progress.percentage}% (${progress.completed_nodes}/${progress.total_nodes} nodes)`);
     }
     
-    // Clear progress when job completes or fails
-    if (status === 'completed' || status === 'failed') {
-      patch.progress_percentage = null;
-      patch.progress_details = null;
-    }
-    
-    // Calculate processing time if we have a start time
-    if (existing.processing_started_at && status.toLowerCase() === 'completed') {
-      const startTime = new Date(existing.processing_started_at).getTime();
-      const endTime = Date.now();
-      patch.processing_time_ms = endTime - startTime;
-      console.log(`[Webhook] Processing time for video ${id}: ${patch.processing_time_ms}ms (${(patch.processing_time_ms / 1000).toFixed(1)}s)`);
-    }
-    
     // Extract video URL from files array if present
     if (files && Array.isArray(files)) {
       const videoFile = files.find(file => 
@@ -77,6 +64,58 @@ export const POST: RequestHandler = async ({ request, params }) => {
         patch.final_video_url = videoFile.data;
         console.log(`[Webhook] Extracted video URL from files: ${videoFile.data}`);
       }
+    }
+
+    // Handle base64-encoded video payloads by uploading them to S3
+    if (!patch.final_video_url && files && Array.isArray(files)) {
+      const base64File = files.find(file =>
+        file.type === 'base64' &&
+        file.filename &&
+        (file.filename.endsWith('.mp4') || file.filename.endsWith('.webm'))
+      );
+
+      if (base64File?.data) {
+        try {
+          const raw: string = typeof base64File.data === 'string' ? base64File.data.trim() : '';
+          const base64Payload = raw.includes(',') ? raw.split(',').pop() : raw;
+          const buffer = Buffer.from(base64Payload || '', 'base64');
+
+          if (buffer.length === 0) {
+            throw new Error('base64 payload empty');
+          }
+
+          const originalName: string = base64File.filename || '';
+          const ext = originalName.includes('.') ? originalName.split('.').pop() || '' : '';
+
+          const uploadedUrl = await uploadBufferToS3(buffer, ext);
+          patch.final_video_url = uploadedUrl;
+          console.log(`[Webhook] Uploaded base64 video for ${id} to ${uploadedUrl}`);
+        } catch (err) {
+          console.error(`[Webhook] Failed to upload base64 video for ${id}:`, err);
+          patch.status = 'failed';
+        }
+      }
+    }
+
+    // If we still do not have a final video URL, mark as failed
+    if (!patch.final_video_url) {
+      patch.status = 'failed';
+    }
+
+    const finalStatus = typeof patch.status === 'string' ? patch.status.toLowerCase() : '';
+
+    // Clear progress when job completes or fails
+    if (finalStatus === 'completed' || finalStatus === 'failed') {
+      patch.progress_percentage = null;
+      patch.progress_details = null;
+    }
+
+    // Calculate processing time if we have a start time and processing completed
+    if (existing.processing_started_at && finalStatus === 'completed') {
+      const startTime = new Date(existing.processing_started_at).getTime();
+      const endTime = Date.now();
+      patch.processing_time_ms = endTime - startTime;
+      console.log(`[Webhook] Processing time for video ${id}: ${patch.processing_time_ms}ms (${(patch.processing_time_ms / 1000).toFixed(1)}s)`);
     }
 
     // Validate field lengths before updating

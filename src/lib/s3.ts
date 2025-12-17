@@ -33,7 +33,12 @@ function makeUrl(key: string) {
   return `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com/${key}`;
 }
 
-export async function uploadBufferToS3(buf: Buffer, filename?: string) {
+function normalizeExt(ext?: string) {
+  if (!ext) return '';
+  return ext.replace(/^\./, '').toLowerCase();
+}
+
+export async function uploadBufferToS3(buf: Buffer, ext?: string) {
   // Fallback to local storage if S3 is not configured
   if (!S3_BUCKET) {
     const fs = await import('fs/promises');
@@ -41,7 +46,10 @@ export async function uploadBufferToS3(buf: Buffer, filename?: string) {
     const uploadDir = path.resolve('static', 'uploads');
     await fs.mkdir(uploadDir, { recursive: true });
 
-    const name = (filename || `${Date.now()}-${randomUUID()}`).replace(/[^A-Za-z0-9._-]/g, '_');
+    const cleanExt = normalizeExt(ext);
+    const name = cleanExt
+      ? `${Date.now()}-${randomUUID()}.${cleanExt}`
+      : `${Date.now()}-${randomUUID()}`;
     const filepath = path.join(uploadDir, name);
     await fs.writeFile(filepath, buf);
 
@@ -49,18 +57,20 @@ export async function uploadBufferToS3(buf: Buffer, filename?: string) {
   }
 
   const client = makeClient();
-  const key = (filename || `${Date.now()}-${randomUUID()}`).replace(/[^A-Za-z0-9._-]/g, '_');
+  const cleanExt = normalizeExt(ext);
+  const baseName = `${Date.now()}-${randomUUID()}`;
+  const key = cleanExt ? `${baseName}.${cleanExt}` : baseName;
 
   // Detect content type from filename extension
-  const ext = key.toLowerCase().split('.').pop();
+  const detectedExt = cleanExt || key.toLowerCase().split('.').pop();
   let contentType = 'application/octet-stream';
   
-  if (ext === 'jpg' || ext === 'jpeg') contentType = 'image/jpeg';
-  else if (ext === 'png') contentType = 'image/png';
-  else if (ext === 'webp') contentType = 'image/webp';
-  else if (ext === 'gif') contentType = 'image/gif';
-  else if (ext === 'mp4') contentType = 'video/mp4';
-  else if (ext === 'webm') contentType = 'video/webm';
+  if (detectedExt === 'jpg' || detectedExt === 'jpeg') contentType = 'image/jpeg';
+  else if (detectedExt === 'png') contentType = 'image/png';
+  else if (detectedExt === 'webp') contentType = 'image/webp';
+  else if (detectedExt === 'gif') contentType = 'image/gif';
+  else if (detectedExt === 'mp4') contentType = 'video/mp4';
+  else if (detectedExt === 'webm') contentType = 'video/webm';
 
   console.log('S3 Config:', {
     bucket: S3_BUCKET,

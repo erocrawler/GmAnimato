@@ -32,10 +32,10 @@ export const actions: Actions = {
       return { error: result.error };
     }
     buffer = result.buffer;
-    const finalName = result.filename;
+    const ext = result.ext || undefined;
 
     // Upload to S3; helper returns a public URL
-    const s3Url = await uploadBufferToS3(buffer, finalName);
+    const s3Url = await uploadBufferToS3(buffer, ext);
 
     // Run image recognition to get tags and suggested prompts
     // Pass Grok API key if configured

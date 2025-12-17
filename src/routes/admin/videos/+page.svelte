@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { navigating } from '$app/stores';
   import { _ } from 'svelte-i18n';
   import type { PageData } from './$types';
   import VideoList from '$lib/components/VideoList.svelte';
@@ -10,15 +11,17 @@
   let statusFilter = $state(data.statusFilter || '');
   let userFilter = $state(data.userFilter || '');
   let message = $state('');
-  let layout = $state<'grid' | 'compact'>('grid');
+  const isLoading = $derived(Boolean($navigating));
 
   async function setPage(newPage: number) {
+    if (isLoading) return;
     const url = new URL(window.location.href);
     url.searchParams.set('page', newPage.toString());
     await goto(url.toString());
   }
 
   async function applyFilters() {
+    if (isLoading) return;
     const url = new URL(window.location.href);
     url.searchParams.set('page', '1');
     if (statusFilter) {
@@ -35,6 +38,7 @@
   }
 
   async function clearFilters() {
+    if (isLoading) return;
     statusFilter = '';
     userFilter = '';
     await goto('/admin/videos');
@@ -138,8 +142,8 @@
 
         <div class="form-control flex flex-col justify-end">
           <div class="flex gap-2">
-            <button class="btn btn-primary flex-1" onclick={applyFilters}>{$_('common.apply')}</button>
-            <button class="btn btn-ghost" onclick={clearFilters}>{$_('common.clear')}</button>
+            <button class="btn btn-primary flex-1" disabled={isLoading} onclick={applyFilters}>{$_('common.apply')}</button>
+            <button class="btn btn-ghost" disabled={isLoading} onclick={clearFilters}>{$_('common.clear')}</button>
           </div>
         </div>
       </div>
@@ -154,6 +158,7 @@
   <VideoList
     videos={data.videos}
     type="admin"
+    loading={isLoading}
 
     pageSize={data.pageSize}
     emptyMessage={$_('admin.videos.noVideos')}
@@ -164,6 +169,7 @@
   <Pagination
     currentPage={data.page}
     totalPages={data.totalPages}
+    disabled={isLoading}
     onPageChange={setPage}
   />
 </div>

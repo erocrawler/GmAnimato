@@ -5,6 +5,7 @@
   
   let { data } = $props<{ data: { video: any; user: any } }>();
   let video = $derived(data.video);
+  let isPublished = $derived(video.is_published ?? false);
   let publishing = $state(false);
   let showOriginal = $state(false);
 
@@ -25,6 +26,7 @@
       
       if (res.ok) {
         video.is_published = !video.is_published;
+        isPublished = video.is_published;
       } else {
         alert($_('videoDetail.publishUpdateError'));
       }
@@ -187,7 +189,7 @@
               {/if}
             </div>
 
-            {#if video.is_published}
+            {#if isPublished}
               <a href="/gallery/{video.id}" class="btn btn-ghost">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />

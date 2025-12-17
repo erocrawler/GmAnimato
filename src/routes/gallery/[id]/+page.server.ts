@@ -11,6 +11,10 @@ export const load: PageServerLoad = async ({ params, locals, url }) => {
   if (!video.is_published) {
     throw error(404, 'Video not found');
   }
+  // Block unregistered users from viewing NSFW content
+  if (!locals.user && video.is_nsfw) {
+    throw error(403, 'This content requires authentication');
+  }
 
   // Get like information
   const likesCount = await getLikeCount(video.id);
@@ -21,18 +25,23 @@ export const load: PageServerLoad = async ({ params, locals, url }) => {
   const page = parseInt(url?.searchParams?.get('page') || '1', 10);
   const pageSize = 12; // match your gallery page size
 
+  // Filter out NSFW content for non-logged-in users
+  const isNsfw = locals.user ? undefined : false;
+
   // Fetch current and next page
   const videosPage1 = await getPublishedVideos({
     page,
     pageSize,
     status: 'completed',
-    sortBy
+    sortBy,
+    isNsfw
   });
   const videosPage2 = await getPublishedVideos({
     page: page + 1,
     pageSize,
     status: 'completed',
-    sortBy
+    sortBy,
+    isNsfw
   });
   const allVideos = [...videosPage1.videos, ...videosPage2.videos];
   const currentIdx = allVideos.findIndex(v => v.id === params.id);
