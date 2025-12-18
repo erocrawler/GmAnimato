@@ -1,6 +1,7 @@
 export type VideoEntry = {
   id: string;
   user_id: string;
+  workflow_id?: string; // ID of the workflow used to generate this video
   original_image_url: string;
   prompt?: string;
   tags?: string[];
@@ -56,6 +57,17 @@ export type RoleConfig = {
   name: string;
   sponsorTier?: string; // Map sponsor tier (schemeName) to this role
   description?: string;
+};
+
+export type Workflow = {
+  id: string;
+  name: string;
+  description?: string;
+  templatePath: string;
+  compatibleLoraIds: string[]; // Array of LoRA IDs compatible with this workflow
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AdminSettings = {
@@ -160,4 +172,9 @@ export interface IDatabase {
   createSponsorClaim(claim: Omit<SponsorClaim, 'id' | 'claimed_at'>): Promise<SponsorClaim>;
   deleteSponsorClaim(id: string): Promise<boolean>;
   getAllSponsorClaims(): Promise<SponsorClaim[]>;
+
+  // Workflow methods
+  getWorkflowById(id: string): Promise<Workflow | null>;
+  getWorkflows(): Promise<Workflow[]>;
+  getDefaultWorkflow(): Promise<Workflow | null>;
 }

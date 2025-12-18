@@ -5,7 +5,7 @@ import { PostgresDatabase } from './db-postgres';
 import { env } from '$env/dynamic/private';
 
 // Re-export types for backward compatibility
-export type { VideoEntry, IDatabase, User, UserPublic, AdminSettings, Session, PaginatedVideos, GetPublishedVideosOptions, GetVideosByUserOptions, GetAllVideosOptions } from './IDatabase';
+export type { VideoEntry, IDatabase, User, UserPublic, AdminSettings, Session, Workflow, PaginatedVideos, GetPublishedVideosOptions, GetVideosByUserOptions, GetAllVideosOptions } from './IDatabase';
 
 // Database instance (singleton)
 let dbInstance: IDatabase | null = null;
@@ -39,6 +39,9 @@ export function getDatabase(): IDatabase {
 // Convenience functions that delegate to the database instance
 // These maintain backward compatibility with existing code
 const db = getDatabase();
+
+// Export db for direct Prisma access in API routes
+export { db };
 
 // ==================== Video Functions ====================
 
@@ -223,6 +226,20 @@ export async function deleteSponsorClaim(id: string) {
 
 export async function getAllSponsorClaims() {
   return db.getAllSponsorClaims();
+}
+
+// ==================== Workflow Functions ====================
+
+export async function getWorkflowById(id: string) {
+  return db.getWorkflowById(id);
+}
+
+export async function getWorkflows() {
+  return db.getWorkflows();
+}
+
+export async function getDefaultWorkflow() {
+  return db.getDefaultWorkflow();
 }
 
 // ==================== Helper Functions ====================

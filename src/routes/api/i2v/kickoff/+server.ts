@@ -1,9 +1,10 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { updateVideo, getVideoById, getActiveJobsByUser, getAdminSettings, checkDailyQuota, getLocalQueueLength } from '$lib/db';
+import { updateVideo, getVideoById, getActiveJobsByUser, getAdminSettings, checkDailyQuota, getLocalQueueLength, getWorkflowById, getDefaultWorkflow } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { buildWorkflow } from '$lib/i2vWorkflow';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { submitJob } from '$lib/local-queue';
+import { filterLoraWeights } from '$lib/workflows';
 
 async function delay(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
@@ -28,9 +29,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       return new Response(JSON.stringify({ error: 'already processing' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
-    // Extract prompt, tags, and optional LoRA weights from request body
+    // Extract prompt, tags, workflowId, and optional LoRA weights from request body
     const prompt = body?.prompt;
     const tags = body?.tags;
+    const workflowIdFromRequest = body?.workflowId;
     const loraWeights = body?.loraWeights;
     const iterationStepsRaw = body?.iterationSteps;
     const parsedSteps = Number(iterationStepsRaw);
@@ -65,6 +67,24 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
     // Get admin settings for thresholds
     const settings = await getAdminSettings();
+
+    // Resolve workflow to use
+    let workflow = null;
+    if (workflowIdFromRequest) {
+      workflow = await getWorkflowById(workflowIdFromRequest);
+      if (!workflow) {
+        return new Response(JSON.stringify({ error: 'workflow not found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      }
+    } else {
+      // Use default workflow
+      workflow = await getDefaultWorkflow();
+      if (!workflow) {
+        return new Response(JSON.stringify({ error: 'no default workflow configured' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+
+    // Filter LoRA weights to only compatible ones for the selected workflow
+    const filteredLoraWeights = loraWeights ? filterLoraWeights(loraWeights, workflow) : undefined;
 
     // Check daily quota if user is logged in
     if (locals.user) {
@@ -193,14 +213,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     // Generate seed for reproducibility
     const seed = Math.floor(Math.random() * 1000000);
 
-    // Update video with status, prompt, tags, processing start time, and workflow parameters
+    // Update video with status, prompt, tags, processing start time, workflow, and workflow parameters
     const updatePayload: any = { 
       status: 'in_queue', 
       processing_started_at: new Date().toISOString(),
+      workflow_id: workflow.id,
       iteration_steps: iterationSteps,
       video_duration: videoDuration,
       video_resolution: resolution,
-      lora_weights: loraWeights,
+      lora_weights: filteredLoraWeights,
       seed: seed
     };
     
@@ -244,9 +265,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             iterationSteps,
             videoDuration,
             videoResolution: resolution,
-            loraWeights: typeof loraWeights === 'object' && loraWeights !== null ? loraWeights : undefined,
+            loraWeights: filteredLoraWeights,
             loraPresets: settings.loraPresets,
-            templatePath: env.I2V_WORKFLOW_TEMPLATE_PATH,
+            workflow: workflow,
           });
         }
       );

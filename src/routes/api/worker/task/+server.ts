@@ -1,6 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { claimLocalJob, getAdminSettings } from '$lib/db';
+import { claimLocalJob, getAdminSettings, getWorkflowById, getDefaultWorkflow } from '$lib/db';
 import { buildWorkflow } from '$lib/i2vWorkflow';
 
 /**
@@ -46,6 +46,21 @@ export const GET: RequestHandler = async ({ request }) => {
     const settings = await getAdminSettings();
     const callbackUrl = `${new URL(request.url).origin}/api/i2v-webhook/${job.id}`;
     
+    // Resolve workflow to use
+    let workflow = null;
+    if (job.workflow_id) {
+      workflow = await getWorkflowById(job.workflow_id);
+    }
+    if (!workflow) {
+      workflow = await getDefaultWorkflow();
+    }
+    if (!workflow) {
+      return new Response(
+        JSON.stringify({ error: 'No workflow configured' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    
     const payload = await buildWorkflow({
       image_name: `${job.id}.png`,
       image_url: job.original_image_url,
@@ -57,7 +72,7 @@ export const GET: RequestHandler = async ({ request }) => {
       videoResolution: job.video_resolution as '480p' | '720p' | undefined,
       loraWeights: typeof job.lora_weights === 'object' && job.lora_weights !== null ? job.lora_weights as Record<string, number> : undefined,
       loraPresets: settings.loraPresets,
-      templatePath: env.I2V_WORKFLOW_TEMPLATE_PATH_LOCAL || env.I2V_WORKFLOW_TEMPLATE_PATH,
+      workflow: workflow,
     });
     
     // Return the complete workflow payload for the worker

@@ -40,6 +40,7 @@ model Session {
 model Video {
   id                  String      @id @default(cuid())
   userId              String      @map("user_id")
+  workflowId          String?     @map("workflow_id") @default("wan-2.2")
   originalImageUrl    String      @map("original_image_url") @db.VarChar(500)
   prompt              String?     @db.VarChar(2000)
   tags                String?     @db.VarChar(1000)
@@ -64,8 +65,10 @@ model Video {
   seed                Int?
   likes               VideoLike[]
   user                User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workflow            Workflow?   @relation(fields: [workflowId], references: [id], onDelete: SetDefault)
 
   @@index([userId])
+  @@index([workflowId])
   @@index([status])
   @@index([isPublished])
   @@index([isPublished, createdAt])
@@ -116,4 +119,18 @@ model SponsorClaim {
   @@index([userId])
   @@index([sponsorUsername])
   @@map("sponsor_claims")
+}
+
+model Workflow {
+  id                   String   @id
+  name                 String   @db.VarChar(255)
+  description          String?  @db.VarChar(500)
+  templatePath         String   @db.VarChar(255)
+  compatibleLoraIds    Json     @default("[]") @map("compatible_lora_ids")
+  isDefault            Boolean  @default(false) @map("is_default")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+  videos               Video[]
+
+  @@map("workflows")
 }

@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { getVideoById, updateVideo, getAdminSettings } from '$lib/db';
+import { getVideoById, updateVideo, getAdminSettings, getWorkflowById, getDefaultWorkflow } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { getRunPodConfig, retryRunPodJob, getRunPodJobStatus, mapRunPodStatus, submitRunPodJob } from '$lib/runpod';
 import { buildWorkflow } from '$lib/i2vWorkflow';
@@ -17,6 +17,18 @@ async function submitNewRunPodJob(runpodConfig: any, video: any, origin: string)
   const videoDuration = video.video_duration as (4 | 6) | undefined;
   const videoResolution = video.video_resolution as ('480p' | '720p') | undefined;
 
+  // Resolve workflow to use
+  let workflow = null;
+  if (video.workflow_id) {
+    workflow = await getWorkflowById(video.workflow_id);
+  }
+  if (!workflow) {
+    workflow = await getDefaultWorkflow();
+  }
+  if (!workflow) {
+    throw new Error('No workflow configured');
+  }
+
   // Build the workflow from template with callback URL
   const payload = await buildWorkflow({
     image_name: `${video.id}.png`,
@@ -29,7 +41,7 @@ async function submitNewRunPodJob(runpodConfig: any, video: any, origin: string)
     videoResolution,
     loraWeights: video.lora_weights,
     loraPresets: settings.loraPresets,
-    templatePath: env.I2V_WORKFLOW_TEMPLATE_PATH,
+    workflow: workflow,
   });
 
   return await submitRunPodJob(runpodConfig, payload);

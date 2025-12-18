@@ -15,9 +15,20 @@
   let userTotalPages = $derived(data.userTotalPages || 1);
   let userTotal = $derived(data.userTotal || 0);
   let userSearch = $derived(data.userSearch || '');
+  let workflows = $state(data.workflows || []);
   let queueStatus: any = $state(null);
   let saving = $state(false);
   let loadingQueue = $state(false);
+  let savingWorkflow = $state(false);
+  
+  // Workflow editor modal state
+  let showWorkflowModal = $state(false);
+  let editingWorkflowId: string | null = $state(null);
+  let workflowName = $state('');
+  let workflowDescription = $state('');
+  let workflowTemplatePath = $state('');
+  let workflowIsDefault = $state(false);
+  let workflowCompatibleLoras = $state<string[]>([]);
   
   // Toast notification system
   let toastMessage = $state('');
@@ -340,6 +351,189 @@
     settings = { ...settings, loraPresets: list };
   }
   
+  function openWorkflowModal(workflow?: any) {
+    if (workflow) {
+      editingWorkflowId = workflow.id;
+      workflowName = workflow.name;
+      workflowDescription = workflow.description || '';
+      workflowTemplatePath = workflow.templatePath;
+      workflowIsDefault = workflow.isDefault;
+      workflowCompatibleLoras = workflow.compatibleLoraIds || [];
+    } else {
+      editingWorkflowId = null;
+      workflowName = '';
+      workflowDescription = '';
+      workflowTemplatePath = 'data/new_workflow.json.tmpl';
+      workflowIsDefault = false;
+      workflowCompatibleLoras = [];
+    }
+    showWorkflowModal = true;
+  }
+  
+  function closeWorkflowModal() {
+    showWorkflowModal = false;
+    editingWorkflowId = null;
+    workflowName = '';
+    workflowDescription = '';
+    workflowTemplatePath = '';
+    workflowIsDefault = false;
+    workflowCompatibleLoras = [];
+  }
+  
+  function toggleLoraInModal(loraId: string) {
+    if (workflowCompatibleLoras.includes(loraId)) {
+      workflowCompatibleLoras = workflowCompatibleLoras.filter(id => id !== loraId);
+    } else {
+      workflowCompatibleLoras = [...workflowCompatibleLoras, loraId];
+    }
+  }
+  
+  async function saveWorkflow() {
+    if (!workflowName.trim() || !workflowTemplatePath.trim()) {
+      showNotification('Workflow name and template path are required', 'error');
+      return;
+    }
+    
+    savingWorkflow = true;
+    try {
+      if (editingWorkflowId) {
+        // Update existing workflow
+        const response = await fetch(`/api/admin/workflows/${editingWorkflowId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: workflowName.trim(),
+            description: workflowDescription.trim() || undefined,
+            templatePath: workflowTemplatePath.trim(),
+            isDefault: workflowIsDefault,
+            compatibleLoraIds: workflowCompatibleLoras,
+          }),
+        });
+        
+        if (response.ok) {
+          const updated = await response.json();
+          workflows = workflows.map(w => w.id === editingWorkflowId ? updated : w);
+          showNotification('Workflow updated successfully', 'success');
+          closeWorkflowModal();
+        } else {
+          const error = await response.json();
+          showNotification(`Failed to update workflow: ${error.error || 'Unknown error'}`, 'error');
+        }
+      } else {
+        // Create new workflow
+        const response = await fetch('/api/admin/workflows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: workflowName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+            name: workflowName.trim(),
+            description: workflowDescription.trim() || undefined,
+            templatePath: workflowTemplatePath.trim(),
+            isDefault: workflowIsDefault,
+            compatibleLoraIds: workflowCompatibleLoras,
+          }),
+        });
+        
+        if (response.ok) {
+          const created = await response.json();
+          workflows = [...workflows, created];
+          showNotification('Workflow created successfully', 'success');
+          closeWorkflowModal();
+        } else {
+          const error = await response.json();
+          showNotification(`Failed to create workflow: ${error.error || 'Unknown error'}`, 'error');
+        }
+      }
+    } catch (err) {
+      showNotification(`Error: ${String(err)}`, 'error');
+    } finally {
+      savingWorkflow = false;
+    }
+  }
+  
+  async function deleteWorkflow(workflowId: string, workflowName: string) {
+    if (!confirm(`Are you sure you want to delete workflow "${workflowName}"? This action cannot be undone.`)) {
+      return;
+    }
+    
+    try {
+      const response = await fetch(`/api/admin/workflows/${workflowId}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        workflows = workflows.filter(w => w.id !== workflowId);
+        showNotification('Workflow deleted successfully', 'success');
+      } else {
+        const error = await response.json();
+        showNotification(`Failed to delete workflow: ${error.error || 'Unknown error'}`, 'error');
+      }
+    } catch (err) {
+      showNotification(`Error: ${String(err)}`, 'error');
+    }
+  }
+  
+  async function setDefaultWorkflow(workflowId: string) {
+    try {
+      const response = await fetch(`/api/admin/workflows/${workflowId}/default`, {
+        method: 'POST',
+      });
+      
+      if (response.ok) {
+        // Update all workflows - unset default on others
+        workflows = workflows.map(w => ({ ...w, isDefault: w.id === workflowId }));
+        showNotification('Default workflow updated', 'success');
+      } else {
+        const error = await response.json();
+        showNotification(`Failed to set default: ${error.error || 'Unknown error'}`, 'error');
+      }
+    } catch (err) {
+      showNotification(`Error: ${String(err)}`, 'error');
+    }
+  }
+  
+  async function updateWorkflow(workflowId: string, compatibleLoraIds: string[]) {
+    savingWorkflow = true;
+    try {
+      const response = await fetch(`/api/admin/workflows/${workflowId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ compatibleLoraIds }),
+      });
+      
+      if (response.ok) {
+        const updated = await response.json();
+        workflows = workflows.map(w => w.id === workflowId ? updated : w);
+        showNotification('Workflow updated successfully', 'success');
+      } else {
+        const error = await response.json();
+        showNotification(`Failed to update workflow: ${error.error || 'Unknown error'}`, 'error');
+      }
+    } catch (err) {
+      showNotification(`Error: ${String(err)}`, 'error');
+    } finally {
+      savingWorkflow = false;
+    }
+  }
+  
+  function toggleLoraForWorkflow(workflowId: string, loraId: string) {
+    const workflow = workflows.find(w => w.id === workflowId);
+    if (!workflow) return;
+    
+    const currentIds = workflow.compatibleLoraIds || [];
+    const newIds = currentIds.includes(loraId)
+      ? currentIds.filter(id => id !== loraId)
+      : [...currentIds, loraId];
+    
+    // Update local state immediately for better UX
+    workflows = workflows.map(w => 
+      w.id === workflowId ? { ...w, compatibleLoraIds: newIds } : w
+    );
+    
+    // Save to server
+    updateWorkflow(workflowId, newIds);
+  }
+  
   // Load queue status on mount
   $effect(() => {
     if (typeof window !== 'undefined') {
@@ -426,33 +620,6 @@
         {/if}
       </div>
       
-      <div class="divider">Daily Quota by Role</div>
-      
-      <div class="space-y-4">
-        <p class="text-sm opacity-70">Configure daily video generation limits for each role.</p>
-        
-        {#if roleList && roleList.length > 0}
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {#each roleList as role}
-              <div class="form-control">
-                <label class="label" for={`quota-${role.name}`}>
-                  <span class="label-text">{role.name}</span>
-                </label>
-                <input 
-                  id={`quota-${role.name}`}
-                  type="number" 
-                  bind:value={settings.quotaPerDay[role.name]} 
-                  class="input input-bordered" 
-                  min="0" 
-                />
-              </div>
-            {/each}
-          </div>
-        {:else}
-          <p class="text-base-content/70 text-sm">No roles configured yet. Add roles above to set quotas.</p>
-        {/if}
-      </div>
-      
       <div class="divider">System Settings</div>
       
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -526,6 +693,70 @@
           {saving ? $_('admin.settings.saving') : $_('admin.settings.save')}
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Workflow Management -->
+  <div class="card bg-base-200 shadow-xl mb-6">
+    <div class="card-body">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="card-title text-2xl">Workflow Management</h2>
+        <button class="btn btn-primary btn-sm" onclick={() => openWorkflowModal()}>+ Add Workflow</button>
+      </div>
+      <p class="text-sm opacity-70 mb-4">Configure workflows and their compatible LoRAs. Users will only see compatible LoRAs when they select a workflow.</p>
+
+      {#if workflows && workflows.length > 0}
+        <div class="space-y-6">
+          {#each workflows as workflow}
+            <div class="card bg-base-100 shadow">
+              <div class="card-body">
+                <div class="flex items-start justify-between mb-4">
+                  <div>
+                    <h3 class="text-lg font-bold">{workflow.name}</h3>
+                    {#if workflow.description}
+                      <p class="text-sm opacity-70">{workflow.description}</p>
+                    {/if}
+                    <p class="text-xs opacity-60 mt-1">Template: {workflow.templatePath}</p>
+                    {#if workflow.isDefault}
+                      <span class="badge badge-primary badge-sm mt-2">Default</span>
+                    {/if}
+                  </div>
+                  <div class="flex gap-2">
+                    {#if !workflow.isDefault}
+                      <button 
+                        class="btn btn-xs btn-outline"
+                        onclick={() => setDefaultWorkflow(workflow.id)}
+                      >
+                        Set Default
+                      </button>
+                    {/if}
+                    <button 
+                      class="btn btn-xs btn-outline"
+                      onclick={() => openWorkflowModal(workflow)}
+                    >
+                      Edit
+                    </button>
+                    <button 
+                      class="btn btn-xs btn-outline btn-error"
+                      onclick={() => deleteWorkflow(workflow.id, workflow.name)}
+                      disabled={workflow.isDefault}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+                
+                <div class="mt-2">
+                  <span class="text-sm opacity-70">Compatible LoRAs: </span>
+                  <span class="font-semibold">{workflow.compatibleLoraIds?.length || 0}</span>
+                </div>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <p class="text-base-content/70">No workflows found. Run database migrations to create workflows.</p>
+      {/if}
     </div>
   </div>
 
@@ -1026,7 +1257,7 @@
 <!-- Role Editor Modal -->
 {#if showRoleModal && editingUser}
   <div class="modal modal-open">
-    <div class="modal-box">
+    <div class="modal-box max-w-3xl">
       <h3 class="font-bold text-lg mb-4">{$_('admin.users.roleModal.title', { values: { username: editingUser.username } })}</h3>
       
       <div class="mb-4">
@@ -1067,6 +1298,103 @@
       </div>
     </div>
     <button class="modal-backdrop" type="button" onclick={closeRoleModal} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && closeRoleModal()} aria-label="Close modal"></button>
+  </div>
+{/if}
+
+<!-- Workflow Editor Modal -->
+{#if showWorkflowModal}
+  <div class="modal modal-open">
+    <div class="modal-box max-w-4xl">
+      <h3 class="font-bold text-lg mb-4">
+        {editingWorkflowId ? 'Edit Workflow' : 'Add New Workflow'}
+      </h3>
+      
+      <div class="form-control mb-4">
+        <label class="label" for="workflow-name">
+          <span class="label-text">Workflow Name</span>
+        </label>
+        <input 
+          id="workflow-name"
+          type="text" 
+          bind:value={workflowName}
+          placeholder="e.g., WAN 2.2, Dasiwa 1.0"
+          class="input input-bordered w-full"
+        />
+      </div>
+      
+      <div class="form-control mb-4">
+        <label class="label" for="workflow-description">
+          <span class="label-text">Description</span>
+        </label>
+        <textarea 
+          id="workflow-description"
+          bind:value={workflowDescription}
+          placeholder="Brief description of this workflow"
+          class="textarea textarea-bordered w-full"
+          rows="2"
+        ></textarea>
+      </div>
+      
+      <div class="form-control mb-4">
+        <label class="label" for="workflow-template">
+          <span class="label-text">Template Path</span>
+          <span class="label-text-alt">Relative to project root</span>
+        </label>
+        <input 
+          id="workflow-template"
+          type="text" 
+          bind:value={workflowTemplatePath}
+          placeholder="data/workflow_template.json.tmpl"
+          class="input input-bordered w-full font-mono text-sm"
+        />
+      </div>
+      
+      <div class="form-control mb-4">
+        <label class="label cursor-pointer justify-start gap-3" for="workflow-default">
+          <input 
+            id="workflow-default"
+            type="checkbox" 
+            bind:checked={workflowIsDefault}
+            class="checkbox checkbox-primary"
+          />
+          <div>
+            <span class="label-text font-semibold">Set as Default Workflow</span>
+            <p class="text-xs opacity-70">New videos will use this workflow if not specified</p>
+          </div>
+        </label>
+      </div>
+      
+      <div class="divider">Compatible LoRAs</div>
+      
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-96 overflow-y-auto p-2 border border-base-300 rounded-lg">
+        {#each (settings.loraPresets || []) as lora}
+          <label class="flex items-center gap-2 p-2 rounded hover:bg-base-200 cursor-pointer">
+            <input
+              type="checkbox"
+              class="checkbox checkbox-primary checkbox-sm"
+              checked={workflowCompatibleLoras.includes(lora.id)}
+              onchange={() => toggleLoraInModal(lora.id)}
+            />
+            <div class="flex-1 min-w-0">
+              <span class="text-sm truncate block">{lora.label}</span>
+              <span class="badge badge-xs badge-ghost">{lora.chain}</span>
+            </div>
+          </label>
+        {/each}
+      </div>
+      
+      <div class="text-xs opacity-60 mt-2">
+        Selected: {workflowCompatibleLoras.length} LoRAs
+      </div>
+      
+      <div class="modal-action">
+        <button class="btn btn-ghost" onclick={closeWorkflowModal} disabled={savingWorkflow}>Cancel</button>
+        <button class="btn btn-primary" onclick={saveWorkflow} disabled={savingWorkflow}>
+          {savingWorkflow ? 'Saving...' : (editingWorkflowId ? 'Update' : 'Create')}
+        </button>
+      </div>
+    </div>
+    <button class="modal-backdrop" type="button" onclick={closeWorkflowModal} aria-label="Close modal"></button>
   </div>
 {/if}
 

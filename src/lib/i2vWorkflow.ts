@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import probe from 'probe-image-size';
 import type { LoraPreset } from './loraPresets';
+import type { Workflow } from './IDatabase';
 import { normalizeLoraPresets } from './loraPresets';
 
 interface WorkflowParams {
@@ -15,7 +16,8 @@ interface WorkflowParams {
   videoResolution?: '480p' | '720p';
   loraWeights?: Record<string, number>;
   loraPresets?: LoraPreset[];
-  templatePath?: string;
+  workflow?: Workflow;
+  templatePath?: string; // Deprecated: use workflow.templatePath instead
 }
 
 /**
@@ -58,8 +60,9 @@ function calculateVideoDimensions(
 }
 
 export async function buildWorkflow(params: WorkflowParams): Promise<object> {
-  const templatePath = params.templatePath || path.resolve('data/api_template.json.tmpl');
-  let template = await fs.readFile(templatePath, 'utf-8');
+  // Resolve template path: prefer workflow.templatePath, fall back to templatePath parameter, or use default
+  let resolvedTemplatePath = params.workflow?.templatePath || params.templatePath || path.resolve('data/api_template.json.tmpl');
+  let template = await fs.readFile(resolvedTemplatePath, 'utf-8');
 
   // Sanitize and replace placeholders using JSON.stringify to properly escape values
   // slice(1, -1) removes the outer quotes that JSON.stringify adds

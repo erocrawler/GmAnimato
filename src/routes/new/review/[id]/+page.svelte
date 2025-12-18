@@ -7,6 +7,7 @@
   import { createTagsInput, melt } from '@melt-ui/svelte';
   import { DEFAULT_LORA_PRESETS } from '$lib/loraPresets';
   import type { LoraPreset } from '$lib/loraPresets';
+  import type { Workflow } from '$lib/IDatabase';
 
   export let data: any;
   let entry = data.entry as any;
@@ -22,6 +23,11 @@
   let pollInterval: ReturnType<typeof setInterval> | null = null;
   let showAdvancedSettings = false;
   let progressPercentage: number | null = null;
+
+  // Workflow management
+  let workflows: Workflow[] = [];
+  let selectedWorkflowId: string = '';
+  let loadingWorkflows = true;
 
   const LORA_PRESETS: LoraPreset[] = (data.loraPresets && data.loraPresets.length > 0)
     ? data.loraPresets
@@ -48,6 +54,17 @@
   $: visibleStepOptions = canUseQuality ? stepOptions : stepOptions.filter((o) => !o.requiresPaid);
   $: visibleResolutionOptions = canUseQuality ? resolutionOptions : resolutionOptions.filter((o) => !o.requiresPaid);
   $: if (!canUseQuality && iterationSteps === 8) iterationSteps = 4;
+  
+  // Get LoRAs compatible with selected workflow
+  $: filteredLoraPresets = selectedWorkflowId && workflows.length > 0
+    ? (() => {
+        const workflow = workflows.find(w => w.id === selectedWorkflowId);
+        if (workflow) {
+          return LORA_PRESETS.filter(lora => workflow.compatibleLoraIds.includes(lora.id));
+        }
+        return LORA_PRESETS;
+      })()
+    : LORA_PRESETS;
   $: if (!canUseQuality && videoResolution === '720p') videoResolution = '480p';
   $: resolutionOptions = [
     { value: '480p', label: get(_)('review.resolution.standard'), description: get(_)('review.resolution.standardDesc'), requiresPaid: false },
@@ -60,7 +77,7 @@
   ];
 
 
-  // Track enabled state for each LoRA
+  // Track enabled state for each LoRA - initialize with LORA_PRESETS
   let loraEnabled: Record<string, boolean> = Object.fromEntries(
     LORA_PRESETS.map((lora) => [
       lora.id,
@@ -74,6 +91,26 @@
   let loraWeights: Record<string, number> = Object.fromEntries(
     LORA_PRESETS.map((lora) => [lora.id, lora.default])
   );
+
+  // Update loraEnabled and loraWeights when filteredLoraPresets changes
+  $: if (filteredLoraPresets && Array.isArray(filteredLoraPresets)) {
+    loraEnabled = Object.fromEntries(
+      filteredLoraPresets.map((lora) => [
+        lora.id,
+        loraEnabled[lora.id] !== undefined
+          ? loraEnabled[lora.id]
+          : (lora.isConfigurable === false
+            ? true
+            : lora.enabled !== undefined
+              ? lora.enabled
+              : true
+          )
+      ])
+    );
+    loraWeights = Object.fromEntries(
+      filteredLoraPresets.map((lora) => [lora.id, loraWeights[lora.id] ?? lora.default])
+    );
+  }
 
   $: isEditable = entry.status !== 'processing' && entry.status !== 'completed' && entry.status !== 'in_queue' && entry.status !== 'failed' && entry.status !== 'deleted';
 
@@ -141,7 +178,23 @@
     }
   }
 
-  onMount(() => {
+  onMount(async () => {
+    // Fetch available workflows
+    try {
+      const res = await fetch('/api/workflows');
+      if (res.ok) {
+        workflows = await res.json();
+        // Set default workflow to the first one or find the default one
+        const defaultWorkflow = workflows.find(w => w.isDefault);
+        selectedWorkflowId = defaultWorkflow?.id || (workflows[0]?.id || '');
+      }
+    } catch (err) {
+      console.error('Failed to fetch workflows:', err);
+      // Fallback to empty list, will use default LoRAs
+    } finally {
+      loadingWorkflows = false;
+    }
+
     // Redirect to video details if already completed
     if (entry.status === 'completed') {
       goto(`/videos/${entry.id}`);
@@ -178,9 +231,9 @@
   }
 
   function resetLoraWeights() {
-    loraWeights = Object.fromEntries(LORA_PRESETS.map((lora) => [lora.id, lora.default]));
+    loraWeights = Object.fromEntries(filteredLoraPresets.map((lora) => [lora.id, lora.default]));
     loraEnabled = Object.fromEntries(
-      LORA_PRESETS.map((lora) => [
+      filteredLoraPresets.map((lora) => [
         lora.id,
         lora.isConfigurable === false
           ? true
@@ -233,6 +286,7 @@
           id: entry.id, 
           prompt, 
           tags: $tags.map(t => t.value),
+          workflowId: selectedWorkflowId,
           loraWeights: filteredLoraWeights,
           iterationSteps,
           videoDuration,
@@ -413,7 +467,7 @@
         ></textarea>
       </div>
 
-      <!-- Advanced Settings (LoRA Weights) -->
+      <!-- Advanced Settings -->
       <div class="divider mt-6 mb-2"></div>
       <div class="collapse collapse-arrow bg-base-200">
         <input type="checkbox" bind:checked={showAdvancedSettings} />
@@ -421,6 +475,28 @@
           {$_('review.advancedSettings')}
         </div>
         <div class="collapse-content">
+          {#if !loadingWorkflows}
+            <div class="space-y-4 mb-6">
+              <div class="flex items-center justify-between">
+                <h3 class="font-semibold">Workflow</h3>
+                <span class="text-xs opacity-70">Select the AI model and workflow for video generation</span>
+              </div>
+              <select 
+                class="select select-bordered w-full"
+                bind:value={selectedWorkflowId}
+                disabled={!isEditable}
+              >
+                {#each workflows as workflow}
+                  <option value={workflow.id}>{workflow.name}</option>
+                {/each}
+              </select>
+              {#if workflows.find(w => w.id === selectedWorkflowId)?.description}
+                <p class="text-xs opacity-70">{workflows.find(w => w.id === selectedWorkflowId)?.description}</p>
+              {/if}
+            </div>
+            <div class="divider"></div>
+          {/if}
+          
           <div class="space-y-4 mb-6">
             <div class="flex items-center justify-between">
               <h3 class="font-semibold">{$_('review.iteration.title')}</h3>
@@ -521,7 +597,7 @@
           </div>
           <p class="text-sm opacity-70 mb-4">{$_('review.loraWeightsHelp')}</p>
           <div class="space-y-4">
-            {#each LORA_PRESETS as lora}
+            {#each filteredLoraPresets as lora}
               <div class="space-y-1">
                 <div class="flex items-center justify-between text-sm">
                   <span>{lora.label}</span>

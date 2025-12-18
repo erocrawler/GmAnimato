@@ -1,10 +1,10 @@
 import { PrismaClient } from '@prisma/client';
-import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic } from './IDatabase';
+import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic, Workflow } from './IDatabase';
 import { DEFAULT_LORA_PRESETS, normalizeLoraPresets } from './loraPresets';
 import { PrismaPg } from '@prisma/adapter-pg'
 
 export class PostgresDatabase implements IDatabase {
-  private prisma: PrismaClient;
+  public prisma: PrismaClient;
 
   constructor(databaseUrl: string) {
     const adapter = new PrismaPg({ connectionString: databaseUrl });
@@ -20,6 +20,7 @@ export class PostgresDatabase implements IDatabase {
       data: {
         id: entry.id,
         userId: entry.user_id,
+        workflowId: entry.workflow_id,
         originalImageUrl: entry.original_image_url,
         prompt: entry.prompt,
         tags: entry.tags ? JSON.stringify(entry.tags) : null,
@@ -680,6 +681,7 @@ export class PostgresDatabase implements IDatabase {
     return {
       id: video.id,
       user_id: video.userId,
+      workflow_id: video.workflowId || undefined,
       original_image_url: video.originalImageUrl,
       prompt: video.prompt || undefined,
       tags: video.tags ? JSON.parse(video.tags) : undefined,
@@ -826,6 +828,40 @@ export class PostgresDatabase implements IDatabase {
       applied_role: c.appliedRole,
       claimed_at: c.claimedAt.toISOString(),
     }));
+  }
+
+  // ==================== Workflow Methods ====================
+
+  async getWorkflowById(id: string): Promise<Workflow | null> {
+    const workflow = await this.prisma.workflow.findUnique({ where: { id } });
+    return workflow ? this.mapToWorkflow(workflow) : null;
+  }
+
+  async getWorkflows(): Promise<Workflow[]> {
+    const workflows = await this.prisma.workflow.findMany();
+    return workflows.map(w => this.mapToWorkflow(w));
+  }
+
+  async getDefaultWorkflow(): Promise<Workflow | null> {
+    const workflow = await this.prisma.workflow.findFirst({ where: { isDefault: true } });
+    return workflow ? this.mapToWorkflow(workflow) : null;
+  }
+
+  private mapToWorkflow(workflow: any): Workflow {
+    return {
+      id: workflow.id,
+      name: workflow.name,
+      description: workflow.description || undefined,
+      templatePath: workflow.templatePath,
+      compatibleLoraIds: Array.isArray(workflow.compatibleLoraIds)
+        ? workflow.compatibleLoraIds
+        : (typeof workflow.compatibleLoraIds === 'string'
+          ? JSON.parse(workflow.compatibleLoraIds)
+          : []),
+      isDefault: workflow.isDefault,
+      createdAt: workflow.createdAt.toISOString(),
+      updatedAt: workflow.updatedAt.toISOString(),
+    };
   }
 
   async disconnect() {
