@@ -281,6 +281,11 @@
       "highDemand": "Our servers are experiencing high demand right now. Please try again in a few minutes.",
       "okButton": "OK, I'll Try Later"
     },
+    "quotaLimit": {
+      "title": "Daily Quota Reached",
+      "message": "Become a sponsor to get more video generation quota!",
+      "sponsorButton": "Become a Sponsor"
+    },
     "warnings": {
       "noTags": {
         "title": "Image Recognition Failed",

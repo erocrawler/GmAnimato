@@ -280,6 +280,11 @@
       "highDemand": "我们的服务器当前需求量很大。请几分钟后再试。",
       "okButton": "好的，稍后再试"
     },
+    "quotaLimit": {
+      "title": "已达每日配额",
+      "message": "成为赞助者以获得更多视频生成次数！",
+      "sponsorButton": "成为赞助者"
+    },
     "warnings": {
       "noTags": {
         "title": "图像识别失败",

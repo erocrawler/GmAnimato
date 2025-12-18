@@ -2,6 +2,7 @@ import type { PageServerLoad } from './$types';
 import { error } from '@sveltejs/kit';
 import { getVideoById, getAdminSettings } from '$lib/db';
 import { normalizeLoraPresets } from '$lib/loraPresets';
+import { env } from '$env/dynamic/private';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
   const id = params.id;
@@ -14,6 +15,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   return { 
     entry, 
     loraPresets: normalizeLoraPresets(adminSettings.loraPresets),
-    userRoles: locals.user?.roles || []
+    userRoles: locals.user?.roles || [],
+    sponsorUrl: env.SPONSOR_URL
   } as any;
 };
