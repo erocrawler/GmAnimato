@@ -633,11 +633,14 @@ export class PostgresDatabase implements IDatabase {
     const data: any = {};
     
     if (patch.registrationEnabled !== undefined) data.registrationEnabled = patch.registrationEnabled;
+    if (patch.roles !== undefined) data.roles = patch.roles;
     if (patch.quotaPerDay !== undefined) data.quotaPerDay = patch.quotaPerDay;
     if (patch.maxConcurrentJobs !== undefined) data.maxConcurrentJobs = patch.maxConcurrentJobs;
     if (patch.maxQueueThreshold !== undefined) data.maxQueueThreshold = patch.maxQueueThreshold;
     if (patch.localQueueThreshold !== undefined) data.localQueueThreshold = patch.localQueueThreshold;
     if (patch.loraPresets !== undefined) data.loraPresets = normalizeLoraPresets(patch.loraPresets);
+    if (patch.sponsorApiUrl !== undefined) data.sponsorApiUrl = patch.sponsorApiUrl;
+    if (patch.sponsorApiToken !== undefined) data.sponsorApiToken = patch.sponsorApiToken;
 
     const settings = await this.prisma.adminSettings.upsert({
       where: { id: 'default' },
@@ -720,16 +723,109 @@ export class PostgresDatabase implements IDatabase {
       ? JSON.parse(settings.quotaPerDay) 
       : (settings.quotaPerDay || { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 });
     
+    const roles = settings.roles 
+      ? (typeof settings.roles === 'string' ? JSON.parse(settings.roles) : settings.roles)
+      : undefined;
+    
     return {
       id: settings.id,
       registrationEnabled: settings.registrationEnabled,
+      roles,
       quotaPerDay,
       maxConcurrentJobs: settings.maxConcurrentJobs,
       maxQueueThreshold: settings.maxQueueThreshold,
       localQueueThreshold: settings.localQueueThreshold,
       loraPresets: normalizeLoraPresets(settings.loraPresets ?? DEFAULT_LORA_PRESETS),
+      sponsorApiUrl: settings.sponsorApiUrl || undefined,
+      sponsorApiToken: settings.sponsorApiToken || undefined,
       updatedAt: settings.updatedAt.toISOString(),
     };
+  }
+
+  // ==================== Sponsor Claim Methods ====================
+
+  async getSponsorClaimByUsername(sponsorUsername: string): Promise<SponsorClaim | null> {
+    const claim = await this.prisma.sponsorClaim.findUnique({
+      where: { sponsorUsername: sponsorUsername.toLowerCase() },
+    });
+
+    if (!claim) return null;
+
+    return {
+      id: claim.id,
+      user_id: claim.userId,
+      sponsor_username: claim.sponsorUsername,
+      sponsor_nickname: claim.sponsorNickname || undefined,
+      sponsor_avatar: claim.sponsorAvatar || undefined,
+      sponsor_tier: claim.sponsorTier,
+      applied_role: claim.appliedRole,
+      claimed_at: claim.claimedAt.toISOString(),
+    };
+  }
+
+  async getSponsorClaimsByUser(userId: string): Promise<SponsorClaim[]> {
+    const claims = await this.prisma.sponsorClaim.findMany({
+      where: { userId },
+      orderBy: { claimedAt: 'desc' },
+    });
+
+    return claims.map(claim => ({
+      id: claim.id,
+      user_id: claim.userId,
+      sponsor_username: claim.sponsorUsername,
+      sponsor_nickname: claim.sponsorNickname || undefined,
+      sponsor_avatar: claim.sponsorAvatar || undefined,
+      sponsor_tier: claim.sponsorTier,
+      applied_role: claim.appliedRole,
+      claimed_at: claim.claimedAt.toISOString(),
+    }));
+  }
+
+  async createSponsorClaim(claim: Omit<SponsorClaim, 'id' | 'claimed_at'>): Promise<SponsorClaim> {
+    const created = await this.prisma.sponsorClaim.create({
+      data: {
+        userId: claim.user_id,
+        sponsorUsername: claim.sponsor_username.toLowerCase(),
+        sponsorNickname: claim.sponsor_nickname || null,
+        sponsorAvatar: claim.sponsor_avatar || null,
+        sponsorTier: claim.sponsor_tier,
+        appliedRole: claim.applied_role,
+      },
+    });
+
+    return {
+      id: created.id,
+      user_id: created.userId,
+      sponsor_username: created.sponsorUsername,
+      sponsor_nickname: created.sponsorNickname || undefined,
+      sponsor_avatar: created.sponsorAvatar || undefined,
+      sponsor_tier: created.sponsorTier,
+      applied_role: created.appliedRole,
+      claimed_at: created.claimedAt.toISOString(),
+    };
+  }
+
+  async deleteSponsorClaim(id: string): Promise<boolean> {
+    try {
+      await this.prisma.sponsorClaim.delete({ where: { id } });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async getAllSponsorClaims(): Promise<SponsorClaim[]> {
+    const claims = await this.prisma.sponsorClaim.findMany();
+    return claims.map(c => ({
+      id: c.id,
+      user_id: c.userId,
+      sponsor_username: c.sponsorUsername,
+      sponsor_nickname: c.sponsorNickname || undefined,
+      sponsor_avatar: c.sponsorAvatar || undefined,
+      sponsor_tier: c.sponsorTier,
+      applied_role: c.appliedRole,
+      claimed_at: c.claimedAt.toISOString(),
+    }));
   }
 
   async disconnect() {

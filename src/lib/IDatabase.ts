@@ -52,15 +52,35 @@ export type Session = {
 
 import type { LoraPreset } from './loraPresets';
 
+export type RoleConfig = {
+  name: string;
+  sponsorTier?: string; // Map sponsor tier (schemeName) to this role
+  description?: string;
+};
+
 export type AdminSettings = {
   id: string;
   registrationEnabled: boolean;
-  quotaPerDay: Record<string, number>; // Role-based quota map, e.g. { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 }
+  roles?: RoleConfig[]; // Configurable roles with tier mapping
+  quotaPerDay: Record<string, number>; // Role-based quota map, e.g. { "free": 10, "gmgard-user": 50, "paid": 100, "premium": 100 }
   maxConcurrentJobs: number;
   maxQueueThreshold: number;
   localQueueThreshold: number;
   loraPresets?: LoraPreset[];
+  sponsorApiUrl?: string; // GmCrawler sponsor API endpoint
+  sponsorApiToken?: string; // Auth token for sponsor API
   updatedAt?: string;
+};
+
+export type SponsorClaim = {
+  id: string;
+  user_id: string;
+  sponsor_username: string;
+  sponsor_nickname?: string;
+  sponsor_avatar?: string;
+  sponsor_tier: string;
+  applied_role: string;
+  claimed_at: string;
 };
 
 export type PaginatedVideos = {
@@ -133,4 +153,11 @@ export interface IDatabase {
   getAdminSettings(): Promise<AdminSettings>;
   updateAdminSettings(patch: Partial<Omit<AdminSettings, 'id'>>): Promise<AdminSettings>;
   getAllUsers(): Promise<UserPublic[]>;
+  
+  // Sponsor claim methods
+  getSponsorClaimByUsername(sponsorUsername: string): Promise<SponsorClaim | null>;
+  getSponsorClaimsByUser(userId: string): Promise<SponsorClaim[]>;
+  createSponsorClaim(claim: Omit<SponsorClaim, 'id' | 'claimed_at'>): Promise<SponsorClaim>;
+  deleteSponsorClaim(id: string): Promise<boolean>;
+  getAllSponsorClaims(): Promise<SponsorClaim[]>;
 }

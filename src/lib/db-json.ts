@@ -473,4 +473,30 @@ export class JsonFileDatabase implements IDatabase {
     }
     return count;
   }
+
+  // ==================== Sponsor Claim Methods (JSON DB: Stub Implementation) ====================
+  
+  async getSponsorClaimByUsername(sponsorUsername: string): Promise<import('./IDatabase').SponsorClaim | null> {
+    // JSON database doesn't support sponsor claims - always return null
+    return null;
+  }
+
+  async getSponsorClaimsByUser(userId: string): Promise<import('./IDatabase').SponsorClaim[]> {
+    // JSON database doesn't support sponsor claims - always return empty array
+    return [];
+  }
+
+  async createSponsorClaim(claim: Omit<import('./IDatabase').SponsorClaim, 'id' | 'claimed_at'>): Promise<import('./IDatabase').SponsorClaim> {
+    throw new Error('Sponsor claims are only supported with PostgreSQL database');
+  }
+
+  async deleteSponsorClaim(id: string): Promise<boolean> {
+    // JSON database doesn't support sponsor claims
+    return false;
+  }
+
+  async getAllSponsorClaims(): Promise<import('./IDatabase').SponsorClaim[]> {
+    // JSON database doesn't support sponsor claims - always return empty array
+    return [];
+  }
 }

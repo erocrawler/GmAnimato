@@ -134,12 +134,47 @@ export async function deleteUser(id: string) {
 
 // ==================== Admin Settings Functions ====================
 
+// Cache for admin settings to avoid frequent database queries
+let adminSettingsCache: {
+  data: AdminSettings | null;
+  timestamp: number;
+} = {
+  data: null,
+  timestamp: 0
+};
+
+const ADMIN_SETTINGS_CACHE_MS = 30 * 1000; // 30 seconds cache
+
 export async function getAdminSettings() {
-  return db.getAdminSettings();
+  const now = Date.now();
+  
+  // Return cached settings if still valid
+  if (adminSettingsCache.data && (now - adminSettingsCache.timestamp) < ADMIN_SETTINGS_CACHE_MS) {
+    return adminSettingsCache.data;
+  }
+  
+  // Fetch fresh settings
+  const settings = await db.getAdminSettings();
+  
+  // Update cache
+  adminSettingsCache = {
+    data: settings,
+    timestamp: now
+  };
+  
+  return settings;
 }
 
 export async function updateAdminSettings(patch: Partial<Omit<AdminSettings, 'id'>>) {
-  return db.updateAdminSettings(patch);
+  const result = await db.updateAdminSettings(patch);
+  
+  // Invalidate cache when settings are updated
+  adminSettingsCache = {
+    data: null,
+    timestamp: 0
+  };
+  
+  return result;
 }
 
 export async function getAllUsers() {
@@ -168,6 +203,28 @@ export async function deleteUserSessions(userId: string) {
   return db.deleteUserSessions(userId);
 }
 
+// ==================== Sponsor Claim Functions ====================
+
+export async function getSponsorClaimByUsername(sponsorUsername: string) {
+  return db.getSponsorClaimByUsername(sponsorUsername);
+}
+
+export async function getSponsorClaimsByUser(userId: string) {
+  return db.getSponsorClaimsByUser(userId);
+}
+
+export async function createSponsorClaim(claim: Omit<import('./IDatabase').SponsorClaim, 'id' | 'claimed_at'>) {
+  return db.createSponsorClaim(claim);
+}
+
+export async function deleteSponsorClaim(id: string) {
+  return db.deleteSponsorClaim(id);
+}
+
+export async function getAllSponsorClaims() {
+  return db.getAllSponsorClaims();
+}
+
 // ==================== Helper Functions ====================
 
 /**
@@ -178,13 +235,12 @@ export async function deleteUserSessions(userId: string) {
  */
 export async function checkDailyQuota(user: Pick<User, 'id' | 'roles'>, settings: AdminSettings): Promise<{exceeded: boolean, limit: number, used: number}> {
   // Determine quota limit based on user roles
-  let dailyLimit = settings.quotaPerDay['free-tier'] || 10; // Default for free tier
+  let dailyLimit = settings.quotaPerDay['free-tier'] || 1; // Default for free tier
   
-  // Check roles in priority order: paid/premium > gmgard-user > free
   for (const role of user.roles) {
     if (settings.quotaPerDay[role] !== undefined) {
-      // Use the highest quota the user has access to
-      dailyLimit = Math.max(dailyLimit, settings.quotaPerDay[role]);
+      // sum up all applicable role limits
+      dailyLimit += settings.quotaPerDay[role];
     }
   }
   

@@ -1,8 +1,9 @@
 import type { Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
-import { getSessionByToken, getUserById, deleteSession, deleteExpiredSessions } from '$lib/db';
+import { getSessionByToken, getUserById, deleteSession, deleteExpiredSessions, getAllSponsorClaims, deleteSponsorClaim, updateUser, getAdminSettings } from '$lib/db';
 import { isSessionExpired } from '$lib/session';
 import { building } from '$app/environment';
+import { env } from '$env/dynamic/private';
 
 /**
  * Schedule cleanup task to run at a specific time each day (3 AM server local time)
@@ -31,11 +32,136 @@ function scheduleCleanupTask() {
   }, delay);
 }
 
+async function revalidateSponsors() {
+  try {
+    console.log('[Background Tasks] Revalidating sponsor claims...');
+    
+    // Get all sponsor claims from database
+    const claims = await getAllSponsorClaims();
+    if (claims.length === 0) {
+      console.log('[Background Tasks] No sponsor claims to validate');
+      return;
+    }
+
+    // Fetch current sponsors from API
+    const settings = await getAdminSettings();
+    const sponsorApiUrl = settings.sponsorApiUrl || env.SPONSOR_API_URL || 'http://localhost:3999';
+    const sponsorToken = settings.sponsorApiToken || env.SPONSOR_API_TOKEN;
+    
+    if (!sponsorToken) {
+      console.error('[Background Tasks] Sponsor API token not configured in settings or environment, skipping sponsor validation');
+      return;
+    }
+
+    const response = await fetch(`${sponsorApiUrl}/sponsors`, {
+      headers: {
+        'Authorization': `${sponsorToken}`
+      }
+    });
+
+    if (!response.ok) {
+      console.error(`[Background Tasks] Failed to fetch sponsors: ${response.status}`);
+      return;
+    }
+
+    const data = await response.json();
+    const currentSponsors = data.sponsors || [];
+    
+    // Create a map of current sponsors by username
+    const sponsorMap = new Map<string, { tier: string; status: string }>(
+      currentSponsors.map((s: any) => [
+        s.fansDomainName?.toLowerCase(),
+        { tier: s.schemeName, status: s.status }
+      ])
+    );
+    
+    // Get role configuration
+    const roles = (settings.roles || []) as Array<{ name: string; sponsorTier?: string }>;
+    const tierToRoleMap = new Map<string, string>();
+    roles.forEach(role => {
+      if (role.sponsorTier) {
+        tierToRoleMap.set(role.sponsorTier, role.name);
+      }
+    });
+    
+    let expiredCount = 0;
+    let updatedCount = 0;
+
+    // Check each claim against current sponsors
+    for (const claim of claims) {
+      const sponsorInfo = sponsorMap.get(claim.sponsor_username.toLowerCase());
+      
+      if (!sponsorInfo) {
+        // Sponsor no longer exists - remove claim and role
+        console.log(`[Background Tasks] Sponsor no longer exists: ${claim.sponsor_username} (user: ${claim.user_id})`);
+        
+        const user = await getUserById(claim.user_id);
+        if (user) {
+          const updatedRoles = user.roles.filter(r => r !== claim.applied_role);
+          await updateUser(claim.user_id, { roles: updatedRoles });
+          console.log(`[Background Tasks] Removed role '${claim.applied_role}' from user ${user.username}`);
+        }
+        
+        await deleteSponsorClaim(claim.id);
+        expiredCount++;
+      } else if (sponsorInfo.tier !== claim.sponsor_tier) {
+        // Tier changed - update role
+        const newRole = tierToRoleMap.get(sponsorInfo.tier);
+        
+        if (!newRole) {
+          // New tier has no role mapping - remove claim
+          console.log(`[Background Tasks] Sponsor tier changed to unmapped tier: ${claim.sponsor_username} (${claim.sponsor_tier} → ${sponsorInfo.tier})`);
+          
+          const user = await getUserById(claim.user_id);
+          if (user) {
+            const updatedRoles = user.roles.filter(r => r !== claim.applied_role);
+            await updateUser(claim.user_id, { roles: updatedRoles });
+            console.log(`[Background Tasks] Removed role '${claim.applied_role}' from user ${user.username}`);
+          }
+          
+          await deleteSponsorClaim(claim.id);
+          expiredCount++;
+        } else {
+          // Update to new role
+          console.log(`[Background Tasks] Sponsor tier changed: ${claim.sponsor_username} (${claim.sponsor_tier} → ${sponsorInfo.tier})`);
+          
+          const user = await getUserById(claim.user_id);
+          if (user) {
+            // Remove old role and add new role
+            let updatedRoles = user.roles.filter(r => r !== claim.applied_role);
+            if (!updatedRoles.includes(newRole)) {
+              updatedRoles.push(newRole);
+            }
+            await updateUser(claim.user_id, { roles: updatedRoles });
+            console.log(`[Background Tasks] Updated user ${user.username}: role '${claim.applied_role}' → '${newRole}'`);
+          }
+          
+          // Update the claim record with new tier and role
+          await deleteSponsorClaim(claim.id);
+          // Note: The user can re-claim with the new tier, or we could update the claim in place
+          // For now, we just remove it and they can re-claim if needed
+          updatedCount++;
+        }
+      }
+    }
+    
+    console.log(`[Background Tasks] Sponsor validation complete: ${expiredCount} expired claims removed, ${updatedCount} claims updated`);
+  } catch (err) {
+    console.error('[Background Tasks] Sponsor revalidation error:', err);
+  }
+}
+
 async function runCleanup() {
   try {
+    console.log('[Background Tasks] Running cleanup tasks...');
+    
+    // Clean up expired sessions
     console.log('[Background Tasks] Running session cleanup...');
     const deleted = await deleteExpiredSessions();
     console.log(`[Background Tasks] Deleted ${deleted} expired sessions`);
+    
+    // Revalidate sponsor claims
+    await revalidateSponsors();
   } catch (err) {
     console.error('[Background Tasks] Cleanup error:', err);
   }

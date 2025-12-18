@@ -364,7 +364,9 @@
       },
       "unpublishConfirm": "Unpublish video from {username}?",
       "videoUnpublished": "✓ Video unpublished",
-      "unpublishError": "✗ Error: {error}"
+      "unpublishError": "✗ Error: {error}",
+      "roleUpdated": "✓ User role updated",
+      "roleError": "✗ Error: {error}"
     },
     "videos": {
       "title": "Video Management",
@@ -404,7 +406,44 @@
     "passwordChanged": "✓ Password changed successfully",
     "updateError": "Failed to update account",
     "changePasswordError": "Failed to change password",
-    "gmgardOAuthMessage": "This account signs in via GmGard OAuth; password changes are disabled here."
+    "gmgardOAuthMessage": "This account signs in via GmGard OAuth; password changes are disabled here.",
+    "sponsor": {
+      "title": "Sponsor Tier",
+      "currentSponsorship": "Current Sponsorship",
+      "claimedOn": "Claimed",
+      "checkForUpdates": "Check for Updates",
+      "checking": "Checking...",
+      "searchPlaceholder": "Enter your sponsor/supporter username",
+      "searchButton": "Search",
+      "searching": "Searching...",
+      "claimDescription": "If you're a supporter or sponsor, you can claim your tier to unlock additional benefits and quota.",
+      "usernameLabel": "Sponsor Username",
+      "usernameHelp": "Enter the username associated with your sponsor account on UniFans",
+      "confirmTitle": "Confirm Sponsor Claim",
+      "confirmDescription": "Please verify your sponsor information:",
+      "confirmTier": "Tier:",
+      "confirmBenefit": "You'll receive the <strong>{role}</strong> role with corresponding daily quota.",
+      "confirmNoRole": "This sponsor tier is not configured to provide additional benefits. No role or quota changes will be applied.",
+      "confirmButton": "Confirm & Claim",
+      "claiming": "Claiming...",
+      "cancel": "Cancel",
+      "tokenExpired": "Sponsor feature temporarily unavailable. The authentication token has expired. Please contact the administrator.",
+      "errors": {
+        "enterUsername": "Please enter a sponsor username",
+        "notFound": "Sponsor not found",
+        "alreadyClaimed": "This sponsor has already been claimed by another user",
+        "failed": "Failed to search sponsor",
+        "claimFailed": "Failed to claim sponsor",
+        "updateFailed": "Failed to check sponsorship status",
+        "expired": "Sponsor not found. Your sponsorship may have expired."
+      },
+      "success": {
+        "found": "Sponsor found!",
+        "claimed": "Sponsor claimed successfully!",
+        "upToDate": "Your sponsorship is up to date",
+        "tierChanged": "Your sponsor tier has changed. Please confirm to update."
+      }
+    }
   },
   "language": {
     "select": "Language",

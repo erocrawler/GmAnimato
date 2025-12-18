@@ -2,27 +2,178 @@
   import { _ } from 'svelte-i18n';
   import type { PageData } from './$types';
   
-  export let data: PageData;
+  let { data }: { data: PageData } = $props();
   
-  let user = data.user;
-  const isGmGardUser = user.roles?.includes('gmgard-user');
-  let message = '';
-  let error = '';
+  let user = $derived(data.user);
+  let isGmGardUser = $derived(user?.roles?.includes('gmgard-user'));
+  
+  // Toast notification system
+  let toastMessage = $state('');
+  let toastType: 'success' | 'error' | 'info' = $state('info');
+  let showToast = $state(false);
+  
+  function showNotification(message: string, type: 'success' | 'error' | 'info' = 'info') {
+    toastMessage = message;
+    toastType = type;
+    showToast = true;
+    setTimeout(() => showToast = false, 3000);
+  }
   
   // Account info form
-  let email = user.email || '';
-  let savingInfo = false;
+  let email = $state('');
+  let savingInfo = $state(false);
+  
+  // Sync email from user
+  $effect(() => {
+    email = user?.email || '';
+  });
   
   // Password change form
-  let currentPassword = '';
-  let newPassword = '';
-  let confirmPassword = '';
-  let changingPassword = false;
+  let currentPassword = $state('');
+  let newPassword = $state('');
+  let confirmPassword = $state('');
+  let changingPassword = $state(false);
+  
+  // Sponsor claim form
+  let sponsorUsername = $state('');
+  let searchingSponsor = $state(false);
+  let foundSponsor: any = $state(null);
+  let roleToApply = $state('');
+  let showSponsorConfirm = $state(false);
+  let claimingSponso = $state(false);
+  let updatingSponsorship = $state(false);
+  
+  // Sponsor configuration
+  import { isTokenExpired } from '$lib/jwt';
+  
+  let sponsorApiConfigured = $derived(!!(data.sponsorApiUrl && data.sponsorApiToken));
+  let sponsorClaims = $derived(data.sponsorClaims || []);
+  let currentClaim = $derived(sponsorClaims.length > 0 ? sponsorClaims[0] : null);
+  let tokenExpired = $derived(isTokenExpired(data.sponsorApiToken));
+  let sponsorFeatureDisabled = $derived(!sponsorApiConfigured || tokenExpired);
+  
+  async function searchSponsor() {
+    if (!sponsorUsername.trim()) {
+      showNotification('Please enter a sponsor username', 'error');
+      return;
+    }
+    
+    searchingSponsor = true;
+    
+    try {
+      const response = await fetch('/api/profile/claim-sponsor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: sponsorUsername.trim() }),
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (result.found) {
+          foundSponsor = result.sponsor;
+          roleToApply = result.roleToApply || '';
+          showSponsorConfirm = true;
+          showNotification('Sponsor found!', 'success');
+        } else {
+          showNotification(result.message || 'Sponsor not found', 'error');
+          foundSponsor = null;
+        }
+      } else {
+        const result = await response.json();
+        showNotification(result.error || 'Failed to search sponsor', 'error');
+        foundSponsor = null;
+      }
+    } catch (err) {
+      showNotification('Error: ' + String(err), 'error');
+      foundSponsor = null;
+    } finally {
+      searchingSponsor = false;
+    }
+  }
+  
+  async function confirmSponsorClaim() {
+    if (!foundSponsor || !roleToApply) return;
+    
+    claimingSponso = true;
+    
+    try {
+      const response = await fetch('/api/profile/claim-sponsor', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          username: sponsorUsername.trim(),
+          roleToApply 
+        }),
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        user = result.user;
+        showNotification(result.message || $_('profile.sponsor.success.claimed'), 'success');
+        sponsorUsername = '';
+        foundSponsor = null;
+        roleToApply = '';
+        showSponsorConfirm = false;
+      } else {
+        const result = await response.json();
+        showNotification(result.error || $_('profile.sponsor.errors.claimFailed'), 'error');
+      }
+    } catch (err) {
+      showNotification($_('common.error') + ': ' + String(err), 'error');
+    } finally {
+      claimingSponso = false;
+    }
+  }
+  
+  function closeSponsorConfirm() {
+    showSponsorConfirm = false;
+    foundSponsor = null;
+    roleToApply = '';
+  }
+  
+  async function updateSponsorship() {
+    if (!currentClaim) return;
+    
+    updatingSponsorship = true;
+    
+    try {
+      // Search for the sponsor again to check if tier changed
+      const response = await fetch('/api/profile/claim-sponsor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: currentClaim.sponsor_username }),
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (result.found && result.sponsor) {
+          const sponsor = result.sponsor;
+          // Check if tier changed
+          if (sponsor.schemeName !== currentClaim.sponsor_tier) {
+            // Tier changed, need to update
+            foundSponsor = sponsor;
+            roleToApply = result.roleToApply || '';
+            showSponsorConfirm = true;
+            showNotification($_('profile.sponsor.success.tierChanged'), 'info');
+          } else {
+            showNotification($_('profile.sponsor.success.upToDate'), 'success');
+          }
+        } else {
+          showNotification(result.message || $_('profile.sponsor.errors.expired'), 'error');
+        }
+      } else {
+        const result = await response.json();
+        showNotification(result.error || $_('profile.sponsor.errors.updateFailed'), 'error');
+      }
+    } catch (err) {
+      showNotification($_('common.error') + ': ' + String(err), 'error');
+    } finally {
+      updatingSponsorship = false;
+    }
+  }
   
   async function updateAccountInfo() {
     savingInfo = true;
-    message = '';
-    error = '';
     
     try {
       const response = await fetch('/api/profile/update', {
@@ -34,14 +185,13 @@
       if (response.ok) {
         const result = await response.json();
         user = result.user;
-        message = $_('profile.accountUpdated');
-        setTimeout(() => message = '', 3000);
+        showNotification($_('profile.accountUpdated'), 'success');
       } else {
         const result = await response.json();
-        error = '✗ ' + (result.error || $_('profile.updateError'));
+        showNotification(result.error || $_('profile.updateError'), 'error');
       }
     } catch (err) {
-      error = '✗ ' + $_('common.error') + ': ' + String(err);
+      showNotification($_('common.error') + ': ' + String(err), 'error');
     } finally {
       savingInfo = false;
     }
@@ -49,18 +199,16 @@
   
   async function changePassword() {
     if (newPassword !== confirmPassword) {
-      error = '✗ ' + $_('profile.passwordMismatch');
+      showNotification($_('profile.passwordMismatch'), 'error');
       return;
     }
     
     if (newPassword.length < 6) {
-      error = '✗ ' + $_('profile.passwordTooShort');
+      showNotification($_('profile.passwordTooShort'), 'error');
       return;
     }
     
     changingPassword = true;
-    message = '';
-    error = '';
     
     try {
       const response = await fetch('/api/profile/change-password', {
@@ -73,17 +221,16 @@
       });
       
       if (response.ok) {
-        message = $_('profile.passwordChanged');
+        showNotification($_('profile.passwordChanged'), 'success');
         currentPassword = '';
         newPassword = '';
         confirmPassword = '';
-        setTimeout(() => message = '', 3000);
       } else {
         const result = await response.json();
-        error = '✗ ' + (result.error || $_('profile.changePasswordError'));
+        showNotification(result.error || $_('profile.changePasswordError'), 'error');
       }
     } catch (err) {
-      error = '✗ ' + $_('common.error') + ': ' + String(err);
+      showNotification($_('common.error') + ': ' + String(err), 'error');
     } finally {
       changingPassword = false;
     }
@@ -93,15 +240,12 @@
 <div class="container mx-auto p-6 max-w-4xl">
   <h1 class="text-3xl font-bold mb-6">{$_('profile.title')}</h1>
   
-  {#if message}
-    <div class="alert alert-success mb-4">
-      {message}
-    </div>
-  {/if}
-  
-  {#if error}
-    <div class="alert alert-error mb-4">
-      {error}
+  <!-- Floating Toast Notification -->
+  {#if showToast}
+    <div class="toast toast-top toast-end z-50">
+      <div class="alert" class:alert-success={toastType === 'success'} class:alert-error={toastType === 'error'} class:alert-info={toastType === 'info'}>
+        <span>{toastMessage}</span>
+      </div>
     </div>
   {/if}
   
@@ -172,12 +316,7 @@
           </div>
           <div class="flex gap-2 flex-wrap">
             {#each user.roles as role}
-              <span 
-                class="badge badge-lg" 
-                class:badge-primary={role === 'admin'}
-                class:badge-success={role === 'paid-tier'}
-                class:badge-ghost={role === 'free-tier'}
-              >
+              <span class="badge badge-lg">
                 {role}
               </span>
             {/each}
@@ -188,7 +327,7 @@
       <div class="card-actions justify-end mt-4">
         <button 
           class="btn btn-primary" 
-          on:click={updateAccountInfo} 
+          onclick={updateAccountInfo} 
           disabled={savingInfo}
         >
           {savingInfo ? $_('profile.saving') : $_('profile.saveChanges')}
@@ -197,13 +336,179 @@
     </div>
   </div>
   
+  <!-- Claim Sponsor Section -->
+  {#if sponsorApiConfigured}
+    <div class="card bg-base-200 shadow-xl mb-6" class:opacity-50={sponsorFeatureDisabled}>
+      <div class="card-body">
+        <h2 class="card-title text-2xl mb-4">{$_('profile.sponsor.title')}</h2>
+        
+        {#if tokenExpired}
+          <div class="alert alert-warning mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>{$_('profile.sponsor.tokenExpired')}</span>
+          </div>
+        {:else if currentClaim}
+          <!-- Existing Sponsor Claim -->
+          <div class="hover-3d mb-4">
+            <div class="card bg-gradient-to-br from-primary/10 to-secondary/10 shadow-lg">
+              <div class="card-body">
+              <h3 class="card-title text-lg mb-3 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-primary" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                </svg>
+                {$_('profile.sponsor.currentSponsorship')}
+              </h3>
+              <div class="flex items-start gap-4">
+                {#if currentClaim.sponsor_avatar}
+                  <div class="avatar">
+                    <div class="w-20 h-20 rounded-full ring ring-primary ring-offset-base-100 ring-offset-2">
+                      <img 
+                        src={currentClaim.sponsor_avatar} 
+                        alt={currentClaim.sponsor_nickname}
+                      />
+                    </div>
+                  </div>
+                {/if}
+                <div class="flex-1">
+                  <p class="font-bold text-lg">{currentClaim.sponsor_nickname || 'N/A'}</p>
+                  <p class="text-sm opacity-70">@{currentClaim.sponsor_username}</p>
+                  <div class="flex gap-2 mt-3">
+                    <span class="badge badge-primary badge-lg">{currentClaim.sponsor_tier}</span>
+                    <span class="badge badge-ghost badge-lg">{currentClaim.applied_role}</span>
+                  </div>
+                  <p class="text-xs opacity-60 mt-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline mr-1" viewBox="0 0 20 20" fill="currentColor">
+                      <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd" />
+                    </svg>
+                    {$_('profile.sponsor.claimedOn')} {new Date(currentClaim.claimed_at).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+            </div>
+            </div>
+            <!-- 8 empty divs needed for the 3D effect -->
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+          </div>
+          <div class="mt-4">
+            <button 
+              class="btn btn-sm btn-primary" 
+              onclick={updateSponsorship}
+              disabled={updatingSponsorship || sponsorFeatureDisabled}
+            >
+              {#if updatingSponsorship}
+                <span class="loading loading-spinner loading-xs"></span>
+              {/if}
+              {updatingSponsorship ? $_('profile.sponsor.checking') : $_('profile.sponsor.checkForUpdates')}
+            </button>
+          </div>
+        {:else}
+          <!-- Claim New Sponsorship -->
+          <p class="text-sm opacity-70 mb-4">{$_('profile.sponsor.claimDescription')}</p>
+          
+          <div class="form-control mb-4">
+            <label class="label" for="sponsor-username">
+              <span class="label-text">{$_('profile.sponsor.usernameLabel')}</span>
+            </label>
+            <div class="join w-full">
+              <input 
+                id="sponsor-username"
+                type="text" 
+                bind:value={sponsorUsername}
+                class="input input-bordered join-item flex-1" 
+                placeholder={$_('profile.sponsor.searchPlaceholder')}
+                disabled={searchingSponsor || claimingSponso || sponsorFeatureDisabled}
+              />
+              <button 
+                class="btn join-item btn-primary" 
+                onclick={searchSponsor}
+                disabled={searchingSponsor || claimingSponso || !sponsorUsername.trim() || sponsorFeatureDisabled}
+              >
+                {searchingSponsor ? $_('profile.sponsor.searching') : $_('profile.sponsor.searchButton')}
+              </button>
+            </div>
+            <p class="label-text-alt text-xs opacity-60 mt-2">
+              {$_('profile.sponsor.usernameHelp')}
+            </p>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
+  
+  <!-- Sponsor Confirmation Modal -->
+  {#if showSponsorConfirm && foundSponsor}
+    <div class="modal modal-open">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg mb-4">{$_('profile.sponsor.confirmTitle')}</h3>
+        
+        <div class="mb-4">
+          <p class="text-sm mb-3">{$_('profile.sponsor.confirmDescription')}</p>
+          
+          <div class="flex items-start gap-4 mb-4">
+            {#if foundSponsor.fansAvatar}
+              <img 
+                src={foundSponsor.fansAvatar} 
+                alt={foundSponsor.fansNickname}
+                class="w-16 h-16 rounded-full object-cover"
+              />
+            {/if}
+            <div>
+              <p class="font-semibold">{foundSponsor.fansNickname}</p>
+              <p class="text-sm opacity-70">@{foundSponsor.fansDomainName}</p>
+              <p class="text-sm opacity-70">{$_('profile.sponsor.confirmTier')} <span class="badge badge-sm">{foundSponsor.schemeName}</span></p>
+            </div>
+          </div>
+          
+          {#if roleToApply}
+            <div class="alert alert-info mb-4">
+              <span>{@html $_('profile.sponsor.confirmBenefit', { values: { role: roleToApply } })}</span>
+            </div>
+          {:else}
+            <div class="alert alert-warning mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span>{$_('profile.sponsor.confirmNoRole')}</span>
+            </div>
+          {/if}
+        </div>
+        
+        <div class="modal-action">
+          <button class="btn btn-ghost" onclick={closeSponsorConfirm}>{$_('profile.sponsor.cancel')}</button>
+          <button 
+            class="btn btn-primary" 
+            onclick={confirmSponsorClaim}
+            disabled={claimingSponso || !roleToApply}
+          >
+            {claimingSponso ? $_('profile.sponsor.claiming') : $_('profile.sponsor.confirmButton')}
+          </button>
+        </div>
+      </div>
+      <button 
+        class="modal-backdrop" 
+        type="button" 
+        onclick={closeSponsorConfirm} 
+        aria-label="Close modal"
+      ></button>
+    </div>
+  {/if}
+  
   <!-- Change Password (hidden for GmGard OAuth users) -->
   {#if !isGmGardUser}
     <div class="card bg-base-200 shadow-xl">
       <div class="card-body">
         <h2 class="card-title text-2xl mb-4">{$_('profile.changePassword')}</h2>
         
-        <form on:submit|preventDefault={changePassword}>
+        <form onsubmit={(e) => { e.preventDefault(); changePassword(); }}>
           <div class="grid grid-cols-1 gap-4">
             <div class="form-control">
               <label class="label" for="current-password">

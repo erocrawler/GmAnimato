@@ -18,7 +18,23 @@
   let queueStatus: any = $state(null);
   let saving = $state(false);
   let loadingQueue = $state(false);
-  let message = $state('');
+  
+  // Toast notification system
+  let toastMessage = $state('');
+  let toastType: 'success' | 'error' | 'info' = $state('info');
+  let showToast = $state(false);
+  
+  function showNotification(message: string, type: 'success' | 'error' | 'info' = 'info') {
+    toastMessage = message;
+    toastType = type;
+    showToast = true;
+    setTimeout(() => showToast = false, 3000);
+  }
+
+  // JWT token validation
+  import { getTokenStatus } from '$lib/jwt';
+  
+  let tokenStatus = $derived(getTokenStatus(settings.sponsorApiToken));
 
   function sanitizeLoraPresets(presets: any[]) {
     if (!Array.isArray(presets)) return [];
@@ -43,9 +59,105 @@
   let editingUser: { id: string; username: string; roles: string[] } | null = $state(null);
   let roleInput = $state('');
   
+  // Role config editor state
+  let showRoleConfigModal = $state(false);
+  let editingRoleIndex: number | null = $state(null);
+  let editingRoleName = $state('');
+  let editingRoleSponsorTier = $state('');
+  let editingRoleDescription = $state('');
+  let editingRoleQuota = $state('');
+  
+  let roleList = $derived(settings.roles ?? []);
+  let getAvailableRoleNames = $derived(roleList.map((r: any) => r.name));
+  
+  function addRoleConfig() {
+    const roles = settings.roles ?? [];
+    const newRole = {
+      name: `role-${roles.length + 1}`,
+      sponsorTier: undefined,
+      description: '',
+      dailyQuota: undefined,
+    };
+    settings = {
+      ...settings,
+      roles: [...roles, newRole],
+    };
+  }
+
+  function removeRoleConfig(index: number) {
+    const roles = [...(settings.roles ?? [])];
+    const removedRole = roles[index];
+    roles.splice(index, 1);
+    
+    // Remove from quotaPerDay if it exists
+    const quotaPerDay = { ...settings.quotaPerDay };
+    delete quotaPerDay[removedRole.name];
+    
+    settings = {
+      ...settings,
+      roles,
+      quotaPerDay,
+    };
+  }
+
+  function editRoleConfig(index: number) {
+    const role = settings.roles?.[index];
+    if (!role) return;
+    
+    editingRoleIndex = index;
+    editingRoleName = role.name;
+    editingRoleSponsorTier = role.sponsorTier || '';
+    editingRoleDescription = role.description || '';
+    editingRoleQuota = settings.quotaPerDay?.[role.name]?.toString() || '10';
+    showRoleConfigModal = true;
+  }
+
+  function saveRoleConfig() {
+    if (editingRoleIndex === null) return;
+    if (!editingRoleName.trim()) {
+      alert('Role name is required');
+      return;
+    }
+    
+    const roles = [...(settings.roles ?? [])];
+    const oldRoleName = roles[editingRoleIndex].name;
+    
+    roles[editingRoleIndex] = {
+      name: editingRoleName.trim(),
+      sponsorTier: editingRoleSponsorTier.trim() || undefined,
+      description: editingRoleDescription.trim() || undefined,
+    };
+    
+    // Update quotaPerDay
+    const quotaPerDay = { ...settings.quotaPerDay };
+    const quota = editingRoleQuota ? Number(editingRoleQuota) : 10;
+    
+    // If name changed, update quota mapping
+    if (oldRoleName !== editingRoleName) {
+      delete quotaPerDay[oldRoleName];
+    }
+    quotaPerDay[editingRoleName.trim()] = quota;
+    
+    settings = {
+      ...settings,
+      roles,
+      quotaPerDay,
+    };
+    
+    closeRoleConfigModal();
+  }
+
+  function closeRoleConfigModal() {
+    showRoleConfigModal = false;
+    editingRoleIndex = null;
+    editingRoleName = '';
+    editingRoleSponsorTier = '';
+    editingRoleDescription = '';
+    editingRoleQuota = '';
+  }
+  
   async function saveSettings() {
     saving = true;
-    message = '';
     try {
       const payload = {
         ...settings,
@@ -58,8 +170,7 @@
       });
       
       if (response.ok) {
-        message = '✓ Settings saved successfully';
-        setTimeout(() => message = '', 3000);
+        showNotification($_('admin.settings.saved'), 'success');
         // Ensure loraPresets are sanitized after save (for dropdown)
         const newSettings = await response.json();
         settings = {
@@ -68,10 +179,10 @@
         };
       } else {
         const error = await response.json();
-        message = '✗ Error: ' + (error.error || 'Failed to save settings');
+        showNotification($_('admin.settings.error', { values: { error: error.error || 'Failed to save settings' } }), 'error');
       }
     } catch (err) {
-      message = '✗ Error: ' + String(err);
+      showNotification($_('admin.settings.error', { values: { error: String(err) } }), 'error');
     } finally {
       saving = false;
     }
@@ -120,16 +231,15 @@
       });
       
       if (response.ok) {
-        message = '✓ Video unpublished';
-        setTimeout(() => message = '', 3000);
+        showNotification($_('admin.videos.videoUnpublished'), 'success');
         // Reload page to refresh data
         window.location.reload();
       } else {
         const error = await response.json();
-        message = '✗ Error: ' + (error.error || 'Failed to unpublish video');
+        showNotification($_('admin.videos.unpublishError', { values: { error: error.error || 'Failed to unpublish video' } }), 'error');
       }
     } catch (err) {
-      message = '✗ Error: ' + String(err);
+      showNotification($_('common.error') + ': ' + String(err), 'error');
     }
   }
   
@@ -153,17 +263,16 @@
       });
       
       if (response.ok) {
-        message = '✓ User role updated';
-        setTimeout(() => message = '', 3000);
+        showNotification($_('admin.users.roleUpdated'), 'success');
         // Update local data
-        users = users.map(u => u.id === editingUser!.id ? { ...u, roles: updatedRoles } : u);
+        users = users.map((u: any) => u.id === editingUser!.id ? { ...u, roles: updatedRoles } : u);
         closeRoleModal();
       } else {
         const error = await response.json();
-        message = '✗ Error: ' + (error.error || 'Failed to update role');
+        showNotification($_('admin.users.roleError', { values: { error: error.error || 'Failed to update role' } }), 'error');
       }
     } catch (err) {
-      message = '✗ Error: ' + String(err);
+      showNotification($_('common.error') + ': ' + String(err), 'error');
     }
   }
   
@@ -242,9 +351,12 @@
 <div class="container mx-auto p-6 max-w-6xl">
   <h1 class="text-3xl font-bold mb-6">{$_('admin.title')}</h1>
   
-  {#if message}
-    <div class="alert mb-4" class:alert-success={message.startsWith('✓')} class:alert-error={message.startsWith('✗')}>
-      {message}
+  <!-- Toast notifications -->
+  {#if showToast}
+    <div class="toast toast-top toast-end">
+      <div class="alert" class:alert-success={toastType === 'success'} class:alert-error={toastType === 'error'} class:alert-info={toastType === 'info'}>
+        <span>{toastMessage}</span>
+      </div>
     </div>
   {/if}
   
@@ -262,40 +374,83 @@
         </div>
       </div>
 
-      <div class="divider">Daily Quota Settings</div>
+      <div class="divider">Role Configuration</div>
       
       <div class="space-y-4">
-        <p class="text-sm opacity-70">Configure daily video generation limits for different user roles.</p>
+        <p class="text-sm opacity-70">Manage user roles and their sponsor tier mappings.</p>
         
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="form-control">
-            <label class="label" for="free-quota">
-              <span class="label-text">Free Tier</span>
-            </label>
-            <input id="free-quota" type="number" bind:value={settings.quotaPerDay['free-tier']} class="input input-bordered" min="0" />
-          </div>
-          
-          <div class="form-control">
-            <label class="label" for="gmgard-quota">
-              <span class="label-text">GmGard Users</span>
-            </label>
-            <input id="gmgard-quota" type="number" bind:value={settings.quotaPerDay['gmgard-user']} class="input input-bordered" min="0" />
-          </div>
-          
-          <div class="form-control">
-            <label class="label" for="paid-quota">
-              <span class="label-text">Paid Tier</span>
-            </label>
-            <input id="paid-quota" type="number" bind:value={settings.quotaPerDay['paid-tier']} class="input input-bordered" min="0" />
-          </div>
-          
-          <div class="form-control">
-            <label class="label" for="premium-quota">
-              <span class="label-text">Premium Tier</span>
-            </label>
-            <input id="premium-quota" type="number" bind:value={settings.quotaPerDay['premium-tier']} class="input input-bordered" min="0" />
-          </div>
+        <div class="flex justify-end mb-4">
+          <button class="btn btn-sm btn-outline" onclick={addRoleConfig}>+ Add Role</button>
         </div>
+        
+        {#if roleList && roleList.length > 0}
+          <div class="overflow-x-auto">
+            <table class="table table-zebra">
+              <thead>
+                <tr>
+                  <th>Role Name</th>
+                  <th>Sponsor Tier Mapping</th>
+                  <th>Description</th>
+                  <th>Daily Quota</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each roleList as role, idx}
+                  <tr>
+                    <td class="font-semibold">{role.name}</td>
+                    <td>{role.sponsorTier || '-'}</td>
+                    <td class="text-sm opacity-70">{role.description || '-'}</td>
+                    <td>{settings.quotaPerDay?.[role.name] ?? 10}</td>
+                    <td>
+                      <button 
+                        class="btn btn-xs btn-outline"
+                        onclick={() => editRoleConfig(idx)}
+                      >
+                        Edit
+                      </button>
+                      <button 
+                        class="btn btn-xs btn-outline btn-error ml-2"
+                        onclick={() => removeRoleConfig(idx)}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {:else}
+          <p class="text-base-content/70">No roles configured. Click "Add Role" to create one.</p>
+        {/if}
+      </div>
+      
+      <div class="divider">Daily Quota by Role</div>
+      
+      <div class="space-y-4">
+        <p class="text-sm opacity-70">Configure daily video generation limits for each role.</p>
+        
+        {#if roleList && roleList.length > 0}
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {#each roleList as role}
+              <div class="form-control">
+                <label class="label" for={`quota-${role.name}`}>
+                  <span class="label-text">{role.name}</span>
+                </label>
+                <input 
+                  id={`quota-${role.name}`}
+                  type="number" 
+                  bind:value={settings.quotaPerDay[role.name]} 
+                  class="input input-bordered" 
+                  min="0" 
+                />
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="text-base-content/70 text-sm">No roles configured yet. Add roles above to set quotas.</p>
+        {/if}
       </div>
       
       <div class="divider">System Settings</div>
@@ -325,6 +480,46 @@
       </div>
       
       <p class="text-xs opacity-60 mt-3">Jobs are routed to local workers when queue is below this threshold</p>
+      
+      <div class="divider">Sponsor API Configuration</div>
+      
+      <div class="grid grid-cols-1 gap-4">
+        <div class="form-control">
+          <label class="label" for="sponsor-api-url">
+            <span class="label-text">Sponsor API URL</span>
+            <span class="label-text-alt text-xs opacity-70">GmCrawler endpoint (e.g., http://localhost:3999)</span>
+          </label>
+          <input id="sponsor-api-url" type="text" bind:value={settings.sponsorApiUrl} class="input input-bordered" placeholder="http://localhost:3999" />
+        </div>
+        
+        <div class="form-control">
+          <label class="label" for="sponsor-api-token">
+            <span class="label-text">Sponsor API Token</span>
+            <span class="label-text-alt text-xs opacity-70">Bearer token for authentication</span>
+          </label>
+          <input id="sponsor-api-token" type="password" bind:value={settings.sponsorApiToken} class="input input-bordered" placeholder="Enter auth token" />
+          
+          {#if settings.sponsorApiToken && tokenStatus.message}
+            <div class="alert alert-sm mt-2" 
+                 class:alert-error={tokenStatus.severity === 'error'} 
+                 class:alert-warning={tokenStatus.severity === 'warning'}
+                 class:alert-info={tokenStatus.severity === 'info'}>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-5 h-5">
+                {#if tokenStatus.severity === 'error'}
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                {:else if tokenStatus.severity === 'warning'}
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                {:else}
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                {/if}
+              </svg>
+              <span class="text-sm">{tokenStatus.message}</span>
+            </div>
+          {/if}
+        </div>
+      </div>
+      
+      <p class="text-xs opacity-60 mt-3">Used for sponsor claim validation and daily revalidation. Environment variables will be used as fallback if not set.</p>
       
       <div class="card-actions justify-end mt-4">
         <button class="btn btn-primary" onclick={saveSettings} disabled={saving}>
@@ -755,6 +950,79 @@
   </div>
 </div>
 
+<!-- Role Config Editor Modal -->
+{#if showRoleConfigModal}
+  <div class="modal modal-open">
+    <div class="modal-box">
+      <h3 class="font-bold text-lg mb-4">
+        {editingRoleIndex !== null && settings.roles?.[editingRoleIndex] 
+          ? `Edit Role: ${settings.roles[editingRoleIndex].name}` 
+          : 'Add New Role'}
+      </h3>
+      
+      <div class="form-control mb-4">
+        <label class="label" for="role-name">
+          <span class="label-text">Role Name</span>
+        </label>
+        <input 
+          id="role-name"
+          type="text" 
+          bind:value={editingRoleName}
+          placeholder="e.g., premium-tier, sponsor-tier"
+          class="input input-bordered w-full"
+        />
+      </div>
+      
+      <div class="form-control mb-4">
+        <label class="label" for="sponsor-tier">
+          <span class="label-text">Sponsor Tier (from GmCrawler)</span>
+          <span class="label-text-alt">Leave empty if not sponsor-based</span>
+        </label>
+        <input 
+          id="sponsor-tier"
+          type="text" 
+          bind:value={editingRoleSponsorTier}
+          placeholder="e.g., premium, vip"
+          class="input input-bordered w-full"
+        />
+      </div>
+      
+      <div class="form-control mb-4">
+        <label class="label" for="role-description">
+          <span class="label-text">Description</span>
+        </label>
+        <input 
+          id="role-description"
+          type="text" 
+          bind:value={editingRoleDescription}
+          placeholder="User-friendly description"
+          class="input input-bordered w-full"
+        />
+      </div>
+      
+      <div class="form-control mb-4">
+        <label class="label" for="daily-quota">
+          <span class="label-text">Daily Quota</span>
+        </label>
+        <input 
+          id="daily-quota"
+          type="number" 
+          bind:value={editingRoleQuota}
+          placeholder="10"
+          class="input input-bordered w-full"
+          min="0"
+        />
+      </div>
+      
+      <div class="modal-action">
+        <button class="btn btn-ghost" onclick={closeRoleConfigModal}>Cancel</button>
+        <button class="btn btn-primary" onclick={saveRoleConfig}>Save</button>
+      </div>
+    </div>
+    <button class="modal-backdrop" type="button" onclick={closeRoleConfigModal} aria-label="Close modal"></button>
+  </div>
+{/if}
+
 <!-- Role Editor Modal -->
 {#if showRoleModal && editingUser}
   <div class="modal modal-open">
@@ -764,29 +1032,16 @@
       <div class="mb-4">
         <p class="text-sm text-base-content/70 mb-2">Select roles:</p>
         <div class="flex flex-wrap gap-2 mb-4">
-          <button 
-            class="btn btn-sm"
-            class:btn-primary={isRoleSelected('admin')}
-            class:btn-outline={!isRoleSelected('admin')}
-            onclick={() => toggleRole('admin')}
-          >
-            Admin
-          </button>
-          <button 
-            class="btn btn-sm"
-            class:btn-success={isRoleSelected('paid-tier')}
-            class:btn-outline={!isRoleSelected('paid-tier')}
-            onclick={() => toggleRole('paid-tier')}
-          >
-            Paid Tier
-          </button>
-          <button 
-            class="btn btn-sm"
-            class:btn-outline={!isRoleSelected('free-tier')}
-            onclick={() => toggleRole('free-tier')}
-          >
-            Free Tier
-          </button>
+          {#each getAvailableRoleNames as roleName}
+            <button 
+              class="btn btn-sm"
+              class:btn-primary={isRoleSelected(roleName)}
+              class:btn-outline={!isRoleSelected(roleName)}
+              onclick={() => toggleRole(roleName)}
+            >
+              {roleName}
+            </button>
+          {/each}
         </div>
       </div>
       
@@ -798,11 +1053,11 @@
           id="role-input"
           type="text" 
           bind:value={roleInput}
-          placeholder="admin, paid-tier, free-tier"
+          placeholder="admin, premium, free"
           class="input input-bordered w-full"
         />
         <p class="label-text-alt text-base-content/60">
-          Available: admin, paid-tier, free-tier
+          Available: {getAvailableRoleNames.join(', ')}
         </p>
       </div>
       

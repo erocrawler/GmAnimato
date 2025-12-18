@@ -7,15 +7,16 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(cuid())
-  username     String    @unique @db.VarChar(50)
-  email        String?   @unique @db.VarChar(255)
-  passwordHash String    @map("password_hash") @db.VarChar(255)
-  roles        String    @default("[]") @db.VarChar(200)
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-  sessions     Session[]
-  videos       Video[]
+  id            String         @id @default(cuid())
+  username      String         @unique @db.VarChar(50)
+  email         String?        @unique @db.VarChar(255)
+  passwordHash  String         @map("password_hash") @db.VarChar(255)
+  roles         String         @default("[]") @db.VarChar(200)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  sessions      Session[]
+  videos        Video[]
+  sponsorClaims SponsorClaim[]
 
   @@index([username])
   @@index([email])
@@ -87,12 +88,32 @@ model VideoLike {
 model AdminSettings {
   id                     String   @id @default("default")
   registrationEnabled    Boolean  @default(true) @map("registration_enabled")
+  roles                  Json?    @map("roles")
   quotaPerDay            Json     @default("{\"free\": 10, \"gmgard-user\": 50, \"paid\": 100, \"premium\": 100}") @map("quota_per_day")
   maxConcurrentJobs      Int      @default(5) @map("max_concurrent_jobs")
   maxQueueThreshold      Int      @default(5000) @map("max_queue_threshold")
   localQueueThreshold    Int      @default(0) @map("local_queue_threshold")
   loraPresets            Json?    @map("lora_presets")
+  sponsorApiUrl          String?  @map("sponsor_api_url") @db.VarChar(500)
+  sponsorApiToken        String?  @map("sponsor_api_token") @db.VarChar(500)
   updatedAt              DateTime @updatedAt @map("updated_at")
 
   @@map("admin_settings")
+}
+
+model SponsorClaim {
+  id                 String   @id @default(cuid())
+  userId             String   @map("user_id")
+  sponsorUsername    String   @map("sponsor_username") @db.VarChar(100)
+  sponsorNickname    String?  @map("sponsor_nickname") @db.VarChar(255)
+  sponsorAvatar      String?  @map("sponsor_avatar") @db.VarChar(500)
+  sponsorTier        String   @map("sponsor_tier") @db.VarChar(50)
+  appliedRole        String   @map("applied_role") @db.VarChar(50)
+  claimedAt          DateTime @default(now()) @map("claimed_at")
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sponsorUsername])
+  @@index([userId])
+  @@index([sponsorUsername])
+  @@map("sponsor_claims")
 }

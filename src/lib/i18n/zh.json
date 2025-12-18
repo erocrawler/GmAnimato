@@ -363,7 +363,9 @@
       },
       "unpublishConfirm": "取消发布来自 {username} 的视频吗?",
       "videoUnpublished": "✓ 已取消发布视频",
-      "unpublishError": "✗ 错误: {error}"
+      "unpublishError": "✗ 错误: {error}",
+      "roleUpdated": "✓ 用户角色已更新",
+      "roleError": "✗ 错误: {error}"
     },
     "videos": {
       "title": "视频管理",
@@ -403,7 +405,44 @@
     "passwordChanged": "✓ 密码更改成功",
     "updateError": "无法更新账户",
     "changePasswordError": "无法更改密码",
-    "gmgardOAuthMessage": "此账户通过 GmGard OAuth 登录；密码更改在此处被禁用。"
+    "gmgardOAuthMessage": "此账户通过 GmGard OAuth 登录；密码更改在此处被禁用。",
+    "sponsor": {
+      "title": "赞助等级",
+      "currentSponsorship": "当前赞助",
+      "claimedOn": "领取于",
+      "checkForUpdates": "检查更新",
+      "checking": "检查中...",
+      "searchPlaceholder": "输入您的赞助者/支持者用户名",
+      "searchButton": "搜索",
+      "searching": "搜索中...",
+      "claimDescription": "如果您是支持者或赞助者，可以领取您的等级以解锁额外的福利和配额。",
+      "usernameLabel": "赞助者用户名",
+      "usernameHelp": "输入您在 UniFans 上的赞助者账户关联的用户名",
+      "confirmTitle": "确认赞助领取",
+      "confirmDescription": "请验证您的赞助者信息：",
+      "confirmTier": "等级：",
+      "confirmBenefit": "您将获得 <strong>{role}</strong> 角色及相应的每日配额。",
+      "confirmNoRole": "此赞助等级未配置提供额外福利。不会应用任何角色或配额更改。",
+      "confirmButton": "确认并领取",
+      "claiming": "领取中...",
+      "cancel": "取消",
+      "tokenExpired": "赞助功能暂时不可用。身份验证令牌已过期。请联系管理员。",
+      "errors": {
+        "enterUsername": "请输入赞助者用户名",
+        "notFound": "未找到赞助者",
+        "alreadyClaimed": "此赞助者已被其他用户领取",
+        "failed": "搜索赞助者失败",
+        "claimFailed": "领取赞助者失败",
+        "updateFailed": "检查赞助状态失败",
+        "expired": "未找到赞助者。您的赞助可能已过期。"
+      },
+      "success": {
+        "found": "找到赞助者！",
+        "claimed": "赞助领取成功！",
+        "upToDate": "您的赞助是最新的",
+        "tierChanged": "您的赞助等级已更改。请确认以更新。"
+      }
+    }
   },
   "language": {
     "select": "语言",
