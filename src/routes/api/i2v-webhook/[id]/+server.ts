@@ -97,12 +97,13 @@ export const POST: RequestHandler = async ({ request, params }) => {
       }
     }
 
-    // If we still do not have a final video URL, mark as failed
-    if (!patch.final_video_url) {
-      patch.status = 'failed';
-    }
-
     const finalStatus = typeof patch.status === 'string' ? patch.status.toLowerCase() : '';
+
+    // If we still do not have a final video URL and this is a completion event, mark as failed
+    if (!patch.final_video_url && (finalStatus === 'completed' || finalStatus === 'failed')) {
+      patch.status = 'failed';
+      console.log(`[Webhook] Marking video ${id} as failed - no video URL in completion event`);
+    }
 
     // Clear progress when job completes or fails
     if (finalStatus === 'completed' || finalStatus === 'failed') {
