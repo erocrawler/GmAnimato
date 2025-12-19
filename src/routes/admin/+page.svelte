@@ -930,12 +930,7 @@
           <div class="mb-4">
             <h3 class="text-lg font-semibold mb-3">Local Queue Status</h3>
             
-            <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <div class="stat bg-base-100 rounded-box">
-                <div class="stat-title text-xs">Queue Length</div>
-                <div class="stat-value text-lg text-primary">{queueStatus.localQueue.length}</div>
-              </div>
-              
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div class="stat bg-base-100 rounded-box">
                 <div class="stat-title text-xs">In Queue</div>
                 <div class="stat-value text-lg text-warning">{queueStatus.localQueue.inQueue || 0}</div>

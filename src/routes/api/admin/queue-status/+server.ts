@@ -1,7 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
-import { getAdminSettings, getLocalQueueLength, getLocalJobStats } from '$lib/db';
+import { getAdminSettings, getLocalJobStats } from '$lib/db';
 
 export const GET: RequestHandler = async ({ locals }) => {
   // Check if user is admin
@@ -14,7 +14,6 @@ export const GET: RequestHandler = async ({ locals }) => {
 
   try {
     const settings = await getAdminSettings();
-    const localQueueLength = await getLocalQueueLength();
     const localJobStats = await getLocalJobStats();
     const runpodConfig = getRunPodConfig({
       RUNPOD_ENDPOINT_URL: env.RUNPOD_ENDPOINT_URL,
@@ -55,7 +54,6 @@ export const GET: RequestHandler = async ({ locals }) => {
         },
         threshold: settings.maxQueueThreshold,
         localQueue: {
-          length: localQueueLength,
           threshold: settings.localQueueThreshold,
           enabled: settings.localQueueThreshold > 0,
           inQueue: localJobStats.inQueue,

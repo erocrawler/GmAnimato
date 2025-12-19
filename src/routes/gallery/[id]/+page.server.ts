@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { getVideoById, getPublishedVideos, getUserById, getLikeCount, isVideoLikedByUser } from '$lib/db';
+import { getVideoById, getPublishedVideos, getUserById, getLikeCount, isVideoLikedByUser, getWorkflowById, getAdminSettings } from '$lib/db';
 import { error } from '@sveltejs/kit';
 
 export const load: PageServerLoad = async ({ params, locals, url }) => {
@@ -55,10 +55,19 @@ export const load: PageServerLoad = async ({ params, locals, url }) => {
         username: author.username,
       }
     : null;
+  
+  // Fetch workflow info if available
+  const workflow = video.workflow_id ? await getWorkflowById(video.workflow_id) : null;
+  
+  // Fetch admin settings to get LoRA presets for display names
+  const settings = await getAdminSettings();
+  
   return {
     video: { ...video, likesCount, isLiked },
     user: locals.user || null,
     relatedVideos,
     author: authorPublic,
+    workflow,
+    loraPresets: settings.loraPresets || [],
   };
 };

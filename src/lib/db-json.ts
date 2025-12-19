@@ -240,11 +240,6 @@ export class JsonFileDatabase implements IDatabase {
     return todayVideos.length;
   }
 
-  async getLocalQueueLength(): Promise<number> {
-    const rows = await this.readAll();
-    return rows.filter(v => v.is_local_job === true && v.status === 'in_queue').length;
-  }
-
   async getOldestLocalJob(): Promise<VideoEntry | null> {
     const rows = await this.readAll();
     const localJobs = rows.filter(v => v.is_local_job === true && v.status === 'in_queue');

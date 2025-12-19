@@ -177,7 +177,7 @@ export class PostgresDatabase implements IDatabase {
     
     // Determine sort order
     const orderBy = sortBy === 'likes' 
-      ? { likes: { _count: 'desc' as const } }
+      ? [{ likes: { _count: 'desc' as const } }, { processingStartedAt: 'desc' as const }]
       : [{ processingStartedAt: 'desc' as const }, { createdAt: 'desc' as const }];
     
     const [videos, total] = await Promise.all([
@@ -226,6 +226,7 @@ export class PostgresDatabase implements IDatabase {
       const data: any = {};
       
       if (patch.user_id !== undefined) data.userId = patch.user_id;
+      if (patch.workflow_id !== undefined) data.workflowId = patch.workflow_id;
       if (patch.original_image_url !== undefined) data.originalImageUrl = patch.original_image_url;
       if (patch.prompt !== undefined) data.prompt = patch.prompt;
       if (patch.tags !== undefined) data.tags = patch.tags ? JSON.stringify(patch.tags) : null;
@@ -371,16 +372,6 @@ export class PostgresDatabase implements IDatabase {
       }
     });
     
-    return count;
-  }
-
-  async getLocalQueueLength(): Promise<number> {
-    const count = await this.prisma.video.count({
-      where: {
-        isLocalJob: true,
-        status: 'in_queue'
-      }
-    });
     return count;
   }
 

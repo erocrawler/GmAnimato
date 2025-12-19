@@ -1,3 +1,4 @@
+import type { Workflow } from './db';
 import type { LoraPreset } from './loraPresets';
 
 export type WorkflowMetadata = {
@@ -16,7 +17,7 @@ export type WorkflowMetadata = {
  */
 export function filterLorasForWorkflow(
   allLoraPresets: LoraPreset[],
-  workflow: WorkflowMetadata
+  workflow: Workflow
 ): LoraPreset[] {
   return allLoraPresets.filter((lora) => workflow.compatibleLoraIds.includes(lora.id));
 }
@@ -24,7 +25,7 @@ export function filterLorasForWorkflow(
 /**
  * Check if a LoRA is compatible with a workflow
  */
-export function isLoraCompatible(loraId: string, workflow: WorkflowMetadata): boolean {
+export function isLoraCompatible(loraId: string, workflow: Workflow): boolean {
   return workflow.compatibleLoraIds.includes(loraId);
 }
 
@@ -33,7 +34,7 @@ export function isLoraCompatible(loraId: string, workflow: WorkflowMetadata): bo
  */
 export function filterLoraWeights(
   loraWeights: Record<string, number>,
-  workflow: WorkflowMetadata
+  workflow: Workflow
 ): Record<string, number> {
   return Object.fromEntries(
     Object.entries(loraWeights).filter(([loraId]) => isLoraCompatible(loraId, workflow))

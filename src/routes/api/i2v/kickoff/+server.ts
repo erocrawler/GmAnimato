@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { updateVideo, getVideoById, getActiveJobsByUser, getAdminSettings, checkDailyQuota, getLocalQueueLength, getWorkflowById, getDefaultWorkflow } from '$lib/db';
+import { updateVideo, getVideoById, getActiveJobsByUser, getAdminSettings, checkDailyQuota, getLocalJobStats, getWorkflowById, getDefaultWorkflow } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { buildWorkflow } from '$lib/i2vWorkflow';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
@@ -83,8 +83,33 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
+    console.log(`[I2V] Using workflow: ${workflow.name} (${workflow.id})`);
+
     // Filter LoRA weights to only compatible ones for the selected workflow
     const filteredLoraWeights = loraWeights ? filterLoraWeights(loraWeights, workflow) : undefined;
+
+    // Generate seed for reproducibility
+    const seed = Math.floor(Math.random() * 1000000);
+
+    // Save user's settings first (before quota check) so their preferences are preserved
+    const settingsPayload: any = { 
+      workflow_id: workflow.id,
+      iteration_steps: iterationSteps,
+      video_duration: videoDuration,
+      video_resolution: resolution,
+      lora_weights: filteredLoraWeights,
+      seed: seed
+    };
+    
+    if (prompt !== undefined) {
+      settingsPayload.prompt = prompt;
+    }
+    
+    if (tags !== undefined) {
+      settingsPayload.tags = tags;
+    }
+
+    await updateVideo(id, settingsPayload);
 
     // Check daily quota if user is logged in
     if (locals.user) {
@@ -134,8 +159,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
     let localQueueAvailable = false;
     try {
-      const localLen = await getLocalQueueLength();
-      localQueueAvailable = Number.isFinite(localLen);
+      const stats = await getLocalJobStats();
+      localQueueAvailable = Number.isFinite(stats.inQueue);
     } catch (e) {
       localQueueAvailable = false;
     }
@@ -210,30 +235,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
-    // Generate seed for reproducibility
-    const seed = Math.floor(Math.random() * 1000000);
-
-    // Update video with status, prompt, tags, processing start time, workflow, and workflow parameters
-    const updatePayload: any = { 
+    // Update video status to in_queue and set processing start time
+    await updateVideo(id, { 
       status: 'in_queue', 
-      processing_started_at: new Date().toISOString(),
-      workflow_id: workflow.id,
-      iteration_steps: iterationSteps,
-      video_duration: videoDuration,
-      video_resolution: resolution,
-      lora_weights: filteredLoraWeights,
-      seed: seed
-    };
-    
-    if (prompt !== undefined) {
-      updatePayload.prompt = prompt;
-    }
-    
-    if (tags !== undefined) {
-      updatePayload.tags = tags;
-    }
-
-    await updateVideo(id, updatePayload);
+      processing_started_at: new Date().toISOString()
+    });
 
     // Verify the update by fetching the video again
     const updated = await getVideoById(id);
@@ -249,7 +255,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         runpodConfig, 
         id, 
         settings.localQueueThreshold, 
-        getLocalQueueLength, 
+        getLocalJobStats, 
         updateVideo,
         async () => {
           // This callback is only called if routing to RunPod

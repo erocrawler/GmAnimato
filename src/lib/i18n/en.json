@@ -178,6 +178,8 @@
     "processingStarted": "Processing Started",
     "processingCompleted": "Processing Completed",
     "status": "Status",
+    "workflow": "Workflow",
+    "lorasUsed": "LoRAs Used",
     "noVideoAvailable": "No video available",
     "unknownAuthor": "Unknown author",
     "publish": "Publish to Gallery",

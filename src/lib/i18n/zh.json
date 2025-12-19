@@ -177,6 +177,8 @@
     "processingStarted": "开始处理",
     "processingCompleted": "完成时间",
     "status": "状态",
+    "workflow": "工作流",
+    "lorasUsed": "使用的LoRA",
     "noVideoAvailable": "没有可用视频",
     "unknownAuthor": "未知作者",
     "publish": "发布到视频库",
@@ -292,7 +294,7 @@
       },
       "nsfwRealistic": {
         "title": "发布受限制",
-        "message": "该图像被检测为 NSFW 和照片级真实性。您可以生成视频，但无法将其发布到美术馆。"
+        "message": "该图像被检测为 NSFW 和照片级真实性。您可以生成视频，但无法将其发布到视频库。"
       }
     },
     "videoDeleted": "此视频已被删除。"

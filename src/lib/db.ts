@@ -93,10 +93,6 @@ export async function getDailyQuotaUsage(userId: string, date: Date) {
   return db.getDailyQuotaUsage(userId, date);
 }
 
-export async function getLocalQueueLength() {
-  return db.getLocalQueueLength();
-}
-
 export async function getOldestLocalJob() {
   return db.getOldestLocalJob();
 }

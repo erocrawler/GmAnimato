@@ -1,7 +1,7 @@
 <script lang="ts">
   import { _ } from 'svelte-i18n';
   
-  let { data } = $props<{ data: { video: any; user?: any; relatedVideos: any[]; author?: { id: string; username: string } | null } }>();
+  let { data } = $props<{ data: { video: any; user?: any; relatedVideos: any[]; author?: { id: string; username: string } | null; workflow?: any | null; loraPresets?: any[] } }>();
   let video = $derived(data.video);
   const likesCount = $derived(video.likesCount || 0);
   const isLiked = $derived(video.isLiked || false);
@@ -24,6 +24,14 @@
     }
   }
   const authorName = $derived(data.author?.username ?? $_('videoDetail.unknownAuthor'));
+
+  function getLoraDisplayName(loraId: string): string {
+    const preset = data.loraPresets?.find(p => p.id === loraId);
+    if (preset?.label) return preset.label;
+    // Extract filename without path and show just the filename
+    const filename = loraId.split('/').pop() || loraId;
+    return filename;
+  }
 
   function buildGalleryUrl(id?: string) {
     if (typeof window === 'undefined') return id ? `/gallery/${id}` : '/gallery';
@@ -101,6 +109,38 @@
           {/if}
         </figure>
       </div>
+
+      <!-- Actions -->
+      {#if video.status === 'completed' && video.final_video_url}
+        <div class="card bg-base-100 shadow-xl">
+          <div class="card-body">
+            <div class="card-actions justify-start">
+              <button 
+                class="btn gap-2" 
+                class:btn-error={isLiked}
+                class:btn-outline={!isLiked}
+                onclick={toggleLike}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill={isLiked ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                </svg>
+                {isLiked ? $_('videoDetail.unlike') : $_('videoDetail.like')} ({likesCount})
+              </button>
+              
+              <a 
+                href={video.final_video_url}
+                download="video-{video.id}.mp4"
+                class="btn btn-primary gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                {$_('videoDetail.download')}
+              </a>
+            </div>
+          </div>
+        </div>
+      {/if}
     </div>
 
     <!-- Info Panel -->
@@ -127,38 +167,6 @@
         </div>
       {/if}
 
-      <!-- Actions -->
-      {#if video.status === 'completed' && video.final_video_url}
-        <div class="card bg-base-100 shadow-xl">
-          <div class="card-body">
-            <button 
-              class="btn" 
-              class:btn-error={isLiked}
-              class:btn-outline={!isLiked}
-              onclick={toggleLike}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill={isLiked ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-              </svg>
-              {isLiked ? $_('videoDetail.unlike') : $_('videoDetail.like')} ({likesCount})
-            </button>
-
-            <div class="divider"></div>
-            
-            <a 
-              href={video.final_video_url}
-              download="video-{video.id}.mp4"
-              class="btn btn-primary"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              {$_('videoDetail.download')}
-            </a>
-          </div>
-        </div>
-      {/if}
-
       <!-- Metadata -->
       <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
@@ -166,7 +174,21 @@
           <div class="text-sm space-y-1">
             <p><strong>{$_('videoDetail.author')}:</strong> {authorName}</p>
             <p><strong>{$_('videoDetail.created')}:</strong> {new Date(video.created_at).toLocaleString()}</p>
-            <p><strong>{$_('videoDetail.status')}:</strong> {video.status}</p>
+            {#if data.workflow}
+              <p><strong>{$_('videoDetail.workflow')}:</strong> {data.workflow.name}</p>
+            {/if}
+            {#if video.lora_weights && Object.keys(video.lora_weights).length > 0}
+              <details class="mt-2">
+                <summary class="cursor-pointer font-semibold">{$_('videoDetail.lorasUsed')} ({Object.keys(video.lora_weights).length})</summary>
+                <div class="ml-4 mt-2 space-y-1">
+                  {#each Object.entries(video.lora_weights) as [loraId, weight]}
+                    <p class="text-xs">
+                      <span class="opacity-70">{getLoraDisplayName(loraId)}:</span> {weight}
+                    </p>
+                  {/each}
+                </div>
+              </details>
+            {/if}
           </div>
         </div>
       </div>

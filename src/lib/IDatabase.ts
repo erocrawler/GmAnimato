@@ -141,7 +141,6 @@ export interface IDatabase {
   getLikeCount(videoId: string): Promise<number>;
   isVideoLikedByUser(videoId: string, userId: string): Promise<boolean>;
   getDailyQuotaUsage(userId: string, date: Date): Promise<number>;
-  getLocalQueueLength(): Promise<number>;
   getOldestLocalJob(): Promise<VideoEntry | null>;
   claimLocalJob(): Promise<VideoEntry | null>; // Atomically claim a job for processing
   getLocalJobStats(): Promise<{ inQueue: number; processing: number; completed: number; failed: number }>;

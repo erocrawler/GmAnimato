@@ -11,7 +11,7 @@ import { submitRunPodJob, getRunPodJobStatus } from './runpod';
  * @param config RunPod configuration (only used if routing to RunPod)
  * @param videoId Video ID for the job
  * @param localQueueThreshold Threshold from admin settings (0 = disabled, >0 = enabled)
- * @param getLocalQueueLength Function to get current local queue length
+ * @param getLocalJobStats Function to get current local job stats
  * @param updateVideo Function to update video in database
  * @param buildPayload Async function to build workflow payload - ONLY called if routing to RunPod. Local jobs build workflow on-demand in worker/task endpoint.
  * @returns {isLocal: boolean, jobId?: string} - indicates if job is local and the job ID
@@ -20,11 +20,12 @@ export async function submitJob(
   config: RunPodConfig | null,
   videoId: string,
   localQueueThreshold: number,
-  getLocalQueueLength: () => Promise<number>,
+  getLocalJobStats: () => Promise<{ inQueue: number; processing: number; completed: number; failed: number }>,
   updateVideo: (id: string, patch: any) => Promise<any>,
   buildPayload: () => Promise<any>
 ): Promise<{ isLocal: boolean; jobId?: string }> {
-  const localQueueLength = await getLocalQueueLength();
+  const stats = await getLocalJobStats();
+  const localQueueLength = stats.inQueue;
   
   console.log(`[Job Router] Local queue length: ${localQueueLength}, threshold: ${localQueueThreshold}`);
   
