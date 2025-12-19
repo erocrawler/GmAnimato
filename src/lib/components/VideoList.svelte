@@ -172,10 +172,14 @@
               <div class="badge {$layoutMode === 'compact' ? 'badge-sm' : 'badge-lg'} {getStatusBadgeClass(v.status)}">
                 {getStatusText(v.status)}
               </div>
-              {#if type === 'admin'}
-                {#if v.is_published}
-                  <div class="badge badge-info {$layoutMode === 'compact' ? 'badge-sm' : ''}">Published</div>
-                {/if}
+              {#if v.is_published}
+                <div class="badge badge-info {$layoutMode === 'compact' ? 'badge-sm' : ''}">
+                  {#if type === 'admin'}
+                    Published
+                  {:else}
+                    {$_('videoDetail.published')}
+                  {/if}
+                </div>
               {/if}
             </div>
 

@@ -6,9 +6,9 @@
   let { data } = $props<{ data: PageData }>();
   
   let settings = $derived({
-    ...data.settings,
-    loraPresets: data.settings.loraPresets ?? [],
-    quotaPerDay: data.settings.quotaPerDay ?? { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 },
+    ...(data.settings || {}),
+    loraPresets: data.settings?.loraPresets ?? [],
+    quotaPerDay: data.settings?.quotaPerDay ?? { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 },
   });
   let users = $derived(data.users);
   let userPage = $derived(data.userPage || 1);
@@ -533,6 +533,11 @@
     // Save to server
     updateWorkflow(workflowId, newIds);
   }
+  
+  // Sync workflows when data changes
+  $effect(() => {
+    workflows = data.workflows || [];
+  });
   
   // Load queue status on mount
   $effect(() => {
