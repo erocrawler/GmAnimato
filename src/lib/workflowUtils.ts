@@ -15,25 +15,36 @@ export function roundToMultipleOf16(value: number): number {
 }
 
 /**
- * Find a node by class_type and optionally by title
+ * Find a node by class_type and optionally by predicate function
  * @param workflow The workflow object
  * @param classType The class_type to search for
- * @param titlePattern Optional title pattern to match (can be substring or regex)
+ * @param predicate Optional predicate function to filter nodes, or title pattern (string/RegExp)
  * @returns The node ID if found, otherwise null
  */
-export function findNode(workflow: any, classType: string, titlePattern?: string | RegExp): string | null {
+export function findNode(
+  workflow: any, 
+  classType: string, 
+  predicate?: ((node: any) => boolean) | string | RegExp
+): string | null {
   const wf = workflow?.input?.workflow;
   if (!wf) return null;
   
   for (const [nodeId, node] of Object.entries(wf)) {
     if ((node as any).class_type === classType) {
-      if (!titlePattern) return nodeId;
+      if (!predicate) return nodeId;
       
-      const title = (node as any)._meta?.title || '';
-      if (typeof titlePattern === 'string') {
-        if (title.includes(titlePattern)) return nodeId;
-      } else if (titlePattern instanceof RegExp) {
-        if (titlePattern.test(title)) return nodeId;
+      // If predicate is a function, use it to test the node
+      if (typeof predicate === 'function') {
+        if (predicate(node)) return nodeId;
+      }
+      // If predicate is a string or regex, match against title
+      else {
+        const title = (node as any)._meta?.title || '';
+        if (typeof predicate === 'string') {
+          if (title.includes(predicate)) return nodeId;
+        } else if (predicate instanceof RegExp) {
+          if (predicate.test(title)) return nodeId;
+        }
       }
     }
   }

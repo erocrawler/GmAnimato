@@ -130,8 +130,29 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
     const lowChain = presets.filter((p) => p.chain === 'low');
     console.log('Building LoRA chains:', { highChain, lowChain });
     
-    // High noise chain: starts from node 67 output, feeds into node 21
-    let highPrevNodeId = '67';
+    // Find the UnetLoader and TeaCache nodes for high and low chains
+    const highUnetNode = findNode(workflow, 'UnetLoaderGGUF', (node: any) => 
+      node.inputs?.unet_name?.toLowerCase().includes('high') || 
+      node._meta?.title?.toLowerCase().includes('high')
+    );
+    const lowUnetNode = findNode(workflow, 'UnetLoaderGGUF', (node: any) => 
+      node.inputs?.unet_name?.toLowerCase().includes('low') || 
+      node._meta?.title?.toLowerCase().includes('low')
+    );
+    const highTeaCacheNode = findNode(workflow, 'TeaCache', (node: any) => 
+      Array.isArray(node.inputs?.model) && node.inputs.model[0] === highUnetNode
+    );
+    const lowTeaCacheNode = findNode(workflow, 'TeaCache', (node: any) => 
+      Array.isArray(node.inputs?.model) && node.inputs.model[0] === lowUnetNode
+    );
+    
+    if (!highUnetNode || !lowUnetNode || !highTeaCacheNode || !lowTeaCacheNode) {
+      console.error('LoRA chain nodes not found:', { highUnetNode, lowUnetNode, highTeaCacheNode, lowTeaCacheNode });
+      throw new Error('Required LoRA chain nodes not found in template');
+    }
+    
+    // High noise chain: starts from highUnetNode output, feeds into highTeaCacheNode
+    let highPrevNodeId = highUnetNode as string;
     let highNodeCounter = 1;
     for (const preset of highChain) {
       const nodeId = `61:dyn${highNodeCounter}`;
@@ -156,13 +177,14 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
       }
     }
     
-    // Update node 21 to consume the last high chain node
-    if (workflow.input.workflow['21'] && highChain.length > 0) {
-      workflow.input.workflow['21'].inputs.model = [highPrevNodeId, 0];
+    // Update highTeaCacheNode to consume the last high chain node
+    const highTeaCacheInputs = getNodeInputs(workflow, highTeaCacheNode);
+    if (highTeaCacheInputs && highChain.length > 0) {
+      highTeaCacheInputs.model = [highPrevNodeId, 0];
     }
     
-    // Low noise chain: starts from node 68 output, feeds into node 22
-    let lowPrevNodeId = '68';
+    // Low noise chain: starts from lowUnetNode output, feeds into lowTeaCacheNode
+    let lowPrevNodeId = lowUnetNode as string;
     let lowNodeCounter = 1;
     for (const preset of lowChain) {
       const nodeId = `60:dyn${lowNodeCounter}`;
@@ -187,9 +209,10 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
       }
     }
     
-    // Update node 22 to consume the last low chain node
-    if (workflow.input.workflow['22'] && lowChain.length > 0) {
-      workflow.input.workflow['22'].inputs.model = [lowPrevNodeId, 0];
+    // Update lowTeaCacheNode to consume the last low chain node
+    const lowTeaCacheInputs = getNodeInputs(workflow, lowTeaCacheNode);
+    if (lowTeaCacheInputs && lowChain.length > 0) {
+      lowTeaCacheInputs.model = [lowPrevNodeId, 0];
     }
   }
 
