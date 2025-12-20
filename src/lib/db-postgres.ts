@@ -22,6 +22,7 @@ export class PostgresDatabase implements IDatabase {
         userId: entry.user_id,
         workflowId: entry.workflow_id,
         originalImageUrl: entry.original_image_url,
+        lastImageUrl: entry.last_image_url,
         prompt: entry.prompt,
         tags: entry.tags ? JSON.stringify(entry.tags) : null,
         suggestedPrompts: entry.suggested_prompts ? JSON.stringify(entry.suggested_prompts) : null,
@@ -44,7 +45,7 @@ export class PostgresDatabase implements IDatabase {
   }
 
   async getAllVideos(options?: import('./IDatabase').GetAllVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
-    const { page = 1, pageSize = 30, userId, username, status, includeDeleted = false } = options || {};
+    const { page = 1, pageSize = 30, userId, username, status, workflowType, includeDeleted = false } = options || {};
     const skip = (page - 1) * pageSize;
     
     const where: any = {};
@@ -228,6 +229,7 @@ export class PostgresDatabase implements IDatabase {
       if (patch.user_id !== undefined) data.userId = patch.user_id;
       if (patch.workflow_id !== undefined) data.workflowId = patch.workflow_id;
       if (patch.original_image_url !== undefined) data.originalImageUrl = patch.original_image_url;
+      if (patch.last_image_url !== undefined) data.lastImageUrl = patch.last_image_url;
       if (patch.prompt !== undefined) data.prompt = patch.prompt;
       if (patch.tags !== undefined) data.tags = patch.tags ? JSON.stringify(patch.tags) : null;
       if (patch.suggested_prompts !== undefined) data.suggestedPrompts = patch.suggested_prompts ? JSON.stringify(patch.suggested_prompts) : null;
@@ -674,6 +676,7 @@ export class PostgresDatabase implements IDatabase {
       user_id: video.userId,
       workflow_id: video.workflowId || undefined,
       original_image_url: video.originalImageUrl,
+      last_image_url: video.lastImageUrl || undefined,
       prompt: video.prompt || undefined,
       tags: video.tags ? JSON.parse(video.tags) : undefined,
       suggested_prompts: video.suggestedPrompts ? JSON.parse(video.suggestedPrompts) : undefined,
@@ -833,8 +836,13 @@ export class PostgresDatabase implements IDatabase {
     return workflows.map(w => this.mapToWorkflow(w));
   }
 
-  async getDefaultWorkflow(): Promise<Workflow | null> {
-    const workflow = await this.prisma.workflow.findFirst({ where: { isDefault: true } });
+  async getDefaultWorkflow(workflowType: 'i2v' | 'fl2v' = 'i2v'): Promise<Workflow | null> {
+    const workflow = await this.prisma.workflow.findFirst({ 
+      where: { 
+        isDefault: true,
+        workflowType: workflowType 
+      } 
+    });
     return workflow ? this.mapToWorkflow(workflow) : null;
   }
 
@@ -844,6 +852,7 @@ export class PostgresDatabase implements IDatabase {
       name: workflow.name,
       description: workflow.description || undefined,
       templatePath: workflow.templatePath,
+      workflowType: (workflow.workflowType || 'i2v') as 'i2v' | 'fl2v',
       compatibleLoraIds: Array.isArray(workflow.compatibleLoraIds)
         ? workflow.compatibleLoraIds
         : (typeof workflow.compatibleLoraIds === 'string'

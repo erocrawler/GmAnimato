@@ -2,6 +2,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { claimLocalJob, getAdminSettings, getWorkflowById, getDefaultWorkflow } from '$lib/db';
 import { buildWorkflow } from '$lib/i2vWorkflow';
+import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
 
 /**
  * GET /api/worker/task
@@ -61,19 +62,40 @@ export const GET: RequestHandler = async ({ request }) => {
       );
     }
     
-    const payload = await buildWorkflow({
-      image_name: `${job.id}.png`,
-      image_url: job.original_image_url,
-      input_prompt: job.prompt ?? 'A beautiful video',
-      seed: job.seed ?? Math.floor(Math.random() * 1000000),
-      callback_url: callbackUrl,
-      iterationSteps: job.iteration_steps as 4 | 6 | 8 | undefined,
-      videoDuration: job.video_duration as 4 | 6 | undefined,
-      videoResolution: job.video_resolution as '480p' | '720p' | undefined,
-      loraWeights: typeof job.lora_weights === 'object' && job.lora_weights !== null ? job.lora_weights as Record<string, number> : undefined,
-      loraPresets: settings.loraPresets,
-      workflow: workflow,
-    });
+    const isFL2V = !!job.last_image_url;
+    
+    let payload;
+    if (isFL2V) {
+      payload = await buildFL2VWorkflow({
+        first_image_name: `${job.id}_first.png`,
+        first_image_url: job.original_image_url,
+        last_image_name: `${job.id}_last.png`,
+        last_image_url: job.last_image_url!,
+        input_prompt: job.prompt ?? 'A beautiful video',
+        seed: job.seed ?? Math.floor(Math.random() * 1000000),
+        callback_url: callbackUrl,
+        iterationSteps: job.iteration_steps as 4 | 6 | 8 | undefined,
+        videoDuration: job.video_duration as 4 | 6 | undefined,
+        videoResolution: job.video_resolution as '480p' | '720p' | undefined,
+        loraWeights: typeof job.lora_weights === 'object' && job.lora_weights !== null ? job.lora_weights as Record<string, number> : undefined,
+        loraPresets: settings.loraPresets,
+        workflow: workflow,
+      });
+    } else {
+      payload = await buildWorkflow({
+        image_name: `${job.id}.png`,
+        image_url: job.original_image_url,
+        input_prompt: job.prompt ?? 'A beautiful video',
+        seed: job.seed ?? Math.floor(Math.random() * 1000000),
+        callback_url: callbackUrl,
+        iterationSteps: job.iteration_steps as 4 | 6 | 8 | undefined,
+        videoDuration: job.video_duration as 4 | 6 | undefined,
+        videoResolution: job.video_resolution as '480p' | '720p' | undefined,
+        loraWeights: typeof job.lora_weights === 'object' && job.lora_weights !== null ? job.lora_weights as Record<string, number> : undefined,
+        loraPresets: settings.loraPresets,
+        workflow: workflow,
+      });
+    }
     
     // Return the complete workflow payload for the worker
     // payload already contains everything: { input: { workflow: {...}, images: [...], callback_url: ... } }

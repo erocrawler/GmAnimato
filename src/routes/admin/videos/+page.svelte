@@ -8,10 +8,18 @@
   import LayoutToggle from '$lib/components/LayoutToggle.svelte';
 
   let { data } = $props<{ data: PageData }>();
-  let statusFilter = $state(data.statusFilter || '');
-  let userFilter = $state(data.userFilter || '');
+  let statusFilter = $state('');
+  let userFilter = $state('');
+  let workflowTypeFilter = $state('');
   let message = $state('');
   const isLoading = $derived(Boolean($navigating));
+
+  // Sync filters with data when it changes
+  $effect(() => {
+    statusFilter = data.statusFilter || '';
+    userFilter = data.userFilter || '';
+    workflowTypeFilter = data.workflowTypeFilter || '';
+  });
 
   async function setPage(newPage: number) {
     if (isLoading) return;
@@ -34,6 +42,11 @@
     } else {
       url.searchParams.delete('user');
     }
+    if (workflowTypeFilter) {
+      url.searchParams.set('workflowType', workflowTypeFilter);
+    } else {
+      url.searchParams.delete('workflowType');
+    }
     await goto(url.toString());
   }
 
@@ -41,6 +54,7 @@
     if (isLoading) return;
     statusFilter = '';
     userFilter = '';
+    workflowTypeFilter = '';
     await goto('/admin/videos');
   }
 
@@ -117,7 +131,7 @@
         <h2 class="card-title">{$_('admin.videos.filters')}</h2>
         <LayoutToggle />
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div class="form-control">
           <label class="label" for="status-filter">
             <span class="label-text">{$_('videos.filters.status')}</span>
@@ -130,6 +144,17 @@
             <option value="completed">{$_('videos.status.completed')}</option>
             <option value="failed">{$_('videos.status.failed')}</option>
             <option value="deleted">Deleted</option>
+          </select>
+        </div>
+
+        <div class="form-control">
+          <label class="label" for="workflow-type-filter">
+            <span class="label-text">{$_('admin.videos.workflowType')}</span>
+          </label>
+          <select id="workflow-type-filter" bind:value={workflowTypeFilter} class="select select-bordered">
+            <option value="">{$_('common.all')}</option>
+            <option value="i2v">{$_('admin.videos.workflowI2V')}</option>
+            <option value="fl2v">{$_('admin.videos.workflowFL2V')}</option>
           </select>
         </div>
 

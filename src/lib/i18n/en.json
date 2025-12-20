@@ -206,6 +206,20 @@
     "preview": "Preview",
     "startProcessing": "Start Processing",
     "uploading": "Uploading...",
+    "mode": {
+      "title": "Generation Mode",
+      "i2v": {
+        "title": "Image to Video (I2V)",
+        "description": "Animate a single image"
+      },
+      "fl2v": {
+        "title": "First-Last Frame (FL2V)",
+        "description": "Morph between two images",
+        "firstFrame": "First Frame",
+        "lastFrame": "Last Frame",
+        "generateButton": "Generate Morphing Video"
+      }
+    },
     "errors": {
       "fileTooLarge": "File is too large. Maximum size is {size} MB.",
       "notImage": "Selected file does not appear to be an image.",
@@ -220,6 +234,8 @@
   "review": {
     "title": "Review: Suggested tags & prompts",
     "imagePreview": "Image Preview",
+    "firstFrame": "First Frame",
+    "lastFrame": "Last Frame",
     "tags": "Tags",
     "addTag": "Add",
     "tagPlaceholder": "Type and press Enter...",
@@ -230,6 +246,10 @@
     "promptHelp": "Edit or enter your custom prompt in English or Chinese. Click a suggestion above to use it.",
     "promptPlaceholder": "Describe how you want your video to look...",
     "advancedSettings": "Advanced Settings",
+    "workflow": {
+      "title": "Workflow",
+      "help": "Select the AI model and workflow for video generation"
+    },
     "iteration": {
       "title": "Iteration steps (fast, balanced, quality)",
       "help": "Choose speed vs. detail",
@@ -262,6 +282,7 @@
     "loraWeights": "LoRA Weights",
     "loraWeightsHelp": "Tune how strongly each LoRA influences the generation.",
     "loraEnabled": "Enabled",
+    "loraRequired": "required",
     "reset": "Reset",
     "generateVideo": "Generate Video",
     "submitting": "Submitting...",
@@ -378,6 +399,9 @@
     "videos": {
       "title": "Video Management",
       "filters": "Filters",
+      "workflowType": "Workflow Type",
+      "workflowI2V": "I2V (Single Image)",
+      "workflowFL2V": "FL2V (Two Images)",
       "total": "Total: {count} videos",
       "noVideos": "No videos found",
       "deleteConfirm": "Delete video from {username}? This action cannot be undone.",

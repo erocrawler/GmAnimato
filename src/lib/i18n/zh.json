@@ -205,6 +205,20 @@
     "preview": "预览",
     "startProcessing": "开始处理",
     "uploading": "上传中...",
+    "mode": {
+      "title": "生成模式",
+      "i2v": {
+        "title": "图像转视频 (I2V)",
+        "description": "为单张图像生成动画"
+      },
+      "fl2v": {
+        "title": "首末帧转视频 (FL2V)",
+        "description": "在两张图像之间渐变",
+        "firstFrame": "首帧",
+        "lastFrame": "末帧",
+        "generateButton": "生成渐变视频"
+      }
+    },
     "errors": {
       "fileTooLarge": "文件过大。最大大小为{size}MB。",
       "notImage": "所选文件似乎不是图像。",
@@ -219,6 +233,8 @@
   "review": {
     "title": "标签和提示词",
     "imagePreview": "图像预览",
+    "firstFrame": "第一帧",
+    "lastFrame": "最后一帧",
     "tags": "标签",
     "addTag": "添加",
     "tagPlaceholder": "输入后按回车...",
@@ -229,6 +245,10 @@
     "promptHelp": "编辑或输入您的自定义提示词（支持中英文）。点击上方建议即可使用。",
     "promptPlaceholder": "描述您希望视频的样子...",
     "advancedSettings": "高级设置",
+    "workflow": {
+      "title": "工作流",
+      "help": "选择AI模型和视频生成工作流"
+    },
     "iteration": {
       "title": "迭代步数（快速、均衡、精细）",
       "help": "在速度和细节之间选择",
@@ -261,6 +281,7 @@
     "loraWeights": "LoRA权重",
     "loraWeightsHelp": "调整每个LoRA对生成的影响强度。",
     "loraEnabled": "启用",
+    "loraRequired": "必需",
     "reset": "重置",
     "generateVideo": "生成视频",
     "submitting": "提交中...",
@@ -377,6 +398,9 @@
     "videos": {
       "title": "视频管理",
       "filters": "筛选",
+      "workflowType": "工作流类型",
+      "workflowI2V": "I2V (单图像)",
+      "workflowFL2V": "FL2V (两张图像)",
       "total": "总计：{count} 个视频",
       "noVideos": "未找到视频",
       "deleteConfirm": "删除来自 {username} 的视频?此操作无法撤销。",

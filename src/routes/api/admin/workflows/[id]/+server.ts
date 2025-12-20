@@ -15,10 +15,14 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
 
   const { id } = params;
   const body = await request.json();
-  const { compatibleLoraIds, name, description, templatePath, isDefault } = body;
+  const { compatibleLoraIds, name, description, templatePath, workflowType, isDefault } = body;
 
   if (compatibleLoraIds !== undefined && !Array.isArray(compatibleLoraIds)) {
     throw error(400, 'compatibleLoraIds must be an array');
+  }
+
+  if (workflowType !== undefined && !['i2v', 'fl2v'].includes(workflowType)) {
+    throw error(400, 'workflowType must be either "i2v" or "fl2v"');
   }
 
   try {
@@ -31,12 +35,21 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
     if (name !== undefined) updateData.name = name;
     if (description !== undefined) updateData.description = description;
     if (templatePath !== undefined) updateData.templatePath = templatePath;
+    if (workflowType !== undefined) updateData.workflowType = workflowType;
     if (isDefault !== undefined) {
-      // If setting this as default, unset all others first
+      // If setting this as default, unset all others of the same type first
       if (isDefault) {
-        await db.prisma.workflow.updateMany({
-          data: { isDefault: false },
+        // Get current workflow to check its type
+        const current = await db.prisma.workflow.findUnique({ 
+          where: { id },
+          select: { workflowType: true }
         });
+        if (current) {
+          await db.prisma.workflow.updateMany({
+            where: { workflowType: current.workflowType },
+            data: { isDefault: false },
+          });
+        }
       }
       updateData.isDefault = isDefault;
     }
@@ -52,6 +65,7 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
       name: updated.name,
       description: updated.description,
       templatePath: updated.templatePath,
+      workflowType: updated.workflowType,
       compatibleLoraIds: updated.compatibleLoraIds as string[],
       isDefault: updated.isDefault,
       createdAt: updated.createdAt.toISOString(),

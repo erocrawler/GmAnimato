@@ -3,14 +3,36 @@
   import { goto } from '$app/navigation';
   import { _ } from 'svelte-i18n';
 
+  type Mode = 'i2v' | 'fl2v';
+  let mode: Mode = 'i2v';
   let imageFile: File | null = null;
+  let firstImageFile: File | null = null;
+  let lastImageFile: File | null = null;
   let preview = '';
+  let firstPreview = '';
+  let lastPreview = '';
   let validFile = false;
+  let validFirstFile = false;
+  let validLastFile = false;
   let submitting = false;
   let message = '';
   let messageType: 'success' | 'error' = 'error';
   let formElement: HTMLFormElement;
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
+
+  function onModeChange() {
+    // Reset all files when mode changes
+    imageFile = null;
+    firstImageFile = null;
+    lastImageFile = null;
+    preview = '';
+    firstPreview = '';
+    lastPreview = '';
+    validFile = false;
+    validFirstFile = false;
+    validLastFile = false;
+    message = '';
+  }
 
   function onFile(e: Event) {
     const input = e.target as HTMLInputElement;
@@ -35,6 +57,58 @@
       validFile = true;
       const reader = new FileReader();
       reader.onload = () => (preview = String(reader.result));
+      reader.readAsDataURL(f);
+    });
+  }
+
+  function onFirstFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const f = input.files?.[0] || null;
+    firstImageFile = f;
+    validFirstFile = false;
+    if (!f) {
+      firstPreview = '';
+      return;
+    }
+
+    validateFile(f).then((err) => {
+      if (err) {
+        message = err;
+        messageType = 'error';
+        firstPreview = '';
+        setTimeout(() => (message = ''), 4000);
+        return;
+      }
+
+      validFirstFile = true;
+      const reader = new FileReader();
+      reader.onload = () => (firstPreview = String(reader.result));
+      reader.readAsDataURL(f);
+    });
+  }
+
+  function onLastFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const f = input.files?.[0] || null;
+    lastImageFile = f;
+    validLastFile = false;
+    if (!f) {
+      lastPreview = '';
+      return;
+    }
+
+    validateFile(f).then((err) => {
+      if (err) {
+        message = err;
+        messageType = 'error';
+        lastPreview = '';
+        setTimeout(() => (message = ''), 4000);
+        return;
+      }
+
+      validLastFile = true;
+      const reader = new FileReader();
+      reader.onload = () => (lastPreview = String(reader.result));
       reader.readAsDataURL(f);
     });
   }
@@ -78,8 +152,14 @@
           if (entry && entry.id) {
             if (formElement) formElement.reset();
             imageFile = null;
+            firstImageFile = null;
+            lastImageFile = null;
             preview = '';
+            firstPreview = '';
+            lastPreview = '';
             validFile = false;
+            validFirstFile = false;
+            validLastFile = false;
             await goto(`/new/review/${entry.id}`);
             return;
           }
@@ -96,6 +176,8 @@
       setTimeout(() => (message = ''), 3000);
     };
   }
+
+  $: isFormValid = mode === 'i2v' ? validFile : (validFirstFile && validLastFile);
 </script>
 
 <div class="max-w-2xl mx-auto">
@@ -117,35 +199,106 @@
   <div class="card bg-base-100 shadow-xl">
     <div class="card-body">
       <form bind:this={formElement} method="post" enctype="multipart/form-data" use:enhance={handleUploadEnhance}>
-        <div class="form-control w-full">
-          <label class="label" for="image">
-            <span class="label-text font-semibold">{$_('newVideo.selectImage')}</span>
-            <span class="label-text-alt">{$_('newVideo.maxSize')}</span>
-          </label>
-          <input 
-            id="image" 
-            name="image" 
-            type="file" 
-            accept="image/*" 
-            on:change={onFile} 
-            class="file-input file-input-bordered file-input-primary w-full"
-            required 
-          />
+        <!-- Mode Selection -->
+        <div class="form-control w-full mb-6">
+          <div class="label">
+            <span class="label-text font-semibold">{$_('newVideo.mode.title')}</span>
+          </div>
+          <div class="flex gap-4">
+            <label class="label cursor-pointer gap-2 flex-1 border rounded-lg p-4" class:border-primary={mode === 'i2v'} class:bg-base-200={mode === 'i2v'}>
+              <input type="radio" name="mode" value="i2v" bind:group={mode} on:change={onModeChange} class="radio radio-primary" />
+              <div class="flex-1">
+                <span class="label-text font-semibold">{$_('newVideo.mode.i2v.title')}</span>
+                <p class="text-xs opacity-70 mt-1">{$_('newVideo.mode.i2v.description')}</p>
+              </div>
+            </label>
+            <label class="label cursor-pointer gap-2 flex-1 border rounded-lg p-4" class:border-primary={mode === 'fl2v'} class:bg-base-200={mode === 'fl2v'}>
+              <input type="radio" name="mode" value="fl2v" bind:group={mode} on:change={onModeChange} class="radio radio-primary" />
+              <div class="flex-1">
+                <span class="label-text font-semibold">{$_('newVideo.mode.fl2v.title')}</span>
+                <p class="text-xs opacity-70 mt-1">{$_('newVideo.mode.fl2v.description')}</p>
+              </div>
+            </label>
+          </div>
         </div>
-        
-        {#if preview}
-          <div class="mt-6">
-            <div class="label">
-              <span class="label-text font-semibold">{$_('newVideo.preview')}</span>
+
+        {#if mode === 'i2v'}
+          <!-- I2V Mode: Single Image -->
+          <div class="form-control w-full">
+            <label class="label" for="image">
+              <span class="label-text font-semibold">{$_('newVideo.selectImage')}</span>
+              <span class="label-text-alt">{$_('newVideo.maxSize')}</span>
+            </label>
+            <input 
+              id="image" 
+              name="image" 
+              type="file" 
+              accept="image/*" 
+              on:change={onFile} 
+              class="file-input file-input-bordered file-input-primary w-full"
+              required 
+            />
+          </div>
+          
+          {#if preview}
+            <div class="mt-6">
+              <div class="label">
+                <span class="label-text font-semibold">{$_('newVideo.preview')}</span>
+              </div>
+              <div class="rounded-lg overflow-hidden shadow-lg">
+                <img src={preview} alt="preview" class="w-full max-h-96 object-contain bg-base-200" />
+              </div>
             </div>
-            <div class="rounded-lg overflow-hidden shadow-lg">
-              <img src={preview} alt="preview" class="w-full max-h-96 object-contain bg-base-200" />
+          {/if}
+        {:else}
+          <!-- FL2V Mode: Two Images -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="form-control w-full">
+              <label class="label" for="first_image">
+                <span class="label-text font-semibold">{$_('newVideo.mode.fl2v.firstFrame')}</span>
+                <span class="label-text-alt">{$_('newVideo.maxSize')}</span>
+              </label>
+              <input 
+                id="first_image" 
+                name="first_image" 
+                type="file" 
+                accept="image/*" 
+                on:change={onFirstFile} 
+                class="file-input file-input-bordered file-input-primary w-full"
+                required 
+              />
+              {#if firstPreview}
+                <div class="mt-4 rounded-lg overflow-hidden shadow-lg">
+                  <img src={firstPreview} alt="first frame preview" class="w-full max-h-64 object-contain bg-base-200" />
+                </div>
+              {/if}
+            </div>
+
+            <div class="form-control w-full">
+              <label class="label" for="last_image">
+                <span class="label-text font-semibold">{$_('newVideo.mode.fl2v.lastFrame')}</span>
+                <span class="label-text-alt">{$_('newVideo.maxSize')}</span>
+              </label>
+              <input 
+                id="last_image" 
+                name="last_image" 
+                type="file" 
+                accept="image/*" 
+                on:change={onLastFile} 
+                class="file-input file-input-bordered file-input-primary w-full"
+                required 
+              />
+              {#if lastPreview}
+                <div class="mt-4 rounded-lg overflow-hidden shadow-lg">
+                  <img src={lastPreview} alt="last frame preview" class="w-full max-h-64 object-contain bg-base-200" />
+                </div>
+              {/if}
             </div>
           </div>
         {/if}
         
         <div class="card-actions justify-end mt-6">
-          <button type="submit" class="btn btn-primary btn-lg" disabled={submitting || !imageFile}>
+          <button type="submit" class="btn btn-primary btn-lg" disabled={submitting || !isFormValid}>
             {#if submitting}
               <span class="loading loading-spinner"></span>
               {$_('common.uploading')}...
@@ -153,7 +306,11 @@
               <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
               </svg>
-              {$_('newVideo.startProcessing')}
+              {#if mode === 'i2v'}
+                {$_('newVideo.startProcessing')}
+              {:else}
+                {$_('newVideo.mode.fl2v.generateButton')}
+              {/if}
             {/if}
           </button>
         </div>

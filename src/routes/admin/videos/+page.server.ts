@@ -16,6 +16,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const pageSize = 30;
   const statusFilter = url.searchParams.get('status') || undefined;
   const userFilter = url.searchParams.get('user') || undefined;
+  const workflowTypeFilter = url.searchParams.get('workflowType') || undefined;
 
   // Use the optimized getAllVideos function with filters
   const result = await getAllVideos({
@@ -23,6 +24,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     pageSize,
     status: statusFilter as any,
     username: userFilter,
+    workflowType: workflowTypeFilter as 'i2v' | 'fl2v' | undefined,
     includeDeleted: true
   });
 
@@ -34,5 +36,6 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     pageSize: result.pageSize,
     statusFilter: statusFilter || '',
     userFilter: userFilter || '',
+    workflowTypeFilter: workflowTypeFilter || '',
   };
 };

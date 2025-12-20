@@ -13,10 +13,14 @@ export const POST: RequestHandler = async ({ locals, request }) => {
     throw error(403, 'Forbidden: Admin access required');
   }
 
-  const { id, name, description, templatePath, isDefault, compatibleLoraIds } = await request.json();
+  const { id, name, description, templatePath, workflowType, isDefault, compatibleLoraIds } = await request.json();
 
   if (!id || !name || !templatePath) {
     throw error(400, 'id, name, and templatePath are required');
+  }
+
+  if (workflowType && !['i2v', 'fl2v'].includes(workflowType)) {
+    throw error(400, 'workflowType must be either "i2v" or "fl2v"');
   }
 
   if (!Array.isArray(compatibleLoraIds)) {
@@ -24,9 +28,10 @@ export const POST: RequestHandler = async ({ locals, request }) => {
   }
 
   try {
-    // If setting as default, unset all others first
+    // If setting as default, unset all others of the same type first
     if (isDefault) {
       await db.prisma.workflow.updateMany({
+        where: { workflowType: workflowType || 'i2v' },
         data: { isDefault: false },
       });
     }
@@ -38,6 +43,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
         name,
         description: description || null,
         templatePath,
+        workflowType: workflowType || 'i2v',
         isDefault: isDefault || false,
         compatibleLoraIds: compatibleLoraIds,
       },
@@ -48,6 +54,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
       name: created.name,
       description: created.description,
       templatePath: created.templatePath,
+      workflowType: created.workflowType,
       compatibleLoraIds: created.compatibleLoraIds as string[],
       isDefault: created.isDefault,
       createdAt: created.createdAt.toISOString(),

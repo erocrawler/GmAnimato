@@ -3,6 +3,7 @@ export type VideoEntry = {
   user_id: string;
   workflow_id?: string; // ID of the workflow used to generate this video
   original_image_url: string;
+  last_image_url?: string; // For FL2V workflow: the last frame image
   prompt?: string;
   tags?: string[];
   suggested_prompts?: string[];
@@ -64,6 +65,7 @@ export type Workflow = {
   name: string;
   description?: string;
   templatePath: string;
+  workflowType: 'i2v' | 'fl2v'; // Type of workflow: i2v (single image) or fl2v (two images)
   compatibleLoraIds: string[]; // Array of LoRA IDs compatible with this workflow
   isDefault: boolean;
   createdAt: string;
@@ -124,6 +126,7 @@ export type GetAllVideosOptions = {
   userId?: string; // Filter by user ID
   username?: string; // Filter by username (partial match)
   status?: VideoEntry['status']; // Filter by status
+  workflowType?: 'i2v' | 'fl2v'; // Filter by workflow type (i2v = single image, fl2v = two images)
   includeDeleted?: boolean; // Include deleted videos
 };
 
@@ -175,5 +178,5 @@ export interface IDatabase {
   // Workflow methods
   getWorkflowById(id: string): Promise<Workflow | null>;
   getWorkflows(): Promise<Workflow[]>;
-  getDefaultWorkflow(): Promise<Workflow | null>;
+  getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v'): Promise<Workflow | null>;
 }

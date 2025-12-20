@@ -2,6 +2,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { updateVideo, getVideoById, getActiveJobsByUser, getAdminSettings, checkDailyQuota, getLocalJobStats, getWorkflowById, getDefaultWorkflow } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { buildWorkflow } from '$lib/i2vWorkflow';
+import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { submitJob } from '$lib/local-queue';
 import { filterLoraWeights } from '$lib/workflows';
@@ -76,14 +77,32 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return new Response(JSON.stringify({ error: 'workflow not found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
       }
     } else {
-      // Use default workflow
-      workflow = await getDefaultWorkflow();
+      // Detect if this is FL2V mode (has last_image_url) to get appropriate default
+      const isFL2V = !!existing.last_image_url;
+      const workflowType = isFL2V ? 'fl2v' : 'i2v';
+      
+      // Use default workflow for this type
+      workflow = await getDefaultWorkflow(workflowType);
       if (!workflow) {
-        return new Response(JSON.stringify({ error: 'no default workflow configured' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ error: `no default ${workflowType.toUpperCase()} workflow configured` }), { status: 500, headers: { 'Content-Type': 'application/json' } });
       }
     }
 
     console.log(`[I2V] Using workflow: ${workflow.name} (${workflow.id})`);
+
+    // Detect if this is FL2V mode (has last_image_url)
+    const isFL2V = !!existing.last_image_url;
+    const expectedWorkflowType = isFL2V ? 'fl2v' : 'i2v';
+
+    // Validate workflow type matches job type
+    if (workflow.workflowType !== expectedWorkflowType) {
+      return new Response(JSON.stringify({ 
+        error: `Workflow type mismatch: Selected workflow "${workflow.name}" is for ${workflow.workflowType.toUpperCase()} jobs, but this is a ${expectedWorkflowType.toUpperCase()} job.` 
+      }), { 
+        status: 400, 
+        headers: { 'Content-Type': 'application/json' } 
+      });
+    }
 
     // Filter LoRA weights to only compatible ones for the selected workflow
     const filteredLoraWeights = loraWeights ? filterLoraWeights(loraWeights, workflow) : undefined;
@@ -262,19 +281,37 @@ export const POST: RequestHandler = async ({ request, locals }) => {
           const origin = new URL(request.url).origin;
           const callbackUrl = `${origin}/api/i2v-webhook/${id}`;
           
-          return await buildWorkflow({
-            image_name: `${id}.png`,
-            image_url: existing.original_image_url,
-            input_prompt: prompt ?? existing.prompt ?? 'A beautiful video',
-            seed: seed,
-            callback_url: callbackUrl,
-            iterationSteps,
-            videoDuration,
-            videoResolution: resolution,
-            loraWeights: filteredLoraWeights,
-            loraPresets: settings.loraPresets,
-            workflow: workflow,
-          });
+          if (isFL2V) {
+            return await buildFL2VWorkflow({
+              first_image_name: `${id}_first.png`,
+              first_image_url: existing.original_image_url,
+              last_image_name: `${id}_last.png`,
+              last_image_url: existing.last_image_url!,
+              input_prompt: prompt ?? existing.prompt ?? 'A beautiful video',
+              seed: seed,
+              callback_url: callbackUrl,
+              iterationSteps,
+              videoDuration,
+              videoResolution: resolution,
+              loraWeights: filteredLoraWeights,
+              loraPresets: settings.loraPresets,
+              workflow: workflow,
+            });
+          } else {
+            return await buildWorkflow({
+              image_name: `${id}.png`,
+              image_url: existing.original_image_url,
+              input_prompt: prompt ?? existing.prompt ?? 'A beautiful video',
+              seed: seed,
+              callback_url: callbackUrl,
+              iterationSteps,
+              videoDuration,
+              videoResolution: resolution,
+              loraWeights: filteredLoraWeights,
+              loraPresets: settings.loraPresets,
+              workflow: workflow,
+            });
+          }
         }
       );
       jobId = result.jobId;

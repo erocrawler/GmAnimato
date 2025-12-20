@@ -92,7 +92,22 @@
         <figure class="bg-base-300">
           {#if video.status === 'completed' && video.final_video_url && video.original_image_url}
             {#if showOriginal}
-              <img src={video.original_image_url} alt="Original" class="w-full max-h-[600px] object-contain" />
+              {#if video.last_image_url}
+                <!-- FL2V Mode: Show both first and last frames -->
+                <div class="grid grid-cols-2 gap-2 p-4 w-full">
+                  <div>
+                    <p class="text-xs text-center mb-2 font-semibold">{$_('review.firstFrame')}</p>
+                    <img src={video.original_image_url} alt="First Frame" class="w-full rounded-lg object-contain" style="max-height: 580px" />
+                  </div>
+                  <div>
+                    <p class="text-xs text-center mb-2 font-semibold">{$_('review.lastFrame')}</p>
+                    <img src={video.last_image_url} alt="Last Frame" class="w-full rounded-lg object-contain" style="max-height: 580px" />
+                  </div>
+                </div>
+              {:else}
+                <!-- I2V Mode: Show single image -->
+                <img src={video.original_image_url} alt="Original" class="w-full max-h-[600px] object-contain" />
+              {/if}
             {:else}
               <!-- svelte-ignore a11y_media_has_caption -->
               <video src={video.final_video_url} controls class="w-full max-h-[600px]" autoplay loop></video>
@@ -101,7 +116,22 @@
             <!-- svelte-ignore a11y_media_has_caption -->
             <video src={video.final_video_url} controls class="w-full max-h-[600px]" autoplay loop></video>
           {:else if video.original_image_url}
-            <img src={video.original_image_url} alt="Original" class="w-full max-h-[600px] object-contain" />
+            {#if video.last_image_url}
+              <!-- FL2V Mode: Show both images when video not ready -->
+              <div class="grid grid-cols-2 gap-2 p-4 w-full">
+                <div>
+                  <p class="text-xs text-center mb-2 font-semibold">{$_('review.firstFrame')}</p>
+                  <img src={video.original_image_url} alt="First Frame" class="w-full rounded-lg object-contain" style="max-height: 580px" />
+                </div>
+                <div>
+                  <p class="text-xs text-center mb-2 font-semibold">{$_('review.lastFrame')}</p>
+                  <img src={video.last_image_url} alt="Last Frame" class="w-full rounded-lg object-contain" style="max-height: 580px" />
+                </div>
+              </div>
+            {:else}
+              <!-- I2V Mode: Show single image -->
+              <img src={video.original_image_url} alt="Original" class="w-full max-h-[600px] object-contain" />
+            {/if}
           {:else}
             <div class="h-96 flex items-center justify-center">
               <span class="text-lg opacity-60">{$_('videoDetail.noVideoAvailable')}</span>

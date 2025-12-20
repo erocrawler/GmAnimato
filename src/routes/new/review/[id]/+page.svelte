@@ -30,6 +30,12 @@
   let workflows: Workflow[] = [];
   let selectedWorkflowId: string = '';
   let loadingWorkflows = true;
+  
+  // Detect workflow type based on video mode
+  $: videoWorkflowType = entry.last_image_url ? 'fl2v' : 'i2v';
+  
+  // Filter workflows by type to match the video
+  $: filteredWorkflows = workflows.filter(w => w.workflowType === videoWorkflowType);
 
   const LORA_PRESETS: LoraPreset[] = (data.loraPresets && data.loraPresets.length > 0)
     ? data.loraPresets
@@ -40,12 +46,12 @@
   type IterationSteps = 4 | 6 | 8;
   let stepOptions: { value: IterationSteps; label: string; description: string; requiresPaid?: boolean }[] = [];
 
-  let iterationSteps: IterationSteps = 4;
+  let iterationSteps: IterationSteps = (entry.iteration_steps as IterationSteps) || 4;
   
   type VideoDuration = 4 | 6;
   type VideoResolution = '480p' | '720p';
-  let videoDuration: VideoDuration = 4;
-  let videoResolution: VideoResolution = '480p';
+  let videoDuration: VideoDuration = (entry.video_duration as VideoDuration) || 4;
+  let videoResolution: VideoResolution = (entry.video_resolution as VideoResolution) || '480p';
   
   let resolutionOptions: { value: VideoResolution; label: string; description: string; requiresPaid?: boolean }[] = [
     { value: '480p', label: '', description: '', requiresPaid: false },
@@ -58,9 +64,9 @@
   $: if (!canUseQuality && iterationSteps === 8) iterationSteps = 4;
   
   // Get LoRAs compatible with selected workflow
-  $: filteredLoraPresets = selectedWorkflowId && workflows.length > 0
+  $: filteredLoraPresets = selectedWorkflowId && filteredWorkflows.length > 0
     ? (() => {
-        const workflow = workflows.find(w => w.id === selectedWorkflowId);
+        const workflow = filteredWorkflows.find(w => w.id === selectedWorkflowId);
         if (workflow) {
           return LORA_PRESETS.filter(lora => workflow.compatibleLoraIds.includes(lora.id));
         }
@@ -90,7 +96,7 @@
           : true
     ])
   );
-  let loraWeights: Record<string, number> = Object.fromEntries(
+  let loraWeights: Record<string, number> = entry.lora_weights || Object.fromEntries(
     LORA_PRESETS.map((lora) => [lora.id, lora.default])
   );
 
@@ -186,9 +192,20 @@
       const res = await fetch('/api/workflows');
       if (res.ok) {
         workflows = await res.json();
-        // Set default workflow to the first one or find the default one
-        const defaultWorkflow = workflows.find(w => w.isDefault);
-        selectedWorkflowId = defaultWorkflow?.id || (workflows[0]?.id || '');
+        // Filter workflows by type and set default workflow for this type
+        const workflowsForType = workflows.filter(w => w.workflowType === videoWorkflowType);
+        
+        // Use workflow_id from entry if available, otherwise use default
+        if (entry.workflow_id) {
+          const savedWorkflow = workflowsForType.find(w => w.id === entry.workflow_id);
+          selectedWorkflowId = savedWorkflow?.id || '';
+        }
+        
+        // Fallback to default workflow if no saved workflow
+        if (!selectedWorkflowId) {
+          const defaultWorkflow = workflowsForType.find(w => w.isDefault);
+          selectedWorkflowId = defaultWorkflow?.id || (workflowsForType[0]?.id || '');
+        }
       }
     } catch (err) {
       console.error('Failed to fetch workflows:', err);
@@ -405,7 +422,22 @@
     <!-- Image Preview Card -->
     <div class="card bg-base-100 shadow-xl">
       <figure class="px-4 pt-4">
-        <img src={entry.original_image_url} alt="preview" class="rounded-lg max-h-96 object-contain" />
+        {#if entry.last_image_url}
+          <!-- FL2V Mode: Show both images -->
+          <div class="grid grid-cols-2 gap-2 w-full">
+            <div>
+              <p class="text-xs text-center mb-2 font-semibold">{$_('review.firstFrame')}</p>
+              <img src={entry.original_image_url} alt="first frame" class="rounded-lg max-h-64 object-contain w-full" />
+            </div>
+            <div>
+              <p class="text-xs text-center mb-2 font-semibold">{$_('review.lastFrame')}</p>
+              <img src={entry.last_image_url} alt="last frame" class="rounded-lg max-h-64 object-contain w-full" />
+            </div>
+          </div>
+        {:else}
+          <!-- I2V Mode: Show single image -->
+          <img src={entry.original_image_url} alt="preview" class="rounded-lg max-h-96 object-contain" />
+        {/if}
       </figure>
       <div class="card-body">
         <div>
@@ -484,20 +516,20 @@
           {#if !loadingWorkflows}
             <div class="space-y-4 mb-6">
               <div class="flex items-center justify-between">
-                <h3 class="font-semibold">Workflow</h3>
-                <span class="text-xs opacity-70">Select the AI model and workflow for video generation</span>
+                <h3 class="font-semibold">{$_('review.workflow.title')}</h3>
+                <span class="text-xs opacity-70">{$_('review.workflow.help')}</span>
               </div>
               <select 
                 class="select select-bordered w-full"
                 bind:value={selectedWorkflowId}
                 disabled={!isEditable}
               >
-                {#each workflows as workflow}
+                {#each filteredWorkflows as workflow}
                   <option value={workflow.id}>{workflow.name}</option>
                 {/each}
               </select>
-              {#if workflows.find(w => w.id === selectedWorkflowId)?.description}
-                <p class="text-xs opacity-70">{workflows.find(w => w.id === selectedWorkflowId)?.description}</p>
+              {#if filteredWorkflows.find(w => w.id === selectedWorkflowId)?.description}
+                <p class="text-xs opacity-70">{filteredWorkflows.find(w => w.id === selectedWorkflowId)?.description}</p>
               {/if}
             </div>
             <div class="divider"></div>
@@ -620,7 +652,7 @@
                       <span class="text-xs select-none">{$_('review.loraEnabled')}</span>
                     </label>
                   {:else}
-                    <span class="badge badge-xs badge-ghost ml-2">required</span>
+                    <span class="badge badge-xs badge-ghost ml-2">{$_('review.loraRequired')}</span>
                   {/if}
                 </div>
                 <input

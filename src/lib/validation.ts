@@ -7,6 +7,7 @@ export const DB_LIMITS = {
   EMAIL: 255,
   PASSWORD_HASH: 255,
   ORIGINAL_IMAGE_URL: 500,
+  LAST_IMAGE_URL: 500,
   PROMPT: 2000,
   TAGS_JSON: 1000,
   SUGGESTED_PROMPTS_JSON: 2000,
@@ -71,6 +72,7 @@ export function validateJsonArrayLength(
  */
 export function validateVideoEntry(data: {
   original_image_url?: string;
+  last_image_url?: string;
   prompt?: string;
   tags?: string[];
   suggested_prompts?: string[];
@@ -81,6 +83,7 @@ export function validateVideoEntry(data: {
 
   const checks = [
     validateStringLength(data.original_image_url, 'original_image_url', DB_LIMITS.ORIGINAL_IMAGE_URL),
+    validateStringLength(data.last_image_url, 'last_image_url', DB_LIMITS.LAST_IMAGE_URL),
     validateStringLength(data.prompt, 'prompt', DB_LIMITS.PROMPT),
     validateJsonArrayLength(data.tags, 'tags', DB_LIMITS.TAGS_JSON),
     validateJsonArrayLength(data.suggested_prompts, 'suggested_prompts', DB_LIMITS.SUGGESTED_PROMPTS_JSON),

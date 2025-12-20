@@ -3,6 +3,7 @@ import { getVideoById, updateVideo, getAdminSettings, getWorkflowById, getDefaul
 import { env } from '$env/dynamic/private';
 import { getRunPodConfig, retryRunPodJob, getRunPodJobStatus, mapRunPodStatus, submitRunPodJob } from '$lib/runpod';
 import { buildWorkflow } from '$lib/i2vWorkflow';
+import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
 
 /**
  * Helper to submit a new RunPod job for a video
@@ -30,19 +31,40 @@ async function submitNewRunPodJob(runpodConfig: any, video: any, origin: string)
   }
 
   // Build the workflow from template with callback URL
-  const payload = await buildWorkflow({
-    image_name: `${video.id}.png`,
-    image_url: video.original_image_url,
-    input_prompt: video.prompt ?? 'A beautiful video',
-    seed: video.seed ?? Math.floor(Math.random() * 1000000),
-    callback_url: callbackUrl,
-    iterationSteps,
-    videoDuration,
-    videoResolution,
-    loraWeights: video.lora_weights,
-    loraPresets: settings.loraPresets,
-    workflow: workflow,
-  });
+  const isFL2V = !!video.last_image_url;
+  
+  let payload;
+  if (isFL2V) {
+    payload = await buildFL2VWorkflow({
+      first_image_name: `${video.id}_first.png`,
+      first_image_url: video.original_image_url,
+      last_image_name: `${video.id}_last.png`,
+      last_image_url: video.last_image_url!,
+      input_prompt: video.prompt ?? 'A beautiful video',
+      seed: video.seed ?? Math.floor(Math.random() * 1000000),
+      callback_url: callbackUrl,
+      iterationSteps,
+      videoDuration,
+      videoResolution,
+      loraWeights: video.lora_weights,
+      loraPresets: settings.loraPresets,
+      workflow: workflow,
+    });
+  } else {
+    payload = await buildWorkflow({
+      image_name: `${video.id}.png`,
+      image_url: video.original_image_url,
+      input_prompt: video.prompt ?? 'A beautiful video',
+      seed: video.seed ?? Math.floor(Math.random() * 1000000),
+      callback_url: callbackUrl,
+      iterationSteps,
+      videoDuration,
+      videoResolution,
+      loraWeights: video.lora_weights,
+      loraPresets: settings.loraPresets,
+      workflow: workflow,
+    });
+  }
 
   return await submitRunPodJob(runpodConfig, payload);
 }

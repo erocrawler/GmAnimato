@@ -27,6 +27,7 @@
   let workflowName = $state('');
   let workflowDescription = $state('');
   let workflowTemplatePath = $state('');
+  let workflowType: 'i2v' | 'fl2v' = $state('i2v');
   let workflowIsDefault = $state(false);
   let workflowCompatibleLoras = $state<string[]>([]);
   
@@ -357,6 +358,7 @@
       workflowName = workflow.name;
       workflowDescription = workflow.description || '';
       workflowTemplatePath = workflow.templatePath;
+      workflowType = workflow.workflowType || 'i2v';
       workflowIsDefault = workflow.isDefault;
       workflowCompatibleLoras = workflow.compatibleLoraIds || [];
     } else {
@@ -364,6 +366,7 @@
       workflowName = '';
       workflowDescription = '';
       workflowTemplatePath = 'data/new_workflow.json.tmpl';
+      workflowType = 'i2v';
       workflowIsDefault = false;
       workflowCompatibleLoras = [];
     }
@@ -376,6 +379,7 @@
     workflowName = '';
     workflowDescription = '';
     workflowTemplatePath = '';
+    workflowType = 'i2v';
     workflowIsDefault = false;
     workflowCompatibleLoras = [];
   }
@@ -405,6 +409,7 @@
             name: workflowName.trim(),
             description: workflowDescription.trim() || undefined,
             templatePath: workflowTemplatePath.trim(),
+            workflowType: workflowType,
             isDefault: workflowIsDefault,
             compatibleLoraIds: workflowCompatibleLoras,
           }),
@@ -429,6 +434,7 @@
             name: workflowName.trim(),
             description: workflowDescription.trim() || undefined,
             templatePath: workflowTemplatePath.trim(),
+            workflowType: workflowType,
             isDefault: workflowIsDefault,
             compatibleLoraIds: workflowCompatibleLoras,
           }),
@@ -480,9 +486,14 @@
       });
       
       if (response.ok) {
-        // Update all workflows - unset default on others
-        workflows = workflows.map(w => ({ ...w, isDefault: w.id === workflowId }));
-        showNotification('Default workflow updated', 'success');
+        const workflow = workflows.find(w => w.id === workflowId);
+        const workflowType = workflow?.workflowType || 'i2v';
+        // Update all workflows - unset default on others of the same type
+        workflows = workflows.map(w => ({ 
+          ...w, 
+          isDefault: w.id === workflowId ? true : (w.workflowType === workflowType ? false : w.isDefault)
+        }));
+        showNotification(`Default ${workflowType.toUpperCase()} workflow updated`, 'success');
       } else {
         const error = await response.json();
         showNotification(`Failed to set default: ${error.error || 'Unknown error'}`, 'error');
@@ -552,12 +563,30 @@
   
   <!-- Toast notifications -->
   {#if showToast}
-    <div class="toast toast-top toast-end">
+    <div class="toast toast-top toast-end z-[9999]">
       <div class="alert" class:alert-success={toastType === 'success'} class:alert-error={toastType === 'error'} class:alert-info={toastType === 'info'}>
         <span>{toastMessage}</span>
       </div>
     </div>
   {/if}
+
+  <!-- Video Management -->
+  <div class="card bg-base-200 shadow-xl mb-6">
+    <div class="card-body">
+      <h2 class="card-title text-2xl mb-4">Video Management</h2>
+      
+      <div class="space-y-4">
+        <p class="text-sm opacity-70">Review and manage all user videos</p>
+        
+        <a href="/admin/videos" class="btn btn-primary">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+          Manage All Videos
+        </a>
+      </div>
+    </div>
+  </div>
   
   <!-- System Settings -->
   <div class="card bg-base-200 shadow-xl mb-6">
@@ -722,9 +751,14 @@
                       <p class="text-sm opacity-70">{workflow.description}</p>
                     {/if}
                     <p class="text-xs opacity-60 mt-1">Template: {workflow.templatePath}</p>
-                    {#if workflow.isDefault}
-                      <span class="badge badge-primary badge-sm mt-2">Default</span>
-                    {/if}
+                    <div class="flex gap-2 mt-2">
+                      <span class="badge badge-sm" class:badge-info={workflow.workflowType === 'i2v'} class:badge-secondary={workflow.workflowType === 'fl2v'}>
+                        {workflow.workflowType?.toUpperCase() || 'I2V'}
+                      </span>
+                      {#if workflow.isDefault}
+                        <span class="badge badge-primary badge-sm">Default</span>
+                      {/if}
+                    </div>
                   </div>
                   <div class="flex gap-2">
                     {#if !workflow.isDefault}
@@ -732,7 +766,7 @@
                         class="btn btn-xs btn-outline"
                         onclick={() => setDefaultWorkflow(workflow.id)}
                       >
-                        Set Default
+                        Set as Default {workflow.workflowType?.toUpperCase() || 'I2V'}
                       </button>
                     {/if}
                     <button 
@@ -1050,24 +1084,7 @@
       </div>
     </div>
   </div>
-  
-  <!-- Video Management -->
-  <div class="card bg-base-200 shadow-xl mb-6">
-    <div class="card-body">
-      <h2 class="card-title text-2xl mb-4">Video Management</h2>
-      
-      <div class="space-y-4">
-        <p class="text-sm opacity-70">Review and manage all user videos</p>
-        
-        <a href="/admin/videos" class="btn btn-primary">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-          Manage All Videos
-        </a>
-      </div>
-    </div>
-  </div>
+
   
   <!-- User Management -->
   <div class="card bg-base-200 shadow-xl">
@@ -1347,6 +1364,23 @@
           placeholder="data/workflow_template.json.tmpl"
           class="input input-bordered w-full font-mono text-sm"
         />
+      </div>
+
+      <div class="form-control mb-4">
+        <label class="label" for="workflow-type">
+          <span class="label-text">Workflow Type</span>
+        </label>
+        <select 
+          id="workflow-type"
+          bind:value={workflowType}
+          class="select select-bordered w-full"
+        >
+          <option value="i2v">I2V (Single Image)</option>
+          <option value="fl2v">FL2V (Two Images)</option>
+        </select>
+        <label class="label">
+          <span class="label-text-alt">Choose whether this workflow processes single images or image pairs</span>
+        </label>
       </div>
       
       <div class="form-control mb-4">

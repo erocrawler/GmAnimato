@@ -2,8 +2,12 @@
   "input": {
     "images": [
       {
-        "name": "{image_name}",
-        "image": "{image_url}"
+        "name": "{first_image_name}",
+        "image": "{first_image_url}"
+      },
+      {
+        "name": "{last_image_name}",
+        "image": "{last_image_url}"
       }
     ],
     "workflow": {
@@ -77,11 +81,15 @@
           "start_image": [
             "15",
             0
+          ],
+          "end_image": [
+            "17",
+            0
           ]
         },
-        "class_type": "WanImageToVideo",
+        "class_type": "WanFirstLastFrameToVideo",
         "_meta": {
-          "title": "WanImageToVideo"
+          "title": "WanFirstLastFrameToVideo"
         }
       },
       "13": {
@@ -99,39 +107,42 @@
       },
       "14": {
         "inputs": {
-          "image": "{image_name}"
+          "image": "{first_image_name}"
         },
         "class_type": "LoadImage",
         "_meta": {
-          "title": "Load Image"
+          "title": "Load Image (First)"
         }
       },
       "15": {
         "inputs": {
-          "image": [
-            "14",
-            0
-          ],
           "width": 832,
           "height": 480,
           "upscale_method": "lanczos",
-          "keep_proportion": true,
-          "divisible_by": 16
+          "keep_proportion": "resize",
+          "pad_color": "0, 0, 0",
+          "crop_position": "center",
+          "divisible_by": 16,
+          "device": "cpu",
+          "image": [
+            "14",
+            0
+          ]
         },
-        "class_type": "ImageResizeKJ",
+        "class_type": "ImageResizeKJv2",
         "_meta": {
-          "title": "Resize Image"
+          "title": "Resize Image (First)"
         }
       },
       "16": {
         "inputs": {
           "frame_rate": 18,
           "loop_count": 0,
-          "filename_prefix": "Wan22",
+          "filename_prefix": "wan22_fl2v",
           "format": "video/h264-mp4",
           "pix_fmt": "yuv420p",
           "crf": 20,
-          "save_metadata": false,
+          "save_metadata": true,
           "trim_to_audio": false,
           "pingpong": false,
           "save_output": true,
@@ -145,7 +156,36 @@
           "title": "Video Combine 🎥🅥🅗🅢"
         }
       },
-      "34": {
+      "17": {
+        "inputs": {
+          "width": 832,
+          "height": 480,
+          "upscale_method": "lanczos",
+          "keep_proportion": "resize",
+          "pad_color": "0, 0, 0",
+          "crop_position": "center",
+          "divisible_by": 16,
+          "device": "cpu",
+          "image": [
+            "18",
+            0
+          ]
+        },
+        "class_type": "ImageResizeKJv2",
+        "_meta": {
+          "title": "Resize Image (Last)"
+        }
+      },
+      "18": {
+        "inputs": {
+          "image": "{last_image_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Image (Last)"
+        }
+      },
+      "67": {
         "inputs": {
           "unet_name": "wan2.2_i2v_high_noise_14B_Q8_0.gguf"
         },
@@ -156,9 +196,9 @@
       },
       "44": {
         "inputs": {
-          "boundary": 0.9,
+          "boundary": 0.895,
           "seed": {seed},
-          "steps": 4,
+          "steps": 6,
           "cfg_high_noise": 1,
           "cfg_low_noise": 1,
           "sampler_name": "euler",
@@ -166,11 +206,11 @@
           "sigma_shift": 8,
           "denoise": 1,
           "model_high_noise": [
-            "70",
+            "21",
             0
           ],
           "model_low_noise": [
-            "72",
+            "22",
             0
           ],
           "positive": [
@@ -191,7 +231,7 @@
           "title": "Wan MoE KSampler"
         }
       },
-      "62": {
+      "68": {
         "inputs": {
           "unet_name": "wan2.2_i2v_low_noise_14B_Q8_0.gguf"
         },
@@ -200,7 +240,7 @@
           "title": "Unet Loader (GGUF) Low"
         }
       },
-      "70": {
+      "21": {
         "inputs": {
           "model_type": "wan2.1_i2v_720p_14B_ret_mode",
           "rel_l1_thresh": 0.25,
@@ -208,16 +248,16 @@
           "end_percent": 1,
           "cache_device": "cuda",
           "model": [
-            "34",
+            "67",
             0
           ]
         },
         "class_type": "TeaCache",
         "_meta": {
-          "title": "TeaCache"
+          "title": "TeaCache (High)"
         }
       },
-      "72": {
+      "22": {
         "inputs": {
           "model_type": "wan2.1_i2v_720p_14B_ret_mode",
           "rel_l1_thresh": 0.25,
@@ -225,13 +265,13 @@
           "end_percent": 1,
           "cache_device": "cuda",
           "model": [
-            "62",
+            "68",
             0
           ]
         },
         "class_type": "TeaCache",
         "_meta": {
-          "title": "TeaCache"
+          "title": "TeaCache (Low)"
         }
       }
     }
