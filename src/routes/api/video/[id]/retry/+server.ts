@@ -18,21 +18,23 @@ async function submitNewRunPodJob(runpodConfig: any, video: any, origin: string)
   const videoDuration = video.video_duration as (4 | 6) | undefined;
   const videoResolution = video.video_resolution as ('480p' | '720p') | undefined;
 
+  // Detect workflow type from video
+  const isFL2V = !!video.last_image_url;
+  const workflowType = isFL2V ? 'fl2v' : 'i2v';
+
   // Resolve workflow to use
   let workflow = null;
   if (video.workflow_id) {
     workflow = await getWorkflowById(video.workflow_id);
   }
   if (!workflow) {
-    workflow = await getDefaultWorkflow();
+    workflow = await getDefaultWorkflow(workflowType);
   }
   if (!workflow) {
-    throw new Error('No workflow configured');
+    throw new Error(`No ${workflowType.toUpperCase()} workflow configured`);
   }
 
   // Build the workflow from template with callback URL
-  const isFL2V = !!video.last_image_url;
-  
   let payload;
   if (isFL2V) {
     payload = await buildFL2VWorkflow({

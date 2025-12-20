@@ -212,6 +212,5 @@ export async function buildFL2VWorkflow(params: FL2VWorkflowParams): Promise<obj
     }
   }
 
-  console.log('Final FL2V workflow:', JSON.stringify(workflow.input.workflow));
   return workflow;
 }

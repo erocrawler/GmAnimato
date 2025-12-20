@@ -47,22 +47,26 @@ export const GET: RequestHandler = async ({ request }) => {
     const settings = await getAdminSettings();
     const callbackUrl = `${new URL(request.url).origin}/api/i2v-webhook/${job.id}`;
     
+    // Detect workflow type from job
+    const isFL2V = !!job.last_image_url;
+    const workflowType = isFL2V ? 'fl2v' : 'i2v';
+    
     // Resolve workflow to use
     let workflow = null;
     if (job.workflow_id) {
       workflow = await getWorkflowById(job.workflow_id);
     }
     if (!workflow) {
-      workflow = await getDefaultWorkflow();
+      workflow = await getDefaultWorkflow(workflowType);
     }
     if (!workflow) {
       return new Response(
-        JSON.stringify({ error: 'No workflow configured' }),
+        JSON.stringify({ error: `No ${workflowType.toUpperCase()} workflow configured` }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
     
-    const isFL2V = !!job.last_image_url;
+    console.log(`[Worker] Using workflow: ${workflow.name} (${workflow.id}) for ${workflowType.toUpperCase()} job ${job.id}`);
     
     let payload;
     if (isFL2V) {

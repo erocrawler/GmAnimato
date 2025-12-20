@@ -75,6 +75,13 @@ export class PostgresDatabase implements IDatabase {
       where.status = status;
     }
     
+    // Filter by workflow type
+    if (workflowType) {
+      where.workflow = {
+        workflowType: workflowType
+      };
+    }
+    
     const [videos, total] = await Promise.all([
       this.prisma.video.findMany({
         where,
@@ -83,7 +90,8 @@ export class PostgresDatabase implements IDatabase {
             select: {
               username: true
             }
-          }
+          },
+          workflow: true,
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -217,6 +225,9 @@ export class PostgresDatabase implements IDatabase {
   async getVideoById(id: string): Promise<VideoEntry | undefined> {
     const video = await this.prisma.video.findUnique({
       where: { id },
+      include: {
+        workflow: true,
+      },
     });
 
     return video ? this.mapToVideoEntry(video) : undefined;

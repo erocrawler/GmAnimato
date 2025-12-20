@@ -1,6 +1,6 @@
 import type { Actions, PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
-import { createVideoEntry } from '$lib/db';
+import { createVideoEntry, getDefaultWorkflow } from '$lib/db';
 import { annotateImage } from '$lib/imageRecognition';
 import { uploadBufferToS3 } from '$lib/s3';
 import { Buffer } from 'buffer';
@@ -70,8 +70,13 @@ export const actions: Actions = {
         return { error: formatValidationErrors(validationErrors) };
       }
 
+      // Get default FL2V workflow
+      const defaultWorkflow = await getDefaultWorkflow('fl2v');
+      console.log('[New Video] FL2V - Using workflow:', defaultWorkflow?.id, defaultWorkflow?.name);
+
       const entry = await createVideoEntry({
         user_id: locals.user.id,
+        workflow_id: defaultWorkflow?.id,
         original_image_url: firstS3Url,
         last_image_url: lastS3Url,
         prompt: '',
@@ -123,8 +128,13 @@ export const actions: Actions = {
         return { error: formatValidationErrors(validationErrors) };
       }
 
+      // Get default I2V workflow
+      const defaultWorkflow = await getDefaultWorkflow('i2v');
+      console.log('[New Video] I2V - Using workflow:', defaultWorkflow?.id, defaultWorkflow?.name);
+
       const entry = await createVideoEntry({
         user_id: locals.user.id,
+        workflow_id: defaultWorkflow?.id,
         original_image_url: s3Url,
         prompt: '',
         tags: annotation.tags,

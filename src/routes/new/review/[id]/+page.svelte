@@ -195,13 +195,15 @@
         // Filter workflows by type and set default workflow for this type
         const workflowsForType = workflows.filter(w => w.workflowType === videoWorkflowType);
         
-        // Use workflow_id from entry if available, otherwise use default
+        // Use workflow_id from entry if available and matches current type
         if (entry.workflow_id) {
           const savedWorkflow = workflowsForType.find(w => w.id === entry.workflow_id);
-          selectedWorkflowId = savedWorkflow?.id || '';
+          if (savedWorkflow) {
+            selectedWorkflowId = savedWorkflow.id;
+          }
         }
         
-        // Fallback to default workflow if no saved workflow
+        // Fallback to default workflow if no valid saved workflow
         if (!selectedWorkflowId) {
           const defaultWorkflow = workflowsForType.find(w => w.isDefault);
           selectedWorkflowId = defaultWorkflow?.id || (workflowsForType[0]?.id || '');
