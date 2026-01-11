@@ -25,12 +25,13 @@ function makeClient() {
 }
 
 function makeUrl(key: string) {
-  if (S3_ENDPOINT) {
-    const base = S3_ENDPOINT.replace(/\/$/, '');
-    return `${base}/${S3_BUCKET}/${key}`;
+  // Return proxy URL format: /image/{bucket}/{key}
+  // This bypasses CORS issues by serving through our API
+  if (S3_BUCKET) {
+    return `/image/${S3_BUCKET}/${key}`;
   }
-  // default AWS URL
-  return `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com/${key}`;
+  // Fallback to relative path for local storage
+  return `/uploads/${key}`;
 }
 
 function normalizeExt(ext?: string) {

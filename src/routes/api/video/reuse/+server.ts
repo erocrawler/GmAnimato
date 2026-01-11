@@ -1,8 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { createVideoEntry, getDefaultWorkflow } from '$lib/db';
-import { annotateImage } from '$lib/imageRecognition';
-import { env } from '$env/dynamic/private';
-import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
+import { createVideoEntryWithRecognition } from '$lib/videoEntryCreation';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
   try {
@@ -23,53 +20,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       return new Response(JSON.stringify({ error: 'missing lastImageUrl for fl2v mode' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
-    const grokApiKey = env.GROK_API_KEY;
-
-    // Run image recognition
-    const annotation = mode === 'fl2v'
-      ? await annotateImage(originalImageUrl, grokApiKey, lastImageUrl)
-      : await annotateImage(originalImageUrl, grokApiKey);
-
-    // Validate field lengths
-    const validationData = mode === 'fl2v'
-      ? {
-          original_image_url: originalImageUrl,
-          last_image_url: lastImageUrl,
-          prompt: '',
-          tags: annotation.tags,
-          suggested_prompts: annotation.suggested_prompts,
-        }
-      : {
-          original_image_url: originalImageUrl,
-          prompt: '',
-          tags: annotation.tags,
-          suggested_prompts: annotation.suggested_prompts,
-        };
-
-    const validationErrors = validateVideoEntry(validationData);
-    if (validationErrors.length > 0) {
-      return new Response(JSON.stringify({ error: formatValidationErrors(validationErrors) }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-    }
-
-    // Get default workflow for the mode
-    const defaultWorkflow = await getDefaultWorkflow(mode);
-
-    // Create video entry with reused image URLs
-    const entry = await createVideoEntry({
-      user_id: locals.user.id,
-      workflow_id: defaultWorkflow?.id,
-      original_image_url: originalImageUrl,
-      last_image_url: mode === 'fl2v' ? lastImageUrl : undefined,
-      prompt: '',
-      tags: annotation.tags,
-      suggested_prompts: annotation.suggested_prompts,
-      is_photo_realistic: annotation.is_photo_realistic,
-      is_nsfw: annotation.is_nsfw,
-      status: 'uploaded',
-      is_published: false
+    // Create video entry with image recognition
+    const result = await createVideoEntryWithRecognition({
+      userId: locals.user.id,
+      mode,
+      originalImageUrl,
+      lastImageUrl
     });
 
-    return new Response(JSON.stringify({ success: true, entry }), { headers: { 'Content-Type': 'application/json' } });
+    if (!result.success) {
+      return new Response(JSON.stringify({ error: result.error }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    return new Response(JSON.stringify({ success: true, entry: result.entry }), { headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
     console.error('Reuse image error:', error);
     return new Response(JSON.stringify({ error: 'failed to create video entry' }), { status: 500, headers: { 'Content-Type': 'application/json' } });

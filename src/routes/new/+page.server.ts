@@ -1,12 +1,9 @@
 import type { Actions, PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
-import { createVideoEntry, getDefaultWorkflow } from '$lib/db';
-import { annotateImage } from '$lib/imageRecognition';
 import { uploadBufferToS3 } from '$lib/s3';
 import { Buffer } from 'buffer';
 import { validateAndConvertImage } from '$lib/imageValidation';
-import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
-import { env } from '$env/dynamic/private';
+import { createVideoEntryWithRecognition } from '$lib/videoEntryCreation';
 
 export const load: PageServerLoad = async ({ locals }) => {
   if (!locals.user) {
@@ -52,43 +49,19 @@ export const actions: Actions = {
       const firstS3Url = await uploadBufferToS3(firstBuffer, firstExt);
       const lastS3Url = await uploadBufferToS3(lastBuffer, lastExt);
 
-      // Run image recognition on both images (FL2V mode)
-      const grokApiKey = env.GROK_API_KEY;
-      const annotation = await annotateImage(firstS3Url, grokApiKey, lastS3Url);
-      const recognitionFailed = annotation.tags.length === 0;
-
-      // Validate field lengths before creating entry
-      const validationErrors = validateVideoEntry({
-        original_image_url: firstS3Url,
-        last_image_url: lastS3Url,
-        prompt: '',
-        tags: annotation.tags,
-        suggested_prompts: annotation.suggested_prompts,
+      // Create video entry with image recognition
+      const result = await createVideoEntryWithRecognition({
+        userId: locals.user.id,
+        mode: 'fl2v',
+        originalImageUrl: firstS3Url,
+        lastImageUrl: lastS3Url
       });
 
-      if (validationErrors.length > 0) {
-        return { error: formatValidationErrors(validationErrors) };
+      if (!result.success) {
+        return { error: result.error };
       }
 
-      // Get default FL2V workflow
-      const defaultWorkflow = await getDefaultWorkflow('fl2v');
-      console.log('[New Video] FL2V - Using workflow:', defaultWorkflow?.id, defaultWorkflow?.name);
-
-      const entry = await createVideoEntry({
-        user_id: locals.user.id,
-        workflow_id: defaultWorkflow?.id,
-        original_image_url: firstS3Url,
-        last_image_url: lastS3Url,
-        prompt: '',
-        tags: annotation.tags,
-        suggested_prompts: annotation.suggested_prompts,
-        is_photo_realistic: annotation.is_photo_realistic,
-        is_nsfw: annotation.is_nsfw,
-        status: 'uploaded',
-        is_published: false
-      });
-
-      return { success: true, entry, recognitionFailed };
+      return { success: true, entry: result.entry, recognitionFailed: result.recognitionFailed };
     } else {
       // Handle I2V mode with single image
       const file = form.get('image') as File | null;
@@ -98,54 +71,28 @@ export const actions: Actions = {
       const arrayBuffer = await file.arrayBuffer();
       let buffer: Buffer<ArrayBufferLike> = Buffer.from(arrayBuffer);
 
-      const result = await validateAndConvertImage(buffer);
-      if (result.error) {
-        return { error: result.error };
+      const validationResult = await validateAndConvertImage(buffer);
+      if (validationResult.error) {
+        return { error: validationResult.error };
       }
-      buffer = result.buffer;
-      const ext = result.ext || undefined;
+      buffer = validationResult.buffer;
+      const ext = validationResult.ext || undefined;
 
       // Upload to S3; helper returns a public URL
       const s3Url = await uploadBufferToS3(buffer, ext);
 
-      // Run image recognition to get tags and suggested prompts
-      // Pass Grok API key if configured
-      const grokApiKey = env.GROK_API_KEY;
-      const annotation = await annotateImage(s3Url, grokApiKey);
-
-      // Check if image recognition failed (empty tags means it failed)
-      const recognitionFailed = annotation.tags.length === 0;
-
-      // Validate field lengths before creating entry
-      const validationErrors = validateVideoEntry({
-        original_image_url: s3Url,
-        prompt: '',
-        tags: annotation.tags,
-        suggested_prompts: annotation.suggested_prompts,
+      // Create video entry with image recognition
+      const result = await createVideoEntryWithRecognition({
+        userId: locals.user.id,
+        mode: 'i2v',
+        originalImageUrl: s3Url
       });
 
-      if (validationErrors.length > 0) {
-        return { error: formatValidationErrors(validationErrors) };
+      if (!result.success) {
+        return { error: result.error };
       }
 
-      // Get default I2V workflow
-      const defaultWorkflow = await getDefaultWorkflow('i2v');
-      console.log('[New Video] I2V - Using workflow:', defaultWorkflow?.id, defaultWorkflow?.name);
-
-      const entry = await createVideoEntry({
-        user_id: locals.user.id,
-        workflow_id: defaultWorkflow?.id,
-        original_image_url: s3Url,
-        prompt: '',
-        tags: annotation.tags,
-        suggested_prompts: annotation.suggested_prompts,
-        is_photo_realistic: annotation.is_photo_realistic,
-        is_nsfw: annotation.is_nsfw,
-        status: 'uploaded',
-        is_published: false
-      });
-
-      return { success: true, entry, recognitionFailed };
+      return { success: true, entry: result.entry, recognitionFailed: result.recognitionFailed };
     }
   }
 };
