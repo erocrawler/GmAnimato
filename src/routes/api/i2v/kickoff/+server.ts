@@ -274,8 +274,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       const result = await submitJob(
         runpodConfig, 
         id, 
-        0, 
-        getLocalJobStats, 
+        settings.localQueueThreshold, 
+        getLocalJobStats,
         updateVideo,
         async () => {
           // This callback is only called if routing to RunPod

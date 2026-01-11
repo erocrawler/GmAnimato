@@ -10,7 +10,6 @@ export function toOriginalUrl(url: string): string {
     const path = url.substring('/media'.length); // includes leading '/'
     const base = (env.S3_ENDPOINT || '').replace(/\/$/, '');
     if (!base) return url;
-    console.log('toOriginalUrl:', url, '->', `${base}${path}`);
     return `${base}${path}`;
   }
   return url;
@@ -30,7 +29,6 @@ export function toProxiedUrl(url: string): string {
   // Check if the URL starts with our S3 endpoint
   if (url.startsWith(s3Endpoint + '/')) {
     const path = url.substring(s3Endpoint.length); // includes leading '/'
-    console.log('toProxiedUrl:', url, '->', `/media${path}`);
     return `/media${path}`;
   }
   
