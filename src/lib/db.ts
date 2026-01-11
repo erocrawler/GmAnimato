@@ -234,8 +234,8 @@ export async function getWorkflows() {
   return db.getWorkflows();
 }
 
-export async function getDefaultWorkflow() {
-  return db.getDefaultWorkflow();
+export async function getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v') {
+  return db.getDefaultWorkflow(workflowType);
 }
 
 // ==================== Helper Functions ====================

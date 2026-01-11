@@ -3,6 +3,7 @@ import { env } from '$env/dynamic/private';
 import { claimLocalJob, getAdminSettings, getWorkflowById, getDefaultWorkflow } from '$lib/db';
 import { buildWorkflow } from '$lib/i2vWorkflow';
 import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
+import { toOriginalUrl } from '$lib/serverImageUrl';
 
 /**
  * GET /api/worker/task
@@ -70,11 +71,15 @@ export const GET: RequestHandler = async ({ request }) => {
     
     let payload;
     if (isFL2V) {
+      // Convert proxy URLs to original S3 URLs for worker
+      const originalImageUrl = toOriginalUrl(job.original_image_url);
+      const lastImageUrl = toOriginalUrl(job.last_image_url!);
+      
       payload = await buildFL2VWorkflow({
         first_image_name: `${job.id}_first.png`,
-        first_image_url: job.original_image_url,
+        first_image_url: originalImageUrl,
         last_image_name: `${job.id}_last.png`,
-        last_image_url: job.last_image_url!,
+        last_image_url: lastImageUrl,
         input_prompt: job.prompt ?? 'A beautiful video',
         seed: job.seed ?? Math.floor(Math.random() * 1000000),
         callback_url: callbackUrl,
@@ -86,9 +91,12 @@ export const GET: RequestHandler = async ({ request }) => {
         workflow: workflow,
       });
     } else {
+      // Convert proxy URL to original S3 URL for worker
+      const originalImageUrl = toOriginalUrl(job.original_image_url);
+      
       payload = await buildWorkflow({
         image_name: `${job.id}.png`,
-        image_url: job.original_image_url,
+        image_url: originalImageUrl,
         input_prompt: job.prompt ?? 'A beautiful video',
         seed: job.seed ?? Math.floor(Math.random() * 1000000),
         callback_url: callbackUrl,

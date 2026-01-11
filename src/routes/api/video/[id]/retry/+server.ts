@@ -4,6 +4,7 @@ import { env } from '$env/dynamic/private';
 import { getRunPodConfig, retryRunPodJob, getRunPodJobStatus, mapRunPodStatus, submitRunPodJob } from '$lib/runpod';
 import { buildWorkflow } from '$lib/i2vWorkflow';
 import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
+import { toOriginalUrl } from '$lib/serverImageUrl';
 
 /**
  * Helper to submit a new RunPod job for a video
@@ -37,11 +38,15 @@ async function submitNewRunPodJob(runpodConfig: any, video: any, origin: string)
   // Build the workflow from template with callback URL
   let payload;
   if (isFL2V) {
+    // Convert proxy URLs to original S3 URLs for worker
+    const originalImageUrl = toOriginalUrl(video.original_image_url);
+    const lastImageUrl = toOriginalUrl(video.last_image_url!);
+    
     payload = await buildFL2VWorkflow({
       first_image_name: `${video.id}_first.png`,
-      first_image_url: video.original_image_url,
+      first_image_url: originalImageUrl,
       last_image_name: `${video.id}_last.png`,
-      last_image_url: video.last_image_url!,
+      last_image_url: lastImageUrl,
       input_prompt: video.prompt ?? 'A beautiful video',
       seed: video.seed ?? Math.floor(Math.random() * 1000000),
       callback_url: callbackUrl,
@@ -53,9 +58,12 @@ async function submitNewRunPodJob(runpodConfig: any, video: any, origin: string)
       workflow: workflow,
     });
   } else {
+    // Convert proxy URL to original S3 URL for worker
+    const originalImageUrl = toOriginalUrl(video.original_image_url);
+    
     payload = await buildWorkflow({
       image_name: `${video.id}.png`,
-      image_url: video.original_image_url,
+      image_url: originalImageUrl,
       input_prompt: video.prompt ?? 'A beautiful video',
       seed: video.seed ?? Math.floor(Math.random() * 1000000),
       callback_url: callbackUrl,
