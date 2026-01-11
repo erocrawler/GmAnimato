@@ -6,6 +6,7 @@ import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { submitJob } from '$lib/local-queue';
 import { filterLoraWeights } from '$lib/workflows';
+import { toOriginalUrl } from '$lib/serverImageUrl';
 
 async function delay(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
@@ -273,7 +274,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       const result = await submitJob(
         runpodConfig, 
         id, 
-        settings.localQueueThreshold, 
+        0, 
         getLocalJobStats, 
         updateVideo,
         async () => {
@@ -284,9 +285,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
           if (isFL2V) {
             return await buildFL2VWorkflow({
               first_image_name: `${id}_first.png`,
-              first_image_url: existing.original_image_url,
+              first_image_url: toOriginalUrl(existing.original_image_url),
               last_image_name: `${id}_last.png`,
-              last_image_url: existing.last_image_url!,
+              last_image_url: toOriginalUrl(existing.last_image_url!),
               input_prompt: prompt ?? existing.prompt ?? 'A beautiful video',
               seed: seed,
               callback_url: callbackUrl,
@@ -300,7 +301,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
           } else {
             return await buildWorkflow({
               image_name: `${id}.png`,
-              image_url: existing.original_image_url,
+              image_url: toOriginalUrl(existing.original_image_url),
               input_prompt: prompt ?? existing.prompt ?? 'A beautiful video',
               seed: seed,
               callback_url: callbackUrl,
