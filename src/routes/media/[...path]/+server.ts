@@ -3,8 +3,8 @@ import { error } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 
 /**
- * Image proxy that maps /image/* to S3_ENDPOINT/*
- * This bypasses CORS restrictions for browser-side image loading
+ * Media proxy that maps /media/* to S3_ENDPOINT/*
+ * This bypasses CORS restrictions for browser-side media loading (images and videos)
  */
 export const GET: RequestHandler = async ({ params }) => {
   try {

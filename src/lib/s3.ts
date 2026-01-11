@@ -25,10 +25,10 @@ function makeClient() {
 }
 
 function makeUrl(key: string) {
-  // Return proxy URL format: /image/{bucket}/{key}
+  // Return proxy URL format: /media/{bucket}/{key}
   // This bypasses CORS issues by serving through our API
   if (S3_BUCKET) {
-    return `/image/${S3_BUCKET}/${key}`;
+    return `/media/${S3_BUCKET}/${key}`;
   }
   // Fallback to relative path for local storage
   return `/uploads/${key}`;

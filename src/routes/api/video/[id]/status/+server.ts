@@ -3,6 +3,7 @@ import { getVideoById, updateVideo } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { getRunPodConfig, mapRunPodStatus, extractVideoUrl, PROCESSING_TIMEOUT_MS } from '$lib/runpod';
 import { getJobStatus } from '$lib/local-queue';
+import { toProxiedUrl } from '$lib/serverImageUrl';
 
 export const GET: RequestHandler = async ({ params }) => {
   try {
@@ -103,7 +104,8 @@ export const GET: RequestHandler = async ({ params }) => {
         if (mappedStatus === 'completed') {
           const extractedUrl = extractVideoUrl(statusData);
           if (extractedUrl) {
-            finalVideoUrl = extractedUrl;
+            // Convert to proxy URL if it matches our S3 endpoint
+            finalVideoUrl = toProxiedUrl(extractedUrl);
           }
         }
 

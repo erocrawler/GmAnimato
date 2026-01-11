@@ -2,6 +2,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { updateVideo, getVideoById } from '$lib/db';
 import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
 import { uploadBufferToS3 } from '$lib/s3';
+import { toProxiedUrl } from '$lib/serverImageUrl';
 
 export const POST: RequestHandler = async ({ request, params }) => {
   try {
@@ -61,8 +62,9 @@ export const POST: RequestHandler = async ({ request, params }) => {
         (file.filename.endsWith('.mp4') || file.filename.endsWith('.webm'))
       );
       if (videoFile?.data) {
-        patch.final_video_url = videoFile.data;
-        console.log(`[Webhook] Extracted video URL from files: ${videoFile.data}`);
+        // Convert to proxy URL if it matches our S3 endpoint
+        patch.final_video_url = toProxiedUrl(videoFile.data);
+        console.log(`[Webhook] Extracted video URL from files: ${videoFile.data} -> ${patch.final_video_url}`);
       }
     }
 
