@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { error } from '@sveltejs/kit';
-import { getVideoById, getAdminSettings } from '$lib/db';
+import { getVideoById, getAdminSettings, checkDailyQuota } from '$lib/db';
 import { normalizeLoraPresets } from '$lib/loraPresets';
 import { env } from '$env/dynamic/private';
 
@@ -12,10 +12,20 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   const isAdmin = locals.user?.roles?.includes('admin');
   if (locals.user && entry.user_id !== locals.user.id && !isAdmin) throw error(403, 'Access denied');
   const adminSettings = await getAdminSettings();
+  
+  // Check if user has advanced features enabled through any of their roles
+  let hasAdvancedFeatures = false;
+  if (locals.user && adminSettings.roles) {
+    hasAdvancedFeatures = locals.user.roles.some(userRole => {
+      const roleConfig = adminSettings.roles?.find(r => r.name === userRole);
+      return roleConfig?.allowAdvancedFeatures === true;
+    });
+  }
+  
   return { 
     entry, 
     loraPresets: normalizeLoraPresets(adminSettings.loraPresets),
-    userRoles: locals.user?.roles || [],
+    hasAdvancedFeatures,
     sponsorUrl: env.SPONSOR_URL
   } as any;
 };

@@ -72,22 +72,33 @@ export function calculateVideoDimensions(
   imageHeight: number,
   resolution: '480p' | '720p'
 ): { width: number; height: number } {
-  const longSide = resolution === '720p' ? 1280 : 832;
-  const squareSide = resolution === '720p' ? 960 : 640;
-  const aspectRatio = imageWidth / imageHeight;
+  const totalPixels = resolution === '720p' ? 921600 : 409600;
+  let aspectRatio = imageWidth / imageHeight;
   
-  // Portrait (taller than wide)
-  if (aspectRatio < 0.95) {
-    const width = roundToMultipleOf16(longSide * aspectRatio);
-    return { width, height: longSide };
-  }
-  // Landscape (wider than tall)
-  else if (aspectRatio > 1.05) {
-    const height = roundToMultipleOf16(longSide / aspectRatio);
-    return { width: longSide, height };
-  }
-  // Square (roughly 1:1 ratio, within 5% tolerance)
-  else {
-    return { width: squareSide, height: squareSide };
-  }
+  // Clamp aspect ratio to reasonable range:
+  // 1:2.2 (phone full screen portrait) to 2.2:1 (cinema widescreen)
+  const minAspectRatio = 1 / 2.2;  // ~0.45
+  const maxAspectRatio = 2.2;       // 2.2
+  aspectRatio = Math.max(minAspectRatio, Math.min(maxAspectRatio, aspectRatio));
+  
+  // Calculate dimensions that fit the total pixel count while maintaining aspect ratio
+  // width * height = totalPixels
+  // width / height = aspectRatio
+  // width = sqrt(totalPixels * aspectRatio)
+  // height = sqrt(totalPixels / aspectRatio)
+  const width = Math.sqrt(totalPixels * aspectRatio);
+  const height = Math.sqrt(totalPixels / aspectRatio);
+  
+  // Round both dimensions to multiples of 16
+  let finalWidth = roundToMultipleOf16(width);
+  let finalHeight = roundToMultipleOf16(height);
+  
+  // Ensure minimum dimensions of 256 pixels
+  if (finalWidth < 256) finalWidth = 256;
+  if (finalHeight < 256) finalHeight = 256;
+  
+  return {
+    width: finalWidth,
+    height: finalHeight
+  };
 }

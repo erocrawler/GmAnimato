@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { updateUser, getAdminSettings, getSponsorClaimByUsername, createSponsorClaim } from '$lib/db';
+import { updateUser, getAdminSettings, getSponsorClaimByUsername, createSponsorClaim, deleteSponsorClaim } from '$lib/db';
 import { env } from '$env/dynamic/private';
 
 interface SponsorData {
@@ -189,36 +189,7 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
   }
 
   try {
-    // Check if this sponsor has already been claimed
-    const existingClaim = await getSponsorClaimByUsername(sponsorUsername);
-    
-    if (existingClaim) {
-      // Check if it was claimed by the current user
-      if (existingClaim.user_id !== locals.user.id) {
-        return new Response(
-          JSON.stringify({ error: 'This sponsor has already been claimed by another user' }),
-          { status: 409, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-      // If already claimed by this user, just return success
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: `You have already claimed this sponsor with the "${existingClaim.applied_role}" role.`,
-          user: {
-            id: locals.user.id,
-            username: locals.user.username,
-            email: locals.user.email,
-            roles: locals.user.roles,
-            created_at: locals.user.created_at,
-            updated_at: locals.user.updated_at,
-          },
-        }),
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Re-verify sponsor from GmCrawler
+    // Re-verify sponsor from GmCrawler first
     const sponsor = await fetchSponsorFromCrawler(sponsorUsername);
 
     if (!sponsor) {
@@ -239,7 +210,92 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
       );
     }
 
-    // Update user roles
+    // Check if this sponsor has already been claimed
+    const existingClaim = await getSponsorClaimByUsername(sponsorUsername);
+    
+    if (existingClaim) {
+      // Check if it was claimed by someone else
+      if (existingClaim.user_id !== locals.user.id) {
+        return new Response(
+          JSON.stringify({ error: 'This sponsor has already been claimed by another user' }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      // If tier/role changed, remove old role and delete old claim
+      if (existingClaim.applied_role !== roleToApply) {
+        const currentRoles = locals.user.roles || [];
+        const updatedRoles = currentRoles.filter(r => r !== existingClaim.applied_role);
+        if (!updatedRoles.includes(roleToApply)) {
+          updatedRoles.push(roleToApply);
+        }
+        
+        // Update user roles
+        const updated = await updateUser(locals.user.id, { roles: updatedRoles });
+        if (!updated) {
+          return new Response(JSON.stringify({ error: 'Failed to update user roles' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        
+        // Delete old claim and create new one
+        await deleteSponsorClaim(existingClaim.id);
+        await createSponsorClaim({
+          user_id: locals.user.id,
+          sponsor_username: sponsorUsername,
+          sponsor_nickname: sponsor.fansNickname,
+          sponsor_avatar: sponsor.fansAvatar,
+          sponsor_tier: sponsor.schemeName,
+          applied_role: roleToApply,
+        });
+        
+        // Update session cookie with new user data
+        const userPublic = {
+          id: updated.id,
+          username: updated.username,
+          email: updated.email,
+          roles: updated.roles,
+          created_at: updated.created_at,
+          updated_at: updated.updated_at,
+        };
+
+        cookies.set('session', JSON.stringify(userPublic), {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: 60 * 60 * 24 * 7, // 7 days
+        });
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            message: `Successfully updated to ${roleToApply} role!`,
+            user: userPublic,
+          }),
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+      } else {
+        // Same role, no update needed
+        return new Response(
+          JSON.stringify({
+            success: true,
+            message: `You already have the "${roleToApply}" role from this sponsor.`,
+            user: {
+              id: locals.user.id,
+              username: locals.user.username,
+              email: locals.user.email,
+              roles: locals.user.roles,
+              created_at: locals.user.created_at,
+              updated_at: locals.user.updated_at,
+            },
+          }),
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    // New claim - update user roles
     const currentRoles = locals.user.roles || [];
     if (!currentRoles.includes(roleToApply)) {
       currentRoles.push(roleToApply);

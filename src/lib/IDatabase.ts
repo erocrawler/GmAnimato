@@ -58,6 +58,7 @@ export type RoleConfig = {
   name: string;
   sponsorTier?: string; // Map sponsor tier (schemeName) to this role
   description?: string;
+  allowAdvancedFeatures?: boolean; // Allow 720p resolution and other premium features
 };
 
 export type Workflow = {

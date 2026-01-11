@@ -78,6 +78,7 @@
   let editingRoleSponsorTier = $state('');
   let editingRoleDescription = $state('');
   let editingRoleQuota = $state('');
+  let editingRoleAllowAdvancedFeatures = $state(false);
   
   let roleList = $derived(settings.roles ?? []);
   let getAvailableRoleNames = $derived(roleList.map((r: any) => r.name));
@@ -121,6 +122,7 @@
     editingRoleSponsorTier = role.sponsorTier || '';
     editingRoleDescription = role.description || '';
     editingRoleQuota = settings.quotaPerDay?.[role.name]?.toString() || '10';
+    editingRoleAllowAdvancedFeatures = role.allowAdvancedFeatures || false;
     showRoleConfigModal = true;
   }
 
@@ -138,6 +140,7 @@
       name: editingRoleName.trim(),
       sponsorTier: editingRoleSponsorTier.trim() || undefined,
       description: editingRoleDescription.trim() || undefined,
+      allowAdvancedFeatures: editingRoleAllowAdvancedFeatures,
     };
     
     // Update quotaPerDay
@@ -166,6 +169,7 @@
     editingRoleSponsorTier = '';
     editingRoleDescription = '';
     editingRoleQuota = '';
+    editingRoleAllowAdvancedFeatures = false;
   }
   
   async function saveSettings() {
@@ -1262,9 +1266,23 @@
         />
       </div>
       
+      <div class="form-control mb-4">
+        <label class="label cursor-pointer">
+          <span class="label-text">Allow Advanced Features</span>
+          <input 
+            type="checkbox" 
+            bind:checked={editingRoleAllowAdvancedFeatures}
+            class="toggle toggle-primary"
+          />
+        </label>
+        <label class="label">
+          <span class="label-text-alt">Enable 720p resolution and other premium features</span>
+        </label>
+      </div>
+      
       <div class="modal-action">
         <button class="btn btn-ghost" onclick={closeRoleConfigModal}>Cancel</button>
-        <button class="btn btn-primary" onclick={saveRoleConfig}>Save</button>
+        <button class="btn btn-primary" onclick={saveRoleConfig}>Apply</button>
       </div>
     </div>
     <button class="modal-backdrop" type="button" onclick={closeRoleConfigModal} aria-label="Close modal"></button>

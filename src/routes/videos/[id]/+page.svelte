@@ -47,6 +47,41 @@
 
   let likesCount = $derived(video.likesCount || 0);
   let isLiked = $derived(video.isLiked || false);
+  let reusing = $state(false);
+
+  async function reuseImage() {
+    reusing = true;
+    try {
+      const body = video.last_image_url
+        ? {
+            mode: 'fl2v',
+            originalImageUrl: video.original_image_url,
+            lastImageUrl: video.last_image_url
+          }
+        : {
+            mode: 'i2v',
+            originalImageUrl: video.original_image_url
+          };
+
+      const res = await fetch('/api/video/reuse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        await goto(`/new/review/${result.entry.id}`);
+      } else {
+        const error = await res.json();
+        alert($_('videoDetail.reuseImageError') + ': ' + (error.error || 'Unknown error'));
+      }
+    } catch (err) {
+      alert($_('videoDetail.reuseImageError') + ': ' + err);
+    } finally {
+      reusing = false;
+    }
+  }
 
   async function toggleLike() {
     try {
@@ -263,6 +298,26 @@
               </svg>
               {$_('videoDetail.download')}
             </a>
+          {/if}
+
+          <div class="divider"></div>
+
+          <!-- Reuse Image Button -->
+          {#if video.original_image_url}
+            <button 
+              class="btn btn-secondary btn-outline"
+              onclick={reuseImage}
+              disabled={reusing}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              {reusing ? $_('videoDetail.reusingImage') : $_('videoDetail.reuseImage')}
+            </button>
+          {/if}
+
+          {#if video.status === 'completed'}
+            <div class="divider"></div>
           {/if}
 
           <button class="btn btn-error btn-outline" onclick={deleteVideo}>

@@ -151,6 +151,7 @@
           // Check if tier changed
           if (sponsor.schemeName !== currentClaim.sponsor_tier) {
             // Tier changed, need to update
+            sponsorUsername = currentClaim.sponsor_username;
             foundSponsor = sponsor;
             roleToApply = result.roleToApply || '';
             showSponsorConfirm = true;

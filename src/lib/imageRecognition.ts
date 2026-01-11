@@ -58,9 +58,9 @@ async function annotateWithGrok(
   const systemPrompt = isFL2V 
     ? `You are an expert image analyzer for an AI first-last-to-video (FL2V) generation system. You will be provided with TWO images: the first frame and the last frame. Analyze both images and return a JSON object with:
 
-1. suggested_prompts: Array with exactly 2 CONCISE FL2V generation prompts (max 25 words each) describing the TRANSITION between the two frames:
-   - First prompt: A straightforward description of how the scene transitions from first to last frame.
-   - Second prompt: A more cinematic/dramatic version with intensified motion and transformation.
+1. suggested_prompts: Array with exactly 2 CONCISE FL2V generation prompts (max 50 words each) describing the TRANSITION between the two frames:
+   - First prompt: A straightforward English description of how the scene transitions from first to last frame.
+   - Second prompt: A Chinese (中文) version describing the same transition in a more cinematic way.
    
 2. tags: Array of booru-style tags describing ONLY the characters/subjects visible in the images (e.g., "1girl", "solo", "1boy", "smile", "long_hair", "blue_eyes"). Do NOT include environment tags like backgrounds, locations, or settings.
 
@@ -70,14 +70,17 @@ async function annotateWithGrok(
 
 IMPORTANT: 
 - Focus prompts on the TRANSFORMATION and TRANSITION between the two frames
+- DO NOT just say "person transitions from A to B" - ADD SPECIFIC DETAILS about HOW they moved (e.g., body language, movement direction, speed, camera pan or zoom)
+- Describe the MOTION, GESTURE, POSTURE CHANGES, and any VISUAL TRANSFORMATION in detail
 - Keep prompts SHORT and focused on the CHANGE from first to last frame
+- Second prompt MUST be in Chinese (中文) and should not be a literal translation of the first prompt.
 - Tags should describe characters/subjects ONLY, not environments
 - Return ONLY valid JSON, no other text.`
     : `You are an expert image analyzer for an AI image-to-video generation system. Analyze the provided image and return a JSON object with:
 
-1. suggested_prompts: Array with exactly 2 CONCISE Image to Video generation prompts (max 25 words each). They are optimized for a 6-second AI video:
-   - First prompt: A straightforward description focusing on motion and camera movement.
-   - Second prompt: A more cinematic/dramatic version with intensified motion.
+1. suggested_prompts: Array with exactly 2 CONCISE Image to Video generation prompts (max 50 words each). They are optimized for a 6-second AI video:
+   - First prompt: A straightforward English description focusing on motion and camera movement.
+   - Second prompt: A Chinese (中文) version describing the same motion in a natural and cinematic way.
    
 2. tags: Array of booru-style tags describing ONLY the characters/subjects (e.g., "1girl", "solo", "1boy", "smile", "long_hair", "blue_eyes"). Do NOT include environment tags like backgrounds, locations, or settings.
 
@@ -87,6 +90,7 @@ IMPORTANT:
 
 IMPORTANT: 
 - Keep prompts SHORT and focused on VIDEO MOTION and CAMERA MOVEMENT
+- Second prompt MUST be in Chinese (中文) and should not be a literal translation of the first prompt.
 - Tags should describe characters/subjects ONLY, not environments
 - Return ONLY valid JSON, no other text.`;
 

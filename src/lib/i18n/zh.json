@@ -196,7 +196,10 @@
     "deleteError": "删除视频失败",
     "publishUpdateError": "无法更新发布状态",
     "likeError": "无法切换喜欢状态",
-    "published": "已发布"
+    "published": "已发布",
+    "reuseImage": "重用图像",
+    "reusingImage": "重用中...",
+    "reuseImageError": "无法重用图像"
   },
   "newVideo": {
     "title": "创建新的图像→视频任务",
@@ -224,7 +227,8 @@
       "notImage": "所选文件似乎不是图像。",
       "invalidImage": "无法将文件解析为图像。",
       "uploadFailed": "上传失败：{error}",
-      "unexpectedError": "发生意外错误"
+      "unexpectedError": "发生意外错误",
+      "failedToLoadImage": "无法从URL加载图像"
     },
     "success": "图像已上传。",
     "nextSteps": "下一步",

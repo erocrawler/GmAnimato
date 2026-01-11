@@ -197,7 +197,10 @@
     "deleteError": "Failed to delete video",
     "publishUpdateError": "Failed to update publish status",
     "likeError": "Failed to toggle like",
-    "published": "Published"
+    "published": "Published",
+    "reuseImage": "Reuse Image",
+    "reusingImage": "Reusing...",
+    "reuseImageError": "Failed to reuse image"
   },
   "newVideo": {
     "title": "Create a new Image→Video job",
@@ -225,7 +228,8 @@
       "notImage": "Selected file does not appear to be an image.",
       "invalidImage": "The file could not be parsed as an image.",
       "uploadFailed": "Upload failed: {error}",
-      "unexpectedError": "An unexpected error occurred"
+      "unexpectedError": "An unexpected error occurred",
+      "failedToLoadImage": "Failed to load image from URL"
     },
     "success": "Image uploaded.",
     "nextSteps": "Next Steps",

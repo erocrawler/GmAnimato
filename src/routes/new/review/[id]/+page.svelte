@@ -41,9 +41,9 @@
     ? data.loraPresets
     : DEFAULT_LORA_PRESETS;
 
-  const userRoles: string[] = data.userRoles || [];
+  const hasAdvancedFeatures: boolean = data.hasAdvancedFeatures || false;
 
-  type IterationSteps = 4 | 6 | 8;
+  type IterationSteps = 4 | 6;
   let stepOptions: { value: IterationSteps; label: string; description: string; requiresPaid?: boolean }[] = [];
 
   let iterationSteps: IterationSteps = (entry.iteration_steps as IterationSteps) || 4;
@@ -58,10 +58,9 @@
     { value: '720p', label: '', description: '', requiresPaid: true },
   ];
 
-  $: canUseQuality = userRoles.includes('paid-user');
-  $: visibleStepOptions = canUseQuality ? stepOptions : stepOptions.filter((o) => !o.requiresPaid);
+  $: canUseQuality = hasAdvancedFeatures;
+  $: visibleStepOptions = stepOptions;
   $: visibleResolutionOptions = canUseQuality ? resolutionOptions : resolutionOptions.filter((o) => !o.requiresPaid);
-  $: if (!canUseQuality && iterationSteps === 8) iterationSteps = 4;
   
   // Get LoRAs compatible with selected workflow
   $: filteredLoraPresets = selectedWorkflowId && filteredWorkflows.length > 0
@@ -81,7 +80,6 @@
   $: stepOptions = [
     { value: 4, label: get(_)('review.iteration.fast'), description: get(_)('review.iteration.steps.fast'), requiresPaid: false },
     { value: 6, label: get(_)('review.iteration.balanced'), description: get(_)('review.iteration.steps.balanced'), requiresPaid: false },
-    { value: 8, label: get(_)('review.iteration.quality'), description: get(_)('review.iteration.steps.quality'), requiresPaid: true },
   ];
 
 
