@@ -38,7 +38,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const loraWeights = body?.loraWeights;
     const iterationStepsRaw = body?.iterationSteps;
     const parsedSteps = Number(iterationStepsRaw);
-    const allowedSteps = [4, 6, 8] as const;
+    const allowedSteps = [4, 6] as const;
     type IterationSteps = (typeof allowedSteps)[number];
     let iterationSteps: IterationSteps = 4;
 
@@ -147,23 +147,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     // Get user roles for feature enforcement
     const roles = locals.user?.roles || [];
 
-    // Enforce role requirement for detailed (8-step) runs
-    if (iterationSteps === 8) {
-      if (!roles.includes('paid-user')) {
-        return new Response(JSON.stringify({ 
-          error: 'Detailed mode (8 steps) is available to paid users only.' 
-        }), { 
-          status: 403, 
-          headers: { 'Content-Type': 'application/json' } 
-        });
-      }
-    }
-
     // Enforce role requirement for 720p resolution
     if (resolution === '720p') {
-      if (!roles.includes('paid-user')) {
+      // Check if any of user's roles has allowAdvancedFeatures enabled
+      const hasAdvancedFeatures = roles.some(roleName => 
+        settings.roles?.find(rc => rc.name === roleName)?.allowAdvancedFeatures
+      );
+
+      if (!hasAdvancedFeatures) {
         return new Response(JSON.stringify({ 
-          error: '720p resolution is available to paid users only.' 
+          error: '720p resolution is available to users with advanced features only.' 
         }), { 
           status: 403, 
           headers: { 'Content-Type': 'application/json' } 
