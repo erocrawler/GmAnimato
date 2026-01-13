@@ -470,13 +470,33 @@
         "failed": "Failed to search sponsor",
         "claimFailed": "Failed to claim sponsor",
         "updateFailed": "Failed to check sponsorship status",
-        "expired": "Sponsor not found. Your sponsorship may have expired."
+        "expired": "Sponsor not found. Your sponsorship may have expired.",
+        "usernameRequired": "Username is required",
+        "searchFailed": "Failed to search sponsor",
+        "verificationFailed": "Sponsor verification failed",
+        "invalidRole": "Invalid role",
+        "updateRolesFailed": "Failed to update user roles"
       },
       "success": {
         "found": "Sponsor found!",
         "claimed": "Sponsor claimed successfully!",
         "upToDate": "Your sponsorship is up to date",
         "tierChanged": "Your sponsor tier has changed. Please confirm to update."
+      },
+      "backend": {
+        "notFound": "Sponsor not found. Please verify the username.",
+        "alreadyClaimedBySelf": "You have already claimed this sponsor. You currently have the \"{role}\" role.",
+        "alreadyClaimedByOther": "This sponsor has already been claimed by another user.",
+        "alreadyHasRole": "You already have the \"{role}\" role from this sponsor tier.",
+        "claimSuccess": "Successfully claimed {role} role!",
+        "updateSuccess": "Successfully updated to {role} role!",
+        "noChangeNeeded": "You already have the \"{role}\" role from this sponsor.",
+        "usernameRequired": "Username is required",
+        "searchFailed": "Failed to search sponsor",
+        "verificationFailed": "Sponsor verification failed",
+        "invalidRole": "Invalid role",
+        "updateRolesFailed": "Failed to update user roles",
+        "claimFailed": "Failed to claim sponsor"
       }
     }
   },

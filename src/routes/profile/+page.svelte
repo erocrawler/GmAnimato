@@ -54,7 +54,7 @@
   
   async function searchSponsor() {
     if (!sponsorUsername.trim()) {
-      showNotification('Please enter a sponsor username', 'error');
+      showNotification($_('profile.sponsor.errors.usernameRequired'), 'error');
       return;
     }
     
@@ -72,23 +72,64 @@
         if (result.found) {
           foundSponsor = result.sponsor;
           roleToApply = result.roleToApply || '';
-          showSponsorConfirm = true;
-          showNotification('Sponsor found!', 'success');
+          
+          // Handle different message codes
+          if (result.messageCode) {
+            const messageKey = getMessageKey(result.messageCode);
+            const message = $_(`profile.sponsor.backend.${messageKey}`, {
+              values: { role: result.currentRole || result.role || '' }
+            });
+            
+            // Show info and don't open dialog for certain cases
+            if (['ALREADY_CLAIMED_BY_SELF', 'ALREADY_HAS_ROLE'].includes(result.messageCode)) {
+              showNotification(message, 'info');
+              showSponsorConfirm = false;
+              foundSponsor = null;
+            } else {
+              showSponsorConfirm = true;
+              showNotification($_('profile.sponsor.success.found'), 'success');
+            }
+          } else {
+            // Normal case: show confirmation dialog
+            showSponsorConfirm = true;
+            showNotification($_('profile.sponsor.success.found'), 'success');
+          }
         } else {
-          showNotification(result.message || 'Sponsor not found', 'error');
+          const messageKey = result.messageCode ? getMessageKey(result.messageCode) : 'notFound';
+          showNotification($_(`profile.sponsor.backend.${messageKey}`), 'error');
           foundSponsor = null;
         }
       } else {
         const result = await response.json();
-        showNotification(result.error || 'Failed to search sponsor', 'error');
+        const messageKey = result.messageCode ? getMessageKey(result.messageCode) : 'searchFailed';
+        showNotification($_(`profile.sponsor.errors.${messageKey}`), 'error');
         foundSponsor = null;
       }
     } catch (err) {
-      showNotification('Error: ' + String(err), 'error');
+      showNotification($_('common.error') + ': ' + String(err), 'error');
       foundSponsor = null;
     } finally {
       searchingSponsor = false;
     }
+  }
+  
+  function getMessageKey(code: string): string {
+    const mapping: Record<string, string> = {
+      'NOT_FOUND': 'notFound',
+      'ALREADY_CLAIMED_BY_SELF': 'alreadyClaimedBySelf',
+      'ALREADY_CLAIMED_BY_OTHER': 'alreadyClaimedByOther',
+      'ALREADY_HAS_ROLE': 'alreadyHasRole',
+      'USERNAME_REQUIRED': 'usernameRequired',
+      'SEARCH_FAILED': 'searchFailed',
+      'VERIFICATION_FAILED': 'verificationFailed',
+      'INVALID_ROLE': 'invalidRole',
+      'UPDATE_ROLES_FAILED': 'updateRolesFailed',
+      'CLAIM_SUCCESS': 'claimSuccess',
+      'UPDATE_SUCCESS': 'updateSuccess',
+      'NO_CHANGE_NEEDED': 'noChangeNeeded',
+      'CLAIM_FAILED': 'claimFailed',
+    };
+    return mapping[code] || code.toLowerCase();
   }
   
   async function confirmSponsorClaim() {
@@ -109,14 +150,22 @@
       if (response.ok) {
         const result = await response.json();
         user = result.user;
-        showNotification(result.message || $_('profile.sponsor.success.claimed'), 'success');
+        
+        // Handle message code
+        const messageKey = result.messageCode ? getMessageKey(result.messageCode) : 'claimSuccess';
+        const message = $_(`profile.sponsor.backend.${messageKey}`, {
+          values: { role: result.role || roleToApply }
+        });
+        
+        showNotification(message, 'success');
         sponsorUsername = '';
         foundSponsor = null;
         roleToApply = '';
         showSponsorConfirm = false;
       } else {
         const result = await response.json();
-        showNotification(result.error || $_('profile.sponsor.errors.claimFailed'), 'error');
+        const messageKey = result.messageCode ? getMessageKey(result.messageCode) : 'claimFailed';
+        showNotification($_(`profile.sponsor.errors.${messageKey}`), 'error');
       }
     } catch (err) {
       showNotification($_('common.error') + ': ' + String(err), 'error');

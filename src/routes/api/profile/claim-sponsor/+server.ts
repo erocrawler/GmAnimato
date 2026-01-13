@@ -73,7 +73,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
   if (!sponsorUsername) {
     return new Response(
-      JSON.stringify({ error: 'Username is required', found: false }),
+      JSON.stringify({ 
+        messageCode: 'USERNAME_REQUIRED',
+        found: false 
+      }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -86,7 +89,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       return new Response(
         JSON.stringify({
           found: false,
-          message: 'Sponsor not found. Please verify the username.',
+          messageCode: 'NOT_FOUND',
         } as SponsorClaimResponse),
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -111,7 +114,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             sponsor,
             roleToApply,
             existingClaim,
-            message: `You have already claimed this sponsor. You currently have the "${existingClaim.applied_role}" role.`,
+            messageCode: 'ALREADY_CLAIMED_BY_SELF',
+            currentRole: existingClaim.applied_role,
           } as SponsorClaimResponse),
           { headers: { 'Content-Type': 'application/json' } }
         );
@@ -119,7 +123,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return new Response(
           JSON.stringify({
             found: false,
-            message: 'This sponsor has already been claimed by another user.',
+            messageCode: 'ALREADY_CLAIMED_BY_OTHER',
           } as SponsorClaimResponse),
           { status: 409, headers: { 'Content-Type': 'application/json' } }
         );
@@ -143,7 +147,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         JSON.stringify({
           found: true,
           sponsor,
-          message: `You already have the "${roleToApply}" role from this sponsor tier.`,
+          messageCode: 'ALREADY_HAS_ROLE',
+          role: roleToApply,
         } as SponsorClaimResponse),
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -160,7 +165,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
   } catch (err) {
     console.error('Error in sponsor claim:', err);
     return new Response(
-      JSON.stringify({ error: 'Failed to verify sponsor', found: false }),
+      JSON.stringify({ 
+        messageCode: 'SEARCH_FAILED',
+        found: false 
+      }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -183,7 +191,7 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
 
   if (!sponsorUsername || !roleToApply) {
     return new Response(
-      JSON.stringify({ error: 'Username and roleToApply are required' }),
+      JSON.stringify({ messageCode: 'USERNAME_REQUIRED' }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -194,7 +202,7 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
 
     if (!sponsor) {
       return new Response(
-        JSON.stringify({ error: 'Sponsor verification failed' }),
+        JSON.stringify({ messageCode: 'VERIFICATION_FAILED' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -205,7 +213,7 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
 
     if (!validRole) {
       return new Response(
-        JSON.stringify({ error: 'Invalid role' }),
+        JSON.stringify({ messageCode: 'INVALID_ROLE' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -217,7 +225,7 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
       // Check if it was claimed by someone else
       if (existingClaim.user_id !== locals.user.id) {
         return new Response(
-          JSON.stringify({ error: 'This sponsor has already been claimed by another user' }),
+          JSON.stringify({ messageCode: 'ALREADY_CLAIMED_BY_OTHER' }),
           { status: 409, headers: { 'Content-Type': 'application/json' } }
         );
       }
@@ -233,7 +241,9 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
         // Update user roles
         const updated = await updateUser(locals.user.id, { roles: updatedRoles });
         if (!updated) {
-          return new Response(JSON.stringify({ error: 'Failed to update user roles' }), {
+          return new Response(JSON.stringify({ 
+            messageCode: 'UPDATE_ROLES_FAILED'
+          }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' },
           });
@@ -270,7 +280,8 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
         return new Response(
           JSON.stringify({
             success: true,
-            message: `Successfully updated to ${roleToApply} role!`,
+            messageCode: 'UPDATE_SUCCESS',
+            role: roleToApply,
             user: userPublic,
           }),
           { headers: { 'Content-Type': 'application/json' } }
@@ -280,7 +291,8 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
         return new Response(
           JSON.stringify({
             success: true,
-            message: `You already have the "${roleToApply}" role from this sponsor.`,
+            messageCode: 'NO_CHANGE_NEEDED',
+            role: roleToApply,
             user: {
               id: locals.user.id,
               username: locals.user.username,
@@ -304,7 +316,9 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
     const updated = await updateUser(locals.user.id, { roles: currentRoles });
 
     if (!updated) {
-      return new Response(JSON.stringify({ error: 'Failed to update user roles' }), {
+      return new Response(JSON.stringify({ 
+        messageCode: 'UPDATE_ROLES_FAILED'
+      }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -340,7 +354,8 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Successfully claimed ${roleToApply} role!`,
+        messageCode: 'CLAIM_SUCCESS',
+        role: roleToApply,
         user: userPublic,
       }),
       { headers: { 'Content-Type': 'application/json' } }
@@ -348,7 +363,7 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
   } catch (err) {
     console.error('Error confirming sponsor claim:', err);
     return new Response(
-      JSON.stringify({ error: 'Failed to process sponsor claim' }),
+      JSON.stringify({ messageCode: 'CLAIM_FAILED' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }

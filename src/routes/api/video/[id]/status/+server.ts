@@ -123,7 +123,10 @@ export const GET: RequestHandler = async ({ params }) => {
           status: mappedStatus,
           job_status: statusData.status,
           job_data: statusData,
-          is_local: false
+          is_local: false,
+          final_video_url: finalVideoUrl,
+          progress_percentage: video.progress_percentage,
+          progress_details: video.progress_details
         }), { 
           headers: { 'Content-Type': 'application/json' } 
         });
