@@ -623,7 +623,7 @@ export class PostgresDatabase implements IDatabase {
         data: {
           id: 'default',
           registrationEnabled: true,
-          quotaPerDay: { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 },
+          quotaPerDay: { "gmgard-user": 5 },
           maxConcurrentJobs: 5,
           maxQueueThreshold: 5000,
           loraPresets: DEFAULT_LORA_PRESETS,
@@ -653,7 +653,7 @@ export class PostgresDatabase implements IDatabase {
       create: {
         id: 'default',
         registrationEnabled: patch.registrationEnabled ?? true,
-        quotaPerDay: patch.quotaPerDay ?? { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 },
+        quotaPerDay: patch.quotaPerDay ?? { "gmgard-user": 5 },
         maxConcurrentJobs: patch.maxConcurrentJobs ?? 5,
         maxQueueThreshold: patch.maxQueueThreshold ?? 5000,
         localQueueThreshold: patch.localQueueThreshold ?? 0,
@@ -728,7 +728,7 @@ export class PostgresDatabase implements IDatabase {
     // Parse quotaPerDay if it's a string, otherwise use as-is
     const quotaPerDay = typeof settings.quotaPerDay === 'string' 
       ? JSON.parse(settings.quotaPerDay) 
-      : (settings.quotaPerDay || { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 });
+      : (settings.quotaPerDay || { "gmgard-user": 5 });
     
     const roles = settings.roles 
       ? (typeof settings.roles === 'string' ? JSON.parse(settings.roles) : settings.roles)

@@ -13,7 +13,7 @@ export type User = UserPublic;
 /**
  * Register a new user (username must be unique)
  * Automatically hashes the password before storing
- * @param roles Optional roles array (defaults to ['free-tier'] if not provided)
+ * @param roles Optional roles array (defaults to [] if not provided)
  */
 export async function registerUser(
   username: string, 
@@ -30,8 +30,8 @@ export async function registerUser(
   // Hash the password
   const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
 
-  // Create user in database with default role if not specified
-  const defaultRoles = roles || ['free-tier'];
+  // Create user in database with roles if specified
+  const defaultRoles = roles || [];
   const user = await createUser(username, password_hash, email, defaultRoles);
 
   // Return user without password hash

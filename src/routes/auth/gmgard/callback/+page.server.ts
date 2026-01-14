@@ -56,7 +56,7 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
         userInfo.preferred_username || userInfo.sub,
         randomPassword, // This won't be used for OAuth users
         userInfo.email,
-        ['free-tier', 'gmgard-user']
+        ['gmgard-user']
       );
       console.log('User created:', user);
     } else {

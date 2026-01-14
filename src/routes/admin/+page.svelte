@@ -8,7 +8,7 @@
   let settings = $derived({
     ...(data.settings || {}),
     loraPresets: data.settings?.loraPresets ?? [],
-    quotaPerDay: data.settings?.quotaPerDay ?? { "free-tier": 10, "gmgard-user": 50, "paid-tier": 100, "premium-tier": 100 },
+    quotaPerDay: data.settings?.quotaPerDay ?? { "gmgard-user": 5 },
   });
   let users = $derived(data.users);
   let userPage = $derived(data.userPage || 1);
@@ -1139,7 +1139,7 @@
                 <td>
                   <div class="flex gap-1 flex-wrap">
                     {#each (user.roles || []) as role}
-                      <span class="badge badge-sm" class:badge-primary={role === 'admin'} class:badge-success={role === 'paid-tier'}>
+                      <span class="badge badge-sm" class:badge-primary={role === 'admin'}>
                         {role}
                       </span>
                     {/each}
@@ -1220,7 +1220,7 @@
           id="role-name"
           type="text" 
           bind:value={editingRoleName}
-          placeholder="e.g., premium-tier, sponsor-tier"
+          placeholder="e.g., sponsor-tier"
           class="input input-bordered w-full"
         />
       </div>

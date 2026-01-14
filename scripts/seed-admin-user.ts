@@ -52,7 +52,7 @@ async function seedAdminUser() {
     ADMIN_USERNAME, 
     password_hash, 
     ADMIN_EMAIL,
-    ['admin', 'paid-tier']
+    ['admin']
   );
 
   console.log('✓ Admin user created successfully!');
@@ -71,18 +71,12 @@ async function seedAdminSettings() {
 
   // Default role configuration
   const defaultRoles = [
-    { name: 'free-tier', sponsorTier: undefined, description: 'Free tier users' },
     { name: 'gmgard-user', sponsorTier: undefined, description: 'Registered users' },
-    { name: 'paid-tier', sponsorTier: undefined, description: 'Paid tier users' },
-    { name: 'premium-tier', sponsorTier: undefined, description: 'Premium tier users' },
   ];
 
   // Default quota per day
   const defaultQuotaPerDay = {
-    'free-tier': 10,
-    'gmgard-user': 50,
-    'paid-tier': 100,
-    'premium-tier': 100,
+    'gmgard-user': 5,
   };
 
   // Check if settings need updating

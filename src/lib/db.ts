@@ -248,7 +248,7 @@ export async function getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v') {
  */
 export async function checkDailyQuota(user: Pick<User, 'id' | 'roles'>, settings: AdminSettings): Promise<{exceeded: boolean, limit: number, used: number}> {
   // Determine quota limit based on user roles
-  let dailyLimit = settings.quotaPerDay['free-tier'] || 1; // Default for free tier
+  let dailyLimit = 0;
   
   for (const role of user.roles) {
     if (settings.quotaPerDay[role] !== undefined) {
