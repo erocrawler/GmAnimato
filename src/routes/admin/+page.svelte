@@ -662,29 +662,63 @@
       
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="form-control">
-          <label class="label" for="max-concurrent">
-            <span class="label-text">Max Concurrent Jobs</span>
+          <label class="label" for="free-user-queue-limit">
+            <span class="label-text">Free User Queue Limit</span>
+            <span class="label-text-alt text-xs opacity-70">Max concurrent jobs for free users</span>
           </label>
-          <input id="max-concurrent" type="number" bind:value={settings.maxConcurrentJobs} class="input input-bordered" min="1" />
+          <input id="free-user-queue-limit" type="number" bind:value={settings.freeUserQueueLimit} class="input input-bordered" min="1" />
+        </div>
+        
+        <div class="form-control">
+          <label class="label" for="paid-user-queue-limit">
+            <span class="label-text">Paid User Queue Limit</span>
+            <span class="label-text-alt text-xs opacity-70">Max concurrent jobs for paid users</span>
+          </label>
+          <input id="paid-user-queue-limit" type="number" bind:value={settings.paidUserQueueLimit} class="input input-bordered" min="1" />
         </div>
         
         <div class="form-control">
           <label class="label" for="max-queue">
             <span class="label-text">Max Queue Threshold</span>
+            <span class="label-text-alt text-xs opacity-70">Max RunPod queue size before rejecting</span>
           </label>
           <input id="max-queue" type="number" bind:value={settings.maxQueueThreshold} class="input input-bordered" min="100" />
         </div>
         
         <div class="form-control">
-          <label class="label" for="local-queue-threshold">
-            <span class="label-text">Local Queue Threshold</span>
-            <span class="label-text-alt text-xs opacity-70">(0 = disabled, >0 = enabled)</span>
+          <label class="label cursor-pointer" for="local-queue-enabled">
+            <span class="label-text">Enable Local Queue</span>
+            <input 
+              id="local-queue-enabled"
+              type="checkbox" 
+              checked={settings.localQueueThreshold > 0}
+              onchange={(e) => settings.localQueueThreshold = e.target.checked ? 10 : 0}
+              class="toggle toggle-primary"
+            />
           </label>
-          <input id="local-queue-threshold" type="number" bind:value={settings.localQueueThreshold} class="input input-bordered" min="0" />
+          <label class="label">
+            <span class="label-text-alt text-xs opacity-70">When disabled, all jobs go directly to RunPod</span>
+          </label>
+        </div>
+        
+        <div class="form-control">
+          <label class="label" for="local-queue-migration-threshold">
+            <span class="label-text">Local Queue Migration Threshold</span>
+            <span class="label-text-alt text-xs opacity-70">Migrate to RunPod when local queue exceeds this</span>
+          </label>
+          <input id="local-queue-migration-threshold" type="number" bind:value={settings.localQueueMigrationThreshold} class="input input-bordered" min="1" />
+        </div>
+        
+        <div class="form-control">
+          <label class="label" for="free-user-wait-threshold">
+            <span class="label-text">Free User Wait Threshold (minutes)</span>
+            <span class="label-text-alt text-xs opacity-70">How long free users wait before RunPod migration</span>
+          </label>
+          <input id="free-user-wait-threshold" type="number" bind:value={settings.freeUserWaitThresholdMinutes} class="input input-bordered" min="1" />
         </div>
       </div>
       
-      <p class="text-xs opacity-60 mt-3">Jobs are routed to local workers when queue is below this threshold</p>
+      <p class="text-xs opacity-60 mt-3">Smart queue management: All jobs enter local queue first. Paid users and free users who waited 30+ minutes are migrated to RunPod when local queue is full.</p>
       
       <div class="divider">Sponsor API Configuration</div>
       
@@ -955,6 +989,15 @@
       {:else}
         <p class="text-base-content/70">No LoRAs configured yet. Click "Add LoRA" to create one.</p>
       {/if}
+      
+      <div class="card-actions justify-end mt-4">
+        <button class="btn btn-primary" onclick={saveSettings} disabled={saving}>
+          {#if saving}
+            <span class="loading loading-spinner loading-sm"></span>
+          {/if}
+          Save LoRA Presets
+        </button>
+      </div>
     </div>
   </div>
   
@@ -970,37 +1013,40 @@
       {:else if queueStatus}
         <!-- Local Queue Status -->
         {#if queueStatus.localQueue}
-          <div class="mb-4">
+          <div class="mb-6">
             <h3 class="text-lg font-semibold mb-3">Local Queue Status</h3>
             
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div class="stat bg-base-100 rounded-box">
-                <div class="stat-title text-xs">In Queue</div>
-                <div class="stat-value text-lg text-warning">{queueStatus.localQueue.inQueue || 0}</div>
+                <div class="stat-title">In Queue</div>
+                <div class="stat-value text-warning">{queueStatus.localQueue.inQueue || 0}</div>
               </div>
               
               <div class="stat bg-base-100 rounded-box">
-                <div class="stat-title text-xs">Processing</div>
-                <div class="stat-value text-lg text-info">{queueStatus.localQueue.processing || 0}</div>
+                <div class="stat-title">Processing</div>
+                <div class="stat-value text-info">{queueStatus.localQueue.processing || 0}</div>
               </div>
               
               <div class="stat bg-base-100 rounded-box">
-                <div class="stat-title text-xs">Completed</div>
-                <div class="stat-value text-lg text-success">{queueStatus.localQueue.completed || 0}</div>
+                <div class="stat-title">Completed</div>
+                <div class="stat-value text-success">{queueStatus.localQueue.completed || 0}</div>
               </div>
               
               <div class="stat bg-base-100 rounded-box">
-                <div class="stat-title text-xs">Failed</div>
-                <div class="stat-value text-lg text-error">{queueStatus.localQueue.failed || 0}</div>
+                <div class="stat-title">Failed</div>
+                <div class="stat-value text-error">{queueStatus.localQueue.failed || 0}</div>
               </div>
             </div>
-          </div>
-          <div class="mb-4">
-            <div class="alert" class:alert-success={queueStatus.localQueue.enabled} class:alert-warning={!queueStatus.localQueue.enabled}>
-              <span>
-                Status: {queueStatus.localQueue.enabled ? '✓ Enabled' : '⚠ Disabled'}
-                <br /><small>Threshold: {queueStatus.localQueue.threshold}</small>
-              </span>
+            
+            <div class="mt-4">
+              <div class="alert" class:alert-success={queueStatus.localQueue.enabled} class:alert-warning={!queueStatus.localQueue.enabled}>
+                <span>
+                  {queueStatus.localQueue.enabled ? '✓ Local queue enabled' : '⚠ Local queue disabled - all jobs route to RunPod'}
+                  {#if queueStatus.localQueue.enabled}
+                    <br /><small>Migration threshold: {settings.localQueueMigrationThreshold || 5} jobs</small>
+                  {/if}
+                </span>
+              </div>
             </div>
           </div>
         {/if}

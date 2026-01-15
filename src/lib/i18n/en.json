@@ -255,7 +255,7 @@
       "help": "Select the AI model and workflow for video generation"
     },
     "iteration": {
-      "title": "Iteration steps (fast, balanced, quality)",
+      "title": "Iteration steps (fast, balanced)",
       "help": "Choose speed vs. detail",
       "fast": "Fast",
       "balanced": "Balanced",
@@ -280,7 +280,7 @@
       "standard": "480p",
       "standardDesc": "Standard quality",
       "hd": "720p",
-      "hdDesc": "High definition"
+      "hdDesc": "High definition (processing takes longer)"
     },
     "paidOnly": "Paid",
     "loraWeights": "LoRA Weights",

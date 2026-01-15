@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic, Workflow } from './IDatabase';
+import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic, Workflow, SponsorClaim } from './IDatabase';
 import { DEFAULT_LORA_PRESETS, normalizeLoraPresets } from './loraPresets';
 import { PrismaPg } from '@prisma/adapter-pg'
 
@@ -140,18 +140,17 @@ export class PostgresDatabase implements IDatabase {
     };
   }
 
-  async getActiveJobsByUser(user_id: string): Promise<VideoEntry[]> {
-    const videos = await this.prisma.video.findMany({
+  async getActiveJobCountByUser(user_id: string): Promise<number> {
+    const count = await this.prisma.video.count({
       where: {
         userId: user_id,
         status: {
           in: ['in_queue', 'processing'],
         },
       },
-      orderBy: { processingStartedAt: 'desc' },
     });
 
-    return videos.map(this.mapToVideoEntry);
+    return count;
   }
 
   async getPublishedVideos(options?: import('./IDatabase').GetPublishedVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
@@ -473,6 +472,125 @@ export class PostgresDatabase implements IDatabase {
     }
   }
 
+  async getOldestMigrationCandidate(settings: AdminSettings): Promise<VideoEntry | null> {
+    try {
+      // Find oldest local queue job where user is paid OR has waited >= threshold minutes
+      const thresholdMinutes = settings.freeUserWaitThresholdMinutes || 30;
+      const thresholdDate = new Date(Date.now() - thresholdMinutes * 60 * 1000);
+
+      // Get all pending local jobs with user info
+      const candidates = await this.prisma.video.findMany({
+        where: {
+          isLocalJob: true,
+          status: 'in_queue'
+        },
+        include: {
+          user: true
+        },
+        orderBy: {
+          processingStartedAt: 'asc'
+        },
+        take: 100 // Limit to prevent loading entire queue
+      });
+
+      // Filter for eligible candidates (paid users OR free users who waited long enough)
+      for (const video of candidates) {
+        const userRoles = JSON.parse(video.user.roles || '[]') as string[];
+        
+        // Check if user is paid (has any role with allowAdvancedFeatures)
+        const isPaidUser = userRoles.some(roleName => {
+          const roleConfig = settings.roles?.find(rc => rc.name === roleName);
+          return roleConfig?.allowAdvancedFeatures === true;
+        });
+
+        // If paid user, they're eligible immediately
+        if (isPaidUser) {
+          return this.mapToVideoEntry(video);
+        }
+
+        // If free user, check if they've waited long enough
+        if (video.processingStartedAt && new Date(video.processingStartedAt) <= thresholdDate) {
+          return this.mapToVideoEntry(video);
+        }
+      }
+
+      return null;
+    } catch (error) {
+      console.error('[DB] Error getting oldest migration candidate:', error);
+      return null;
+    }
+  }
+
+  async claimJobForMigration(settings: AdminSettings): Promise<VideoEntry | null> {
+    // Atomically claim a job for migration to prevent race condition with worker claiming
+    // This uses FOR UPDATE SKIP LOCKED to ensure only one process can claim the job
+    try {
+      const thresholdMinutes = settings.freeUserWaitThresholdMinutes || 30;
+      const thresholdDate = new Date(Date.now() - thresholdMinutes * 60 * 1000);
+
+      const video = await this.prisma.$transaction(async (tx) => {
+        // Find eligible jobs with FOR UPDATE lock
+        const candidates = await tx.$queryRaw<Array<{
+          id: string;
+          user_id: string;
+          processing_started_at: Date | null;
+        }>>`
+          SELECT v.id, v.user_id, v.processing_started_at
+          FROM videos v
+          INNER JOIN users u ON v.user_id = u.id
+          WHERE v.is_local_job = true AND v.status = 'in_queue'
+          ORDER BY v.processing_started_at ASC
+          LIMIT 100
+          FOR UPDATE SKIP LOCKED
+        `;
+
+        if (!candidates || candidates.length === 0) {
+          return null;
+        }
+
+        // Check each candidate for eligibility
+        for (const candidate of candidates) {
+          // Get user to check roles
+          const user = await tx.user.findUnique({
+            where: { id: candidate.user_id }
+          });
+
+          if (!user) continue;
+
+          const userRoles = JSON.parse(user.roles || '[]') as string[];
+          
+          // Check if user is paid
+          const isPaidUser = userRoles.some(roleName => {
+            const roleConfig = settings.roles?.find(rc => rc.name === roleName);
+            return roleConfig?.allowAdvancedFeatures === true;
+          });
+
+          // Check eligibility
+          const isEligible = isPaidUser || 
+            (candidate.processing_started_at && new Date(candidate.processing_started_at) <= thresholdDate);
+
+          if (isEligible) {
+            // Mark as migrating by setting status to 'processing' temporarily
+            // This prevents workers from claiming it
+            const updated = await tx.video.update({
+              where: { id: candidate.id },
+              data: { status: 'processing' }
+            });
+
+            return updated;
+          }
+        }
+
+        return null;
+      });
+
+      return video ? this.mapToVideoEntry(video) : null;
+    } catch (error) {
+      console.error('[DB] Error claiming job for migration:', error);
+      return null;
+    }
+  }
+
   // ==================== User Methods ====================
 
   async createUser(username: string, password_hash: string, email?: string, roles?: string[]): Promise<User> {
@@ -643,6 +761,10 @@ export class PostgresDatabase implements IDatabase {
     if (patch.maxConcurrentJobs !== undefined) data.maxConcurrentJobs = patch.maxConcurrentJobs;
     if (patch.maxQueueThreshold !== undefined) data.maxQueueThreshold = patch.maxQueueThreshold;
     if (patch.localQueueThreshold !== undefined) data.localQueueThreshold = patch.localQueueThreshold;
+    if (patch.localQueueMigrationThreshold !== undefined) data.localQueueMigrationThreshold = patch.localQueueMigrationThreshold;
+    if (patch.freeUserWaitThresholdMinutes !== undefined) data.freeUserWaitThresholdMinutes = patch.freeUserWaitThresholdMinutes;
+    if (patch.freeUserQueueLimit !== undefined) data.freeUserQueueLimit = patch.freeUserQueueLimit;
+    if (patch.paidUserQueueLimit !== undefined) data.paidUserQueueLimit = patch.paidUserQueueLimit;
     if (patch.loraPresets !== undefined) data.loraPresets = normalizeLoraPresets(patch.loraPresets);
     if (patch.sponsorApiUrl !== undefined) data.sponsorApiUrl = patch.sponsorApiUrl;
     if (patch.sponsorApiToken !== undefined) data.sponsorApiToken = patch.sponsorApiToken;
@@ -742,6 +864,10 @@ export class PostgresDatabase implements IDatabase {
       maxConcurrentJobs: settings.maxConcurrentJobs,
       maxQueueThreshold: settings.maxQueueThreshold,
       localQueueThreshold: settings.localQueueThreshold,
+      localQueueMigrationThreshold: settings.localQueueMigrationThreshold || 5,
+      freeUserWaitThresholdMinutes: settings.freeUserWaitThresholdMinutes || 30,
+      freeUserQueueLimit: settings.freeUserQueueLimit || 3,
+      paidUserQueueLimit: settings.paidUserQueueLimit || 5,
       loraPresets: normalizeLoraPresets(settings.loraPresets ?? DEFAULT_LORA_PRESETS),
       sponsorApiUrl: settings.sponsorApiUrl || undefined,
       sponsorApiToken: settings.sponsorApiToken || undefined,

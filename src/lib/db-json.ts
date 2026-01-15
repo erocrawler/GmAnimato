@@ -111,12 +111,12 @@ export class JsonFileDatabase implements IDatabase {
     };
   }
 
-  async getActiveJobsByUser(user_id: string): Promise<VideoEntry[]> {
+  async getActiveJobCountByUser(user_id: string): Promise<number> {
     const rows = await this.readAll();
     return rows.filter((r) => 
       r.user_id === user_id && 
       (r.status === 'in_queue' || r.status === 'processing')
-    );
+    ).length;
   }
 
   async getPublishedVideos(options?: import('./IDatabase').GetPublishedVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
@@ -281,6 +281,72 @@ export class JsonFileDatabase implements IDatabase {
     const completed = rows.filter(v => v.is_local_job === true && v.status === 'completed').length;
     const failed = rows.filter(v => v.is_local_job === true && v.status === 'failed').length;
     return { inQueue, processing, completed, failed };
+  }
+
+  async getOldestMigrationCandidate(settings: AdminSettings): Promise<VideoEntry | null> {
+    const rows = await this.readAll();
+    const thresholdMinutes = settings.freeUserWaitThresholdMinutes || 30;
+    const thresholdDate = new Date(Date.now() - thresholdMinutes * 60 * 1000);
+
+    // Get all pending local jobs
+    const candidates = rows
+      .filter(v => v.is_local_job === true && v.status === 'in_queue')
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    // Find first eligible candidate
+    for (const video of candidates) {
+      // Get user to check roles
+      const users = await this.readAllUsers();
+      const user = users.find(u => u.id === video.user_id);
+      if (!user) continue;
+
+      const userRoles = user.roles || [];
+      
+      // Check if user is paid
+      const isPaidUser = userRoles.some(roleName => {
+        const roleConfig = settings.roles?.find(rc => rc.name === roleName);
+        return roleConfig?.allowAdvancedFeatures === true;
+      });
+
+      if (isPaidUser) {
+        return video;
+      }
+
+      // Check if free user waited long enough
+      const startedAt = video.processing_started_at || video.created_at;
+      if (startedAt && new Date(startedAt) <= thresholdDate) {
+        return video;
+      }
+    }
+
+    return null;
+  }
+
+  async claimJobForMigration(settings: AdminSettings): Promise<VideoEntry | null> {
+    // JSON database doesn't have true locking, but we can simulate by updating status
+    const candidate = await this.getOldestMigrationCandidate(settings);
+    
+    if (!candidate) {
+      return null;
+    }
+
+    // Mark as processing to prevent workers from claiming
+    const rows = await this.readAll();
+    const idx = rows.findIndex(v => v.id === candidate.id);
+    
+    if (idx === -1) {
+      return null;
+    }
+
+    // Check if still in queue (not claimed by worker)
+    if (rows[idx].status !== 'in_queue') {
+      return null;
+    }
+
+    rows[idx].status = 'processing';
+    await this.writeAll(rows);
+    
+    return rows[idx];
   }
 
   // ==================== User Methods ====================

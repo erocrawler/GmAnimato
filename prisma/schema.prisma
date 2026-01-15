@@ -40,7 +40,7 @@ model Session {
 model Video {
   id                  String      @id @default(cuid())
   userId              String      @map("user_id")
-  workflowId          String?     @map("workflow_id") @default("wan-2.2")
+  workflowId          String?     @map("workflow_id")
   originalImageUrl    String      @map("original_image_url") @db.VarChar(500)
   lastImageUrl        String?     @map("last_image_url") @db.VarChar(500)
   prompt              String?     @db.VarChar(2000)
@@ -73,6 +73,7 @@ model Video {
   @@index([status])
   @@index([isPublished])
   @@index([isPublished, createdAt])
+  @@index([isLocalJob, status, processingStartedAt])
   @@map("videos")
 }
 
@@ -97,6 +98,10 @@ model AdminSettings {
   maxConcurrentJobs      Int      @default(5) @map("max_concurrent_jobs")
   maxQueueThreshold      Int      @default(5000) @map("max_queue_threshold")
   localQueueThreshold    Int      @default(0) @map("local_queue_threshold")
+  localQueueMigrationThreshold Int @default(5) @map("local_queue_migration_threshold")
+  freeUserWaitThresholdMinutes Int @default(30) @map("free_user_wait_threshold_minutes")
+  freeUserQueueLimit     Int      @default(3) @map("free_user_queue_limit")
+  paidUserQueueLimit     Int      @default(5) @map("paid_user_queue_limit")
   loraPresets            Json?    @map("lora_presets")
   sponsorApiUrl          String?  @map("sponsor_api_url") @db.VarChar(500)
   sponsorApiToken        String?  @map("sponsor_api_token") @db.VarChar(500)

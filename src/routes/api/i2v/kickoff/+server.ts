@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { updateVideo, getVideoById, getActiveJobsByUser, getAdminSettings, checkDailyQuota, getLocalJobStats, getWorkflowById, getDefaultWorkflow } from '$lib/db';
+import { updateVideo, getVideoById, getActiveJobCountByUser, getAdminSettings, checkDailyQuota, getLocalJobStats, getWorkflowById, getDefaultWorkflow, claimJobForMigration, isUserPaid } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { buildWorkflow } from '$lib/i2vWorkflow';
 import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
@@ -14,6 +14,9 @@ async function delay(ms: number) {
 
 export const POST: RequestHandler = async ({ request, locals }) => {
   try {
+    if (!locals.user) {
+      return new Response(JSON.stringify({ error: 'authentication required' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    }
     const body = await request.json();
     const id = body?.id as string | undefined;
     if (!id) return new Response(JSON.stringify({ error: 'missing id' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
@@ -23,7 +26,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
     // Check ownership (admins can kickoff any video)
     const isAdmin = locals.user?.roles?.includes('admin');
-    if (locals.user && existing.user_id !== locals.user.id && !isAdmin) {
+    if (existing.user_id !== locals.user.id && !isAdmin) {
       return new Response(JSON.stringify({ error: 'access denied' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
     }
 
@@ -151,12 +154,29 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     if (resolution === '720p') {
       // Check if any of user's roles has allowAdvancedFeatures enabled
       const hasAdvancedFeatures = roles.some(roleName => 
-        settings.roles?.find(rc => rc.name === roleName)?.allowAdvancedFeatures
+        settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
       );
 
       if (!hasAdvancedFeatures) {
         return new Response(JSON.stringify({ 
           error: '720p resolution is available to users with advanced features only.' 
+        }), { 
+          status: 403, 
+          headers: { 'Content-Type': 'application/json' } 
+        });
+      }
+    }
+
+    // Enforce role requirement for 6 iteration steps
+    if (iterationSteps === 6) {
+      // Check if any of user's roles has allowAdvancedFeatures enabled
+      const hasAdvancedFeatures = roles.some(roleName => 
+        settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
+      );
+
+      if (!hasAdvancedFeatures) {
+        return new Response(JSON.stringify({ 
+          error: '6 iteration steps is available to users with advanced features only.' 
         }), { 
           status: 403, 
           headers: { 'Content-Type': 'application/json' } 
@@ -216,11 +236,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       return new Response(JSON.stringify({ success: true, mock: true }), { headers: { 'Content-Type': 'application/json' } });
     }
 
-    // Check user's concurrent job limit
-    const activeJobs = await getActiveJobsByUser(existing.user_id);
-    if (activeJobs.length >= settings.maxConcurrentJobs) {
+    // Check per-user tier queue limit (free: 3, paid: 5)
+    const activeJobCount = await getActiveJobCountByUser(existing.user_id);
+    const isPaid = isUserPaid(locals.user, settings);
+    const queueLimit = isPaid ? settings.paidUserQueueLimit : settings.freeUserQueueLimit;
+    
+    if (activeJobCount >= queueLimit) {
       return new Response(JSON.stringify({ 
-        error: `You have reached the maximum of ${settings.maxConcurrentJobs} concurrent jobs. Please wait for some to complete.` 
+        error: `You have reached your queue limit of ${queueLimit} jobs. Please wait for some to complete.` 
       }), { 
         status: 429, 
         headers: { 'Content-Type': 'application/json' } 
@@ -258,52 +281,63 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const updated = await getVideoById(id);
     console.log(`[I2V] Video ${id} status after update: ${updated?.status}`);
 
+    if (!updated) {
+      return new Response(JSON.stringify({ error: 'Failed to update video' }), { 
+        status: 500, 
+        headers: { 'Content-Type': 'application/json' } 
+      });
+    }
+
     let jobId: string | undefined;
     let isLocal = false;
     try {
-      // Use the new submitJob function that routes to local or RunPod
-      // For local jobs, workflow will be built on-demand by /api/worker/task
-      // For RunPod jobs, we need to build the workflow now
+      // Use the new submitJob function with intelligent migration
+      // All jobs go to local queue first, then oldest eligible jobs are migrated to RunPod
       const result = await submitJob(
-        runpodConfig, 
-        id, 
-        settings.localQueueThreshold, 
+        runpodConfig,
+        updated,
+        locals.user || null,
+        settings,
         getLocalJobStats,
+        claimJobForMigration,
         updateVideo,
-        async () => {
-          // This callback is only called if routing to RunPod
+        async (video) => {
+          // This callback builds workflow for migrated jobs or RunPod-direct jobs
           const origin = new URL(request.url).origin;
-          const callbackUrl = `${origin}/api/i2v-webhook/${id}`;
+          const callbackUrl = `${origin}/api/i2v-webhook/${video.id}`;
           
-          if (isFL2V) {
+          // Check if this is FL2V workflow (has last_image_url)
+          const isFL2VJob = !!video.last_image_url;
+          
+          if (isFL2VJob) {
             return await buildFL2VWorkflow({
-              first_image_name: `${id}_first.png`,
-              first_image_url: toOriginalUrl(existing.original_image_url),
-              last_image_name: `${id}_last.png`,
-              last_image_url: toOriginalUrl(existing.last_image_url!),
-              input_prompt: prompt ?? existing.prompt ?? 'A beautiful video',
-              seed: seed,
+              first_image_name: `${video.id}_first.png`,
+              first_image_url: toOriginalUrl(video.original_image_url),
+              last_image_name: `${video.id}_last.png`,
+              last_image_url: toOriginalUrl(video.last_image_url!),
+              input_prompt: video.prompt ?? 'A beautiful video',
+              seed: video.seed ?? Math.floor(Math.random() * 1000000),
               callback_url: callbackUrl,
-              iterationSteps,
-              videoDuration,
-              videoResolution: resolution,
-              loraWeights: filteredLoraWeights,
+              iterationSteps: video.iteration_steps as any,
+              videoDuration: video.video_duration as any,
+              videoResolution: video.video_resolution as any,
+              loraWeights: video.lora_weights as any,
               loraPresets: settings.loraPresets,
-              workflow: workflow,
+              workflow: (await getWorkflowById(video.workflow_id!) || await getDefaultWorkflow('fl2v'))!,
             });
           } else {
             return await buildWorkflow({
-              image_name: `${id}.png`,
-              image_url: toOriginalUrl(existing.original_image_url),
-              input_prompt: prompt ?? existing.prompt ?? 'A beautiful video',
-              seed: seed,
+              image_name: `${video.id}.png`,
+              image_url: toOriginalUrl(video.original_image_url),
+              input_prompt: video.prompt ?? 'A beautiful video',
+              seed: video.seed ?? Math.floor(Math.random() * 1000000),
               callback_url: callbackUrl,
-              iterationSteps,
-              videoDuration,
-              videoResolution: resolution,
-              loraWeights: filteredLoraWeights,
+              iterationSteps: video.iteration_steps as any,
+              videoDuration: video.video_duration as any,
+              videoResolution: video.video_resolution as any,
+              loraWeights: video.lora_weights as any,
               loraPresets: settings.loraPresets,
-              workflow: workflow,
+              workflow: (await getWorkflowById(video.workflow_id!) || await getDefaultWorkflow('i2v'))!,
             });
           }
         }

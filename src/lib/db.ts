@@ -57,8 +57,8 @@ export async function getVideosByUser(user_id: string, page?: number, pageSize?:
   return db.getVideosByUser(user_id, page, pageSize, options);
 }
 
-export async function getActiveJobsByUser(user_id: string) {
-  return db.getActiveJobsByUser(user_id);
+export async function getActiveJobCountByUser(user_id: string) {
+  return db.getActiveJobCountByUser(user_id);
 }
 
 export async function getPublishedVideos(options?: GetPublishedVideosOptions) {
@@ -103,6 +103,14 @@ export async function claimLocalJob() {
 
 export async function getLocalJobStats() {
   return db.getLocalJobStats();
+}
+
+export async function getOldestMigrationCandidate(settings: AdminSettings) {
+  return db.getOldestMigrationCandidate(settings);
+}
+
+export async function claimJobForMigration(settings: AdminSettings) {
+  return db.claimJobForMigration(settings);
 }
 
 // ==================== User Functions ====================
@@ -266,4 +274,17 @@ export async function checkDailyQuota(user: Pick<User, 'id' | 'roles'>, settings
     limit: dailyLimit,
     used
   };
+}
+
+/**
+ * Check if a user is a paid user (has any role with allowAdvancedFeatures enabled)
+ * @param user The user to check (only roles needed)
+ * @param settings Admin settings containing role configurations
+ * @returns true if user is paid, false otherwise
+ */
+export function isUserPaid(user: Pick<User, 'roles'>, settings: AdminSettings): boolean {
+  return user.roles.some(roleName => {
+    const roleConfig = settings.roles?.find(rc => rc.name === roleName);
+    return roleConfig?.allowAdvancedFeatures === true;
+  });
 }

@@ -36,7 +36,7 @@ export const POST: RequestHandler = async ({ request, params }) => {
 
     console.log(`[Webhook] Processing update for video ${id}. Current status: ${existing.status}`);
 
-    const patch: any = { status };
+    const patch: any = { status: status.toLowerCase() };
     
     // Handle progress updates
     const progress = body?.progress as any | undefined;
@@ -99,7 +99,17 @@ export const POST: RequestHandler = async ({ request, params }) => {
       }
     }
 
-    const finalStatus = typeof patch.status === 'string' ? patch.status.toLowerCase() : '';
+    const finalStatus = patch.status;
+
+    // Validate status is one of the allowed values
+    const allowedStatuses = ['pending', 'processing', 'completed', 'failed', 'cancelled'];
+    if (!allowedStatuses.includes(finalStatus)) {
+      console.error(`[Webhook] Invalid status '${status}' for video ${id}. Allowed: ${allowedStatuses.join(', ')}`);
+      return new Response(
+        JSON.stringify({ error: `Invalid status. Allowed: ${allowedStatuses.join(', ')}` }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
     // If we still do not have a final video URL and this is a completion event, mark as failed
     if (!patch.final_video_url && (finalStatus === 'completed' || finalStatus === 'failed')) {

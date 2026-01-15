@@ -59,7 +59,7 @@
   ];
 
   $: canUseQuality = hasAdvancedFeatures;
-  $: visibleStepOptions = stepOptions;
+  $: visibleStepOptions = canUseQuality ? stepOptions : stepOptions.filter((o) => !o.requiresPaid);
   $: visibleResolutionOptions = canUseQuality ? resolutionOptions : resolutionOptions.filter((o) => !o.requiresPaid);
   
   // Get LoRAs compatible with selected workflow
@@ -73,13 +73,14 @@
       })()
     : LORA_PRESETS;
   $: if (!canUseQuality && videoResolution === '720p') videoResolution = '480p';
+  $: if (!canUseQuality && iterationSteps === 6) iterationSteps = 4;
   $: resolutionOptions = [
     { value: '480p', label: get(_)('review.resolution.standard'), description: get(_)('review.resolution.standardDesc'), requiresPaid: false },
     { value: '720p', label: get(_)('review.resolution.hd'), description: get(_)('review.resolution.hdDesc'), requiresPaid: true },
   ];
   $: stepOptions = [
     { value: 4, label: get(_)('review.iteration.fast'), description: get(_)('review.iteration.steps.fast'), requiresPaid: false },
-    { value: 6, label: get(_)('review.iteration.balanced'), description: get(_)('review.iteration.steps.balanced'), requiresPaid: false },
+    { value: 6, label: get(_)('review.iteration.balanced'), description: get(_)('review.iteration.steps.balanced'), requiresPaid: true },
   ];
 
 

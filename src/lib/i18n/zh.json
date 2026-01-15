@@ -254,7 +254,7 @@
       "help": "选择AI模型和视频生成工作流"
     },
     "iteration": {
-      "title": "迭代步数（快速、均衡、精细）",
+      "title": "迭代步数（快速、均衡）",
       "help": "在速度和细节之间选择",
       "fast": "快速",
       "balanced": "均衡",
@@ -279,7 +279,7 @@
       "standard": "480p",
       "standardDesc": "标准质量",
       "hd": "720p",
-      "hdDesc": "高清"
+      "hdDesc": "高清（处理时间较长）"
     },
     "paidOnly": "付费",
     "loraWeights": "LoRA权重",

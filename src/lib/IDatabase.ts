@@ -81,6 +81,10 @@ export type AdminSettings = {
   maxConcurrentJobs: number;
   maxQueueThreshold: number;
   localQueueThreshold: number;
+  localQueueMigrationThreshold: number; // Trigger migration when local queue exceeds this
+  freeUserWaitThresholdMinutes: number; // Free users must wait this long before eligible for RunPod migration
+  freeUserQueueLimit: number; // Max concurrent jobs for free users
+  paidUserQueueLimit: number; // Max concurrent jobs for paid users
   loraPresets?: LoraPreset[];
   sponsorApiUrl?: string; // GmCrawler sponsor API endpoint
   sponsorApiToken?: string; // Auth token for sponsor API
@@ -136,7 +140,7 @@ export interface IDatabase {
   createVideoEntry(entry: Omit<VideoEntry, 'id' | 'created_at'> & { id?: string }): Promise<VideoEntry>;
   getAllVideos(options?: GetAllVideosOptions): Promise<PaginatedVideos>;
   getVideosByUser(user_id: string, page?: number, pageSize?: number, options?: GetVideosByUserOptions): Promise<PaginatedVideos>;
-  getActiveJobsByUser(user_id: string): Promise<VideoEntry[]>;
+  getActiveJobCountByUser(user_id: string): Promise<number>;
   getPublishedVideos(options?: GetPublishedVideosOptions): Promise<PaginatedVideos>;
   getVideoById(id: string): Promise<VideoEntry | undefined>;
   updateVideo(id: string, patch: Partial<VideoEntry>): Promise<VideoEntry | null>;
@@ -148,6 +152,8 @@ export interface IDatabase {
   getOldestLocalJob(): Promise<VideoEntry | null>;
   claimLocalJob(): Promise<VideoEntry | null>; // Atomically claim a job for processing
   getLocalJobStats(): Promise<{ inQueue: number; processing: number; completed: number; failed: number }>;
+  getOldestMigrationCandidate(settings: AdminSettings): Promise<VideoEntry | null>; // Find oldest eligible job for RunPod migration
+  claimJobForMigration(settings: AdminSettings): Promise<VideoEntry | null>; // Atomically claim and mark job for migration
   
   // User methods
   createUser(username: string, password_hash: string, email?: string, roles?: string[]): Promise<User>;
