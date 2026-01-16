@@ -428,7 +428,7 @@ export class PostgresDatabase implements IDatabase {
           where: { id: jobId },
           data: { 
             status: 'processing',
-            dequeued_at: new Date().toISOString()
+            dequeuedAt: new Date()
           }
         });
 
