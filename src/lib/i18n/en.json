@@ -323,7 +323,8 @@
         "message": "This image is detected as NSFW and photo-realistic. You can generate a video, but it cannot be published to the gallery."
       }
     },
-    "videoDeleted": "This video has been deleted."
+    "videoDeleted": "This video has been deleted.",
+    "quotaRemaining": "Quota: {count} video{count,plural,=1{} other{s}} left"
   },
   "users": {
     "username": "Username"

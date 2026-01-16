@@ -322,7 +322,8 @@
         "message": "该图像被检测为 NSFW 和照片级真实性。您可以生成视频，但无法将其发布到视频库。"
       }
     },
-    "videoDeleted": "此视频已被删除。"
+    "videoDeleted": "此视频已被删除。",
+    "quotaRemaining": "配额：剩余 {count} 个视频"
   },
   "users": {
     "username": "用户名"
