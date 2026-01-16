@@ -4,7 +4,7 @@ import probe from 'probe-image-size';
 import type { LoraPreset } from './loraPresets';
 import type { Workflow } from './IDatabase';
 import { normalizeLoraPresets } from './loraPresets';
-import { findNode, getNodeInputs, calculateVideoDimensions, DEFAULT_NEGATIVE_PROMPT } from './workflowUtils';
+import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes, DEFAULT_NEGATIVE_PROMPT } from './workflowUtils';
 
 interface WorkflowParams {
   image_name: string;
@@ -85,12 +85,22 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
     encodeInputs.length = frames;
   }
 
-  // Fetch image dimensions and calculate video dimensions
+  // Always generate at 480p for efficiency, then upscale to 720p if needed
   const resolution = params.videoResolution ?? '480p';
+  let gen480pWidth: number;
+  let gen480pHeight: number;
+  let originalImageWidth: number;
+  let originalImageHeight: number;
+  
   try {
     const dimensions = await probe(params.image_url);
-    const { width, height } = calculateVideoDimensions(dimensions.width, dimensions.height, resolution);
-    console.log(`Image dimensions: ${dimensions.width}x${dimensions.height}, Video dimensions: ${width}x${height}`);
+    originalImageWidth = dimensions.width;
+    originalImageHeight = dimensions.height;
+    
+    // Always calculate for 480p generation
+    const { width, height } = calculateVideoDimensions(dimensions.width, dimensions.height, '480p');
+    gen480pWidth = width;
+    gen480pHeight = height;
     
     // Set dimensions on the ImageResize node and WanImageToVideo node
     const resizeInputs = getNodeInputs(workflow, resizeNode);
@@ -104,21 +114,35 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
       encodeInputs.height = height;
     }
   } catch (error) {
-    console.error('Failed to probe image dimensions:', error);
-    // Fallback to default landscape dimensions
-    const longSide = resolution === '720p' ? 1280 : 832;
-    const shortSide = resolution === '720p' ? 720 : 480;
+    // Fallback to default 480p landscape dimensions
+    originalImageWidth = 1280;
+    originalImageHeight = 720;
+    gen480pWidth = 832;
+    gen480pHeight = 480;
     
     const resizeInputs = getNodeInputs(workflow, resizeNode);
     if (resizeInputs) {
-      resizeInputs.width = longSide;
-      resizeInputs.height = shortSide;
+      resizeInputs.width = gen480pWidth;
+      resizeInputs.height = gen480pHeight;
     }
     
     if (encodeInputs) {
-      encodeInputs.width = longSide;
-      encodeInputs.height = shortSide;
+      encodeInputs.width = gen480pWidth;
+      encodeInputs.height = gen480pHeight;
     }
+  }
+  
+  // Add upscale nodes after VAE decode if 720p is requested
+  if (resolution === '720p') {
+    add720pUpscaleNodes(
+      workflow,
+      decodeNode as string,
+      videoCombineNode as string,
+      gen480pWidth,
+      gen480pHeight,
+      originalImageWidth,
+      originalImageHeight
+    );
   }
 
   // Override LoRA strengths when provided and dynamically build chains

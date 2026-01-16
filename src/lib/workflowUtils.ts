@@ -102,3 +102,82 @@ export function calculateVideoDimensions(
     height: finalHeight
   };
 }
+
+/**
+ * Add upscale nodes to workflow for 720p generation
+ * @param workflow The workflow object to modify
+ * @param decodeNodeId The VAE decode node ID to connect from
+ * @param videoCombineNodeId The video combine node ID to update
+ * @param sourceWidth Source video width (480p)
+ * @param sourceHeight Source video height (480p)
+ * @param imageWidth Original image width
+ * @param imageHeight Original image height
+ */
+export function add720pUpscaleNodes(
+  workflow: any,
+  decodeNodeId: string,
+  videoCombineNodeId: string,
+  sourceWidth: number,
+  sourceHeight: number,
+  imageWidth: number,
+  imageHeight: number
+): void {
+  // Calculate 720p target dimensions using the same logic
+  const { width: targetWidth, height: targetHeight } = calculateVideoDimensions(
+    imageWidth,
+    imageHeight,
+    '720p'
+  );
+  
+  // Add upscale model loader node
+  const modelLoaderNodeId = '998:upscale_model';
+  workflow.input.workflow[modelLoaderNodeId] = {
+    inputs: {
+      model_name: 'RealESRGAN_x2plus.pth'
+    },
+    class_type: 'UpscaleModelLoader',
+    _meta: {
+      title: 'Load Upscale Model'
+    }
+  };
+  
+  // Add upscale image node
+  const upscaleNodeId = '999:upscale720p';
+  workflow.input.workflow[upscaleNodeId] = {
+    inputs: {
+      upscale_model: [modelLoaderNodeId, 0],
+      image: [decodeNodeId, 0]
+    },
+    class_type: 'ImageUpscaleWithModel',
+    _meta: {
+      title: 'Upscale to 720p'
+    }
+  };
+  
+  // Add resize node to ensure exact target dimensions
+  const resizeNodeId = '997:resize_exact';
+  workflow.input.workflow[resizeNodeId] = {
+    inputs: {
+      upscale_method: 'lanczos',
+      width: targetWidth,
+      height: targetHeight,
+      crop: 'disabled',
+      image: [upscaleNodeId, 0]
+    },
+    class_type: 'ImageScale',
+    _meta: {
+      title: 'Resize to Exact 720p'
+    }
+  };
+  
+  // Update VideoCombine to use resized images
+  const videoCombineInputs = getNodeInputs(workflow, videoCombineNodeId);
+  if (videoCombineInputs) {
+    videoCombineInputs.images = [resizeNodeId, 0];
+  }
+  
+  // Add node weights
+  workflow.input.node_weights[modelLoaderNodeId] = 1.0;
+  workflow.input.node_weights[upscaleNodeId] = 8.0;
+  workflow.input.node_weights[resizeNodeId] = 2.0;
+}
