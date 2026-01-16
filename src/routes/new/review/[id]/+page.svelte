@@ -25,6 +25,8 @@
   let pollInterval: ReturnType<typeof setInterval> | null = null;
   let showAdvancedSettings = false;
   let progressPercentage: number | null = null;
+  let quotaRemaining: number | null = null;
+  let quotaLoading = true;
 
   // Workflow management
   let workflows: Workflow[] = [];
@@ -215,9 +217,24 @@
       loadingWorkflows = false;
     }
 
+    // Fetch remaining quota
+    try {
+      const quotaRes = await fetch('/api/quota');
+      if (quotaRes.ok) {
+        const quotaData = await quotaRes.json();
+        quotaRemaining = quotaData.remaining;
+      }
+    } catch (err) {
+      console.error('Failed to fetch quota:', err);
+    } finally {
+      quotaLoading = false;
+    }
+
     // Redirect to video details if already completed
     if (entry.status === 'completed') {
-      goto(`/videos/${entry.id}`);
+      setInterval(() => {
+        goto(`/videos/${entry.id}`);
+      }, 1000); // wait 1 second before redirecting, otherwise the entry may not be ready
       return;
     }
     
@@ -683,7 +700,12 @@
           </svg>
           {$_('common.delete')}
         </button>
-        <div class="flex gap-2">
+        <div class="flex gap-2 flex-col sm:flex-row sm:items-center">
+          {#if !quotaLoading && quotaRemaining !== null}
+            <div class="badge badge-lg" class:badge-error={quotaRemaining === 0} class:badge-warning={quotaRemaining < 3} class:badge-success={quotaRemaining > 0}>
+              {$_('review.quotaRemaining', { values: { count: quotaRemaining } })}
+            </div>
+          {/if}
           {#if entry.status === "failed"}
             <button 
               class="btn btn-warning btn-lg" 

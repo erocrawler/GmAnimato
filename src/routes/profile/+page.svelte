@@ -7,6 +7,10 @@
   let user = $derived(data.user);
   let isGmGardUser = $derived(user?.roles?.includes('gmgard-user'));
   
+  // Quota information
+  let quotaData = $state<{ used: number; limit: number; remaining: number; exceeded: boolean } | null>(null);
+  let loadingQuota = $state(true);
+  
   // Toast notification system
   let toastMessage = $state('');
   let toastType: 'success' | 'error' | 'info' = $state('info');
@@ -42,6 +46,22 @@
   let showSponsorConfirm = $state(false);
   let claimingSponso = $state(false);
   let updatingSponsorship = $state(false);
+  
+  // Fetch quota on mount
+  import { onMount } from 'svelte';
+  
+  onMount(async () => {
+    try {
+      const response = await fetch('/api/quota');
+      if (response.ok) {
+        quotaData = await response.json();
+      }
+    } catch (err) {
+      console.error('Failed to fetch quota:', err);
+    } finally {
+      loadingQuota = false;
+    }
+  });
   
   // Sponsor configuration
   import { isTokenExpired } from '$lib/jwt';
@@ -383,6 +403,61 @@
           {savingInfo ? $_('profile.saving') : $_('profile.saveChanges')}
         </button>
       </div>
+    </div>
+  </div>
+  
+  <!-- Daily Quota Section -->
+  <div class="card bg-base-200 shadow-xl mb-6">
+    <div class="card-body">
+      <h2 class="card-title text-2xl mb-4">{$_('profile.dailyQuota.title')}</h2>
+      
+      {#if loadingQuota}
+        <div class="flex justify-center py-8">
+          <span class="loading loading-spinner loading-lg"></span>
+        </div>
+      {:else if quotaData}
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="stat bg-base-300 rounded-lg">
+            <div class="stat-title">{$_('profile.dailyQuota.used')}</div>
+            <div class="stat-value text-primary">{quotaData.used}</div>
+            <div class="stat-desc">{$_('profile.dailyQuota.videosToday')}</div>
+          </div>
+          
+          <div class="stat bg-base-300 rounded-lg">
+            <div class="stat-title">{$_('profile.dailyQuota.limit')}</div>
+            <div class="stat-value">{quotaData.limit}</div>
+            <div class="stat-desc">{$_('profile.dailyQuota.dailyLimit')}</div>
+          </div>
+          
+          <div class="stat bg-base-300 rounded-lg">
+            <div class="stat-title">{$_('profile.dailyQuota.remaining')}</div>
+            <div class="stat-value" class:text-success={quotaData.remaining > 0} class:text-error={quotaData.remaining === 0}>
+              {quotaData.remaining}
+            </div>
+            <div class="stat-desc">{$_('profile.dailyQuota.videosLeft')}</div>
+          </div>
+        </div>
+        
+        {#if quotaData.exceeded}
+          <div class="alert alert-warning mt-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>{$_('profile.dailyQuota.exceeded')}</span>
+          </div>
+        {/if}
+        
+        <div class="text-sm opacity-70 mt-4">
+          <p>{$_('profile.dailyQuota.resetInfo')}</p>
+        </div>
+      {:else}
+        <div class="alert alert-error">
+          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>{$_('profile.dailyQuota.loadError')}</span>
+        </div>
+      {/if}
     </div>
   </div>
   

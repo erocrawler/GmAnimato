@@ -38,6 +38,11 @@ export const POST: RequestHandler = async ({ request, params }) => {
 
     const patch: any = { status: status.toLowerCase() };
     
+    // Set dequeued_at when transitioning to processing
+    if (patch.status === 'processing' && existing.status !== 'processing' && !existing.dequeued_at) {
+      patch.dequeued_at = new Date().toISOString();
+    }
+    
     // Handle progress updates
     const progress = body?.progress as any | undefined;
     if (progress && typeof progress === 'object') {

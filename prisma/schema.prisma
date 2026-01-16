@@ -56,6 +56,7 @@ model Video {
   createdAt           DateTime    @default(now()) @map("created_at")
   updatedAt           DateTime    @updatedAt @map("updated_at")
   processingStartedAt DateTime?   @map("processing_started_at")
+  dequeuedAt          DateTime?   @map("dequeued_at")
   processingTimeMs    Int?        @map("processing_time_ms")
   progressPercentage  Float?      @map("progress_percentage")
   progressDetails     Json?       @map("progress_details")

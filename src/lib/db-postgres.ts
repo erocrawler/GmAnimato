@@ -38,6 +38,8 @@ export class PostgresDatabase implements IDatabase {
         videoResolution: entry.video_resolution,
         loraWeights: entry.lora_weights,
         seed: entry.seed,
+        processingStartedAt: entry.processing_started_at ? new Date(entry.processing_started_at) : null,
+        dequeuedAt: entry.dequeued_at ? new Date(entry.dequeued_at) : null,
       },
     });
 
@@ -252,6 +254,7 @@ export class PostgresDatabase implements IDatabase {
       if (patch.is_published !== undefined) data.isPublished = patch.is_published;
       if (patch.processing_time_ms !== undefined) data.processingTimeMs = patch.processing_time_ms;
       if (patch.processing_started_at !== undefined) data.processingStartedAt = patch.processing_started_at ? new Date(patch.processing_started_at) : null;
+      if (patch.dequeued_at !== undefined) data.dequeuedAt = patch.dequeued_at ? new Date(patch.dequeued_at) : null;
       if (patch.progress_percentage !== undefined) data.progressPercentage = patch.progress_percentage;
       if (patch.progress_details !== undefined) data.progressDetails = patch.progress_details;
       if (patch.iteration_steps !== undefined) data.iterationSteps = patch.iteration_steps;
@@ -420,10 +423,13 @@ export class PostgresDatabase implements IDatabase {
 
         const jobId = job[0].id;
 
-        // Update the job status to processing
+        // Update the job status to processing and record when processing actually started
         const updated = await tx.video.update({
           where: { id: jobId },
-          data: { status: 'processing' }
+          data: { 
+            status: 'processing',
+            dequeued_at: new Date().toISOString()
+          }
         });
 
         return updated;
@@ -822,6 +828,7 @@ export class PostgresDatabase implements IDatabase {
       is_published: video.isPublished || undefined,
       processing_time_ms: video.processingTimeMs ?? undefined,
       processing_started_at: video.processingStartedAt ? video.processingStartedAt.toISOString() : undefined,
+      dequeued_at: video.dequeuedAt ? video.dequeuedAt.toISOString() : undefined,
       progress_percentage: video.progressPercentage ?? undefined,
       progress_details: video.progressDetails || undefined,
       iteration_steps: video.iterationSteps ?? undefined,

@@ -15,7 +15,8 @@ export type VideoEntry = {
   final_video_url?: string;
   is_published?: boolean;
   processing_time_ms?: number; // Time taken to process in milliseconds
-  processing_started_at?: string; // ISO timestamp when job was submitted
+  processing_started_at?: string; // ISO timestamp when job was enqueued
+  dequeued_at?: string; // ISO timestamp when job was dequeued and actually started processing
   progress_percentage?: number; // Overall workflow progress (0-100)
   progress_details?: {
     completed_nodes?: number;
