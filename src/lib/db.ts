@@ -232,8 +232,8 @@ export async function expireSponsorClaim(id: string) {
   return db.expireSponsorClaim(id);
 }
 
-export async function renewSponsorClaim(id: string) {
-  return db.renewSponsorClaim(id);
+export async function updateSponsorClaim(id: string, patch: { sponsor_tier?: string; applied_role?: string; expired_at?: string | null }) {
+  return db.updateSponsorClaim(id, patch);
 }
 
 export async function getAllSponsorClaims() {

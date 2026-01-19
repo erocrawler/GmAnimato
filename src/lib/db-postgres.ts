@@ -984,15 +984,31 @@ export class PostgresDatabase implements IDatabase {
     }
   }
 
-  async renewSponsorClaim(id: string): Promise<boolean> {
+  // Removed renewSponsorClaim: use updateSponsorClaim with expired_at: null
+
+  async updateSponsorClaim(id: string, patch: { sponsor_tier?: string; applied_role?: string; expired_at?: string | null }): Promise<SponsorClaim | null> {
     try {
-      await this.prisma.sponsorClaim.update({
+      const updated = await this.prisma.sponsorClaim.update({
         where: { id },
-        data: { expiredAt: null },
+        data: {
+          sponsorTier: patch.sponsor_tier ?? undefined,
+          appliedRole: patch.applied_role ?? undefined,
+          expiredAt: patch.expired_at === undefined ? undefined : (patch.expired_at ? new Date(patch.expired_at) : null),
+        },
       });
-      return true;
+      return {
+        id: updated.id,
+        user_id: updated.userId,
+        sponsor_username: updated.sponsorUsername,
+        sponsor_nickname: updated.sponsorNickname || undefined,
+        sponsor_avatar: updated.sponsorAvatar || undefined,
+        sponsor_tier: updated.sponsorTier,
+        applied_role: updated.appliedRole,
+        claimed_at: updated.claimedAt.toISOString(),
+        expired_at: updated.expiredAt ? updated.expiredAt.toISOString() : null,
+      };
     } catch {
-      return false;
+      return null;
     }
   }
 

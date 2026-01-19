@@ -547,7 +547,7 @@ export class JsonFileDatabase implements IDatabase {
     return [];
   }
 
-  async createSponsorClaim(claim: Omit<import('./IDatabase').SponsorClaim, 'id' | 'claimed_at'>): Promise<import('./IDatabase').SponsorClaim> {
+  async createSponsorClaim(claim: Omit<import('./IDatabase').SponsorClaim, 'id' | 'claimed_at' | 'expired_at'>): Promise<import('./IDatabase').SponsorClaim> {
     throw new Error('Sponsor claims are only supported with PostgreSQL database');
   }
 
@@ -559,5 +559,33 @@ export class JsonFileDatabase implements IDatabase {
   async getAllSponsorClaims(): Promise<import('./IDatabase').SponsorClaim[]> {
     // JSON database doesn't support sponsor claims - always return empty array
     return [];
+  }
+
+  async expireSponsorClaim(id: string): Promise<boolean> {
+    console.warn('[JSON DB] expireSponsorClaim not supported - use PostgreSQL');
+    return false;
+  }
+
+  // renewSponsorClaim removed; use updateSponsorClaim with expired_at
+
+  async updateSponsorClaim(id: string, patch: { sponsor_tier?: string; applied_role?: string }): Promise<import('./IDatabase').SponsorClaim | null> {
+    console.warn('[JSON DB] updateSponsorClaim not supported - use PostgreSQL');
+    return null;
+  }
+
+  // ==================== Workflow Methods (JSON DB: Stub) ====================
+  async getWorkflowById(id: string): Promise<import('./IDatabase').Workflow | null> {
+    console.warn('[JSON DB] getWorkflowById not supported - use PostgreSQL');
+    return null;
+  }
+
+  async getWorkflows(): Promise<import('./IDatabase').Workflow[]> {
+    console.warn('[JSON DB] getWorkflows not supported - use PostgreSQL');
+    return [];
+  }
+
+  async getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v'): Promise<import('./IDatabase').Workflow | null> {
+    console.warn('[JSON DB] getDefaultWorkflow not supported - use PostgreSQL');
+    return null;
   }
 }

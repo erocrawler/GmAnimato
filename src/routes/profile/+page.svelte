@@ -50,6 +50,7 @@
   
   // Fetch quota on mount
   import { onMount } from 'svelte';
+  import { invalidateAll } from '$app/navigation';
   
   onMount(async () => {
     try {
@@ -184,6 +185,8 @@
         foundSponsor = null;
         roleToApply = '';
         showSponsorConfirm = false;
+        // Refresh page data to update sponsorClaims
+        try { await invalidateAll(); } catch {}
       } else {
         const result = await response.json();
         const messageKey = result.messageCode ? getMessageKey(result.messageCode) : 'claimFailed';
@@ -568,7 +571,7 @@
                             <span class="badge badge-sm badge-warning">{$_('profile.sponsor.expired')}</span>
                           </div>
                           <p class="text-xs opacity-50 mt-2">
-                            {$_('profile.sponsor.expiredOn')} {new Date(expiredClaim.expired_at).toLocaleDateString()}
+                            {$_('profile.sponsor.expiredOn')} {expiredClaim.expired_at ? new Date(expiredClaim.expired_at).toLocaleDateString() : '-'}
                           </p>
                         </div>
                       </div>
@@ -659,7 +662,7 @@
                             <span class="badge badge-sm badge-warning">{$_('profile.sponsor.expired')}</span>
                           </div>
                           <p class="text-xs opacity-50 mt-2">
-                            {$_('profile.sponsor.expiredOn')} {new Date(expiredClaim.expired_at).toLocaleDateString()}
+                            {$_('profile.sponsor.expiredOn')} {expiredClaim.expired_at ? new Date(expiredClaim.expired_at).toLocaleDateString() : '-'}
                           </p>
                         </div>
                       </div>

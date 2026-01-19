@@ -1,6 +1,6 @@
 import type { Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
-import { getSessionByToken, getUserById, deleteSession, deleteExpiredSessions, getAllSponsorClaims, deleteSponsorClaim, expireSponsorClaim, renewSponsorClaim, updateUser, getAdminSettings } from '$lib/db';
+import { getSessionByToken, getUserById, deleteSession, deleteExpiredSessions, getAllSponsorClaims, deleteSponsorClaim, expireSponsorClaim, updateSponsorClaim, updateUser, getAdminSettings } from '$lib/db';
 import { isSessionExpired } from '$lib/session';
 import { building } from '$app/environment';
 import { env } from '$env/dynamic/private';
@@ -126,8 +126,12 @@ async function revalidateSponsors() {
               }
             }
             
-            // Un-expire the claim
-            await renewSponsorClaim(claim.id);
+            // Un-expire the claim and align tier/role
+            await updateSponsorClaim(claim.id, { expired_at: null });
+            if (sponsorInfo.tier !== claim.sponsor_tier && expectedRole) {
+              await updateSponsorClaim(claim.id, { sponsor_tier: sponsorInfo.tier, applied_role: expectedRole });
+              updatedCount++;
+            }
             renewedCount++;
           }
         } else if (sponsorInfo.tier !== claim.sponsor_tier) {
@@ -163,10 +167,10 @@ async function revalidateSponsors() {
             }
             
             // Update the claim record with new tier and role
-            await deleteSponsorClaim(claim.id);
-            // Note: The user can re-claim with the new tier, or we could update the claim in place
-            // For now, we just remove it and they can re-claim if needed
-            updatedCount++;
+            const updated = await updateSponsorClaim(claim.id, { sponsor_tier: sponsorInfo.tier, applied_role: newRole });
+            if (updated) {
+              updatedCount++;
+            }
           }
         }
       }

@@ -183,7 +183,7 @@ export interface IDatabase {
   createSponsorClaim(claim: Omit<SponsorClaim, 'id' | 'claimed_at' | 'expired_at'>): Promise<SponsorClaim>;
   deleteSponsorClaim(id: string): Promise<boolean>;
   expireSponsorClaim(id: string): Promise<boolean>;
-  renewSponsorClaim(id: string): Promise<boolean>;
+  updateSponsorClaim(id: string, patch: { sponsor_tier?: string; applied_role?: string; expired_at?: string | null }): Promise<SponsorClaim | null>;
   getAllSponsorClaims(): Promise<SponsorClaim[]>;
 
   // Workflow methods
