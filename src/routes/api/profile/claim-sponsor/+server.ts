@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { updateUser, getAdminSettings, getSponsorClaimByUsername, createSponsorClaim, deleteSponsorClaim } from '$lib/db';
+import { updateUser, getAdminSettings, getSponsorClaimByUsername, createSponsorClaim, deleteSponsorClaim, renewSponsorClaim } from '$lib/db';
 import { env } from '$env/dynamic/private';
 
 interface SponsorData {
@@ -108,6 +108,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         );
         const roleToApply = roleConfig?.name;
 
+        // If expired, allow renewal
+        if (existingClaim.expired_at) {
+          return new Response(
+            JSON.stringify({
+              found: true,
+              sponsor,
+              roleToApply,
+              existingClaim,
+              messageCode: 'SPONSOR_RENEWED',
+            } as SponsorClaimResponse),
+            { headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
         return new Response(
           JSON.stringify({
             found: true,
@@ -120,13 +134,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
           { headers: { 'Content-Type': 'application/json' } }
         );
       } else {
-        return new Response(
-          JSON.stringify({
-            found: false,
-            messageCode: 'ALREADY_CLAIMED_BY_OTHER',
-          } as SponsorClaimResponse),
-          { status: 409, headers: { 'Content-Type': 'application/json' } }
-        );
+        // Only block if the existing claim is not expired
+        if (!existingClaim.expired_at) {
+          return new Response(
+            JSON.stringify({
+              found: false,
+              messageCode: 'ALREADY_CLAIMED_BY_OTHER',
+            } as SponsorClaimResponse),
+            { status: 409, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        // If expired by someone else, allow this user to claim it
       }
     }
 
@@ -222,16 +240,64 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
     const existingClaim = await getSponsorClaimByUsername(sponsorUsername);
     
     if (existingClaim) {
-      // Check if it was claimed by someone else
-      if (existingClaim.user_id !== locals.user.id) {
+      // Check if it was claimed by someone else (and not expired)
+      if (existingClaim.user_id !== locals.user.id && !existingClaim.expired_at) {
         return new Response(
           JSON.stringify({ messageCode: 'ALREADY_CLAIMED_BY_OTHER' }),
           { status: 409, headers: { 'Content-Type': 'application/json' } }
         );
       }
       
+      // If expired and belongs to current user, renew it
+      if (existingClaim.expired_at && existingClaim.user_id === locals.user.id) {
+        // Restore the role if not present
+        const currentRoles = locals.user.roles || [];
+        if (!currentRoles.includes(roleToApply)) {
+          currentRoles.push(roleToApply);
+          const updated = await updateUser(locals.user.id, { roles: currentRoles });
+          if (!updated) {
+            return new Response(JSON.stringify({ 
+              messageCode: 'UPDATE_ROLES_FAILED'
+            }), {
+              status: 500,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+        
+        // Renew the claim
+        await renewSponsorClaim(existingClaim.id);
+        
+        // Update session cookie with new user data
+        const userPublic = {
+          id: locals.user.id,
+          username: locals.user.username,
+          email: locals.user.email,
+          roles: currentRoles,
+          created_at: locals.user.created_at,
+          updated_at: locals.user.updated_at,
+        };
+
+        cookies.set('session', JSON.stringify(userPublic), {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: 60 * 60 * 24 * 7, // 7 days
+        });
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            messageCode: 'SPONSOR_RENEWED',
+            role: roleToApply,
+            user: userPublic,
+          }),
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      
       // If tier/role changed, remove old role and delete old claim
-      if (existingClaim.applied_role !== roleToApply) {
+      if (existingClaim.user_id === locals.user.id && existingClaim.applied_role !== roleToApply) {
         const currentRoles = locals.user.roles || [];
         const updatedRoles = currentRoles.filter(r => r !== existingClaim.applied_role);
         if (!updatedRoles.includes(roleToApply)) {

@@ -101,6 +101,7 @@ export type SponsorClaim = {
   sponsor_tier: string;
   applied_role: string;
   claimed_at: string;
+  expired_at?: string | null;
 };
 
 export type PaginatedVideos = {
@@ -179,8 +180,10 @@ export interface IDatabase {
   // Sponsor claim methods
   getSponsorClaimByUsername(sponsorUsername: string): Promise<SponsorClaim | null>;
   getSponsorClaimsByUser(userId: string): Promise<SponsorClaim[]>;
-  createSponsorClaim(claim: Omit<SponsorClaim, 'id' | 'claimed_at'>): Promise<SponsorClaim>;
+  createSponsorClaim(claim: Omit<SponsorClaim, 'id' | 'claimed_at' | 'expired_at'>): Promise<SponsorClaim>;
   deleteSponsorClaim(id: string): Promise<boolean>;
+  expireSponsorClaim(id: string): Promise<boolean>;
+  renewSponsorClaim(id: string): Promise<boolean>;
   getAllSponsorClaims(): Promise<SponsorClaim[]>;
 
   // Workflow methods

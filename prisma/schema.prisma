@@ -120,6 +120,7 @@ model SponsorClaim {
   sponsorTier        String   @map("sponsor_tier") @db.VarChar(50)
   appliedRole        String   @map("applied_role") @db.VarChar(50)
   claimedAt          DateTime @default(now()) @map("claimed_at")
+  expiredAt          DateTime? @map("expired_at")
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([sponsorUsername])

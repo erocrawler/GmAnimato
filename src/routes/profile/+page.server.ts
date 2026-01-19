@@ -1,6 +1,7 @@
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
 import { getAdminSettings, getSponsorClaimsByUser } from '$lib/db';
+import { env } from '$env/dynamic/private';
 
 export const load: PageServerLoad = async ({ locals }) => {
   if (!locals.user) {
@@ -15,5 +16,6 @@ export const load: PageServerLoad = async ({ locals }) => {
     sponsorApiUrl: settings.sponsorApiUrl,
     sponsorApiToken: settings.sponsorApiToken,
     sponsorClaims,
+    sponsorUrl: env.SPONSOR_URL,
   };
 };

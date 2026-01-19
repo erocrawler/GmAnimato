@@ -900,6 +900,7 @@ export class PostgresDatabase implements IDatabase {
       sponsor_tier: claim.sponsorTier,
       applied_role: claim.appliedRole,
       claimed_at: claim.claimedAt.toISOString(),
+      expired_at: claim.expiredAt ? claim.expiredAt.toISOString() : null,
     };
   }
 
@@ -918,10 +919,11 @@ export class PostgresDatabase implements IDatabase {
       sponsor_tier: claim.sponsorTier,
       applied_role: claim.appliedRole,
       claimed_at: claim.claimedAt.toISOString(),
+      expired_at: claim.expiredAt ? claim.expiredAt.toISOString() : null,
     }));
   }
 
-  async createSponsorClaim(claim: Omit<SponsorClaim, 'id' | 'claimed_at'>): Promise<SponsorClaim> {
+  async createSponsorClaim(claim: Omit<SponsorClaim, 'id' | 'claimed_at' | 'expired_at'>): Promise<SponsorClaim> {
     const created = await this.prisma.sponsorClaim.create({
       data: {
         userId: claim.user_id,
@@ -942,6 +944,7 @@ export class PostgresDatabase implements IDatabase {
       sponsor_tier: created.sponsorTier,
       applied_role: created.appliedRole,
       claimed_at: created.claimedAt.toISOString(),
+      expired_at: null,
     };
   }
 
@@ -965,7 +968,32 @@ export class PostgresDatabase implements IDatabase {
       sponsor_tier: c.sponsorTier,
       applied_role: c.appliedRole,
       claimed_at: c.claimedAt.toISOString(),
+      expired_at: c.expiredAt ? c.expiredAt.toISOString() : null,
     }));
+  }
+
+  async expireSponsorClaim(id: string): Promise<boolean> {
+    try {
+      await this.prisma.sponsorClaim.update({
+        where: { id },
+        data: { expiredAt: new Date() },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async renewSponsorClaim(id: string): Promise<boolean> {
+    try {
+      await this.prisma.sponsorClaim.update({
+        where: { id },
+        data: { expiredAt: null },
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // ==================== Workflow Methods ====================

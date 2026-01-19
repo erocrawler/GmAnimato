@@ -6,6 +6,7 @@
   
   let user = $derived(data.user);
   let isGmGardUser = $derived(user?.roles?.includes('gmgard-user'));
+  let sponsorUrl = $derived(data.sponsorUrl);
   
   // Quota information
   let quotaData = $state<{ used: number; limit: number; remaining: number; exceeded: boolean } | null>(null);
@@ -68,7 +69,8 @@
   
   let sponsorApiConfigured = $derived(!!(data.sponsorApiUrl && data.sponsorApiToken));
   let sponsorClaims = $derived(data.sponsorClaims || []);
-  let currentClaim = $derived(sponsorClaims.length > 0 ? sponsorClaims[0] : null);
+  let activeClaim = $derived(sponsorClaims.find(c => !c.expired_at) || null);
+  let expiredClaims = $derived(sponsorClaims.filter(c => c.expired_at) || []);
   let tokenExpired = $derived(isTokenExpired(data.sponsorApiToken));
   let sponsorFeatureDisabled = $derived(!sponsorApiConfigured || tokenExpired);
   
@@ -201,16 +203,16 @@
   }
   
   async function updateSponsorship() {
-    if (!currentClaim) return;
+    if (!activeClaim) return;
     
     updatingSponsorship = true;
     
     try {
-      // Search for the sponsor again to check if tier changed
+      // Search for the sponsor again to check if tier changed or renewed
       const response = await fetch('/api/profile/claim-sponsor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: currentClaim.sponsor_username }),
+        body: JSON.stringify({ username: activeClaim.sponsor_username }),
       });
       
       if (response.ok) {
@@ -218,9 +220,9 @@
         if (result.found && result.sponsor) {
           const sponsor = result.sponsor;
           // Check if tier changed
-          if (sponsor.schemeName !== currentClaim.sponsor_tier) {
+          if (sponsor.schemeName !== activeClaim.sponsor_tier) {
             // Tier changed, need to update
-            sponsorUsername = currentClaim.sponsor_username;
+            sponsorUsername = activeClaim.sponsor_username;
             foundSponsor = sponsor;
             roleToApply = result.roleToApply || '';
             showSponsorConfirm = true;
@@ -474,7 +476,7 @@
             </svg>
             <span>{$_('profile.sponsor.tokenExpired')}</span>
           </div>
-        {:else if currentClaim}
+        {:else if activeClaim}
           <!-- Existing Sponsor Claim -->
           <div class="hover-3d mb-4">
             <div class="card bg-gradient-to-br from-primary/10 to-secondary/10 shadow-lg">
@@ -486,28 +488,28 @@
                 {$_('profile.sponsor.currentSponsorship')}
               </h3>
               <div class="flex items-start gap-4">
-                {#if currentClaim.sponsor_avatar}
+                {#if activeClaim.sponsor_avatar}
                   <div class="avatar">
                     <div class="w-20 h-20 rounded-full ring ring-primary ring-offset-base-100 ring-offset-2">
                       <img 
-                        src={currentClaim.sponsor_avatar} 
-                        alt={currentClaim.sponsor_nickname}
+                        src={activeClaim.sponsor_avatar} 
+                        alt={activeClaim.sponsor_nickname}
                       />
                     </div>
                   </div>
                 {/if}
                 <div class="flex-1">
-                  <p class="font-bold text-lg">{currentClaim.sponsor_nickname || 'N/A'}</p>
-                  <p class="text-sm opacity-70">@{currentClaim.sponsor_username}</p>
+                  <p class="font-bold text-lg">{activeClaim.sponsor_nickname || 'N/A'}</p>
+                  <p class="text-sm opacity-70">@{activeClaim.sponsor_username}</p>
                   <div class="flex gap-2 mt-3">
-                    <span class="badge badge-primary badge-lg">{currentClaim.sponsor_tier}</span>
-                    <span class="badge badge-ghost badge-lg">{currentClaim.applied_role}</span>
+                    <span class="badge badge-primary badge-lg">{activeClaim.sponsor_tier}</span>
+                    <span class="badge badge-ghost badge-lg">{activeClaim.applied_role}</span>
                   </div>
                   <p class="text-xs opacity-60 mt-3">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline mr-1" viewBox="0 0 20 20" fill="currentColor">
                       <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd" />
                     </svg>
-                    {$_('profile.sponsor.claimedOn')} {new Date(currentClaim.claimed_at).toLocaleDateString()}
+                    {$_('profile.sponsor.claimedOn')} {new Date(activeClaim.claimed_at).toLocaleDateString()}
                   </p>
                 </div>
               </div>
@@ -535,6 +537,68 @@
               {updatingSponsorship ? $_('profile.sponsor.checking') : $_('profile.sponsor.checkForUpdates')}
             </button>
           </div>
+
+          <!-- Expired Sponsor Claims -->
+          {#if expiredClaims.length > 0}
+            <div class="divider mt-6 mb-6"></div>
+            <h3 class="text-lg font-semibold mb-4 flex items-center gap-2 text-warning">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+              </svg>
+              {$_('profile.sponsor.expiredSponsorship')}
+            </h3>
+            <div class="space-y-3">
+              {#each expiredClaims as expiredClaim}
+                <div class="card bg-base-300/50 shadow">
+                  <div class="card-body p-4">
+                    <div class="flex items-start justify-between gap-4">
+                      <div class="flex items-start gap-3 flex-1">
+                        {#if expiredClaim.sponsor_avatar}
+                          <img 
+                            src={expiredClaim.sponsor_avatar} 
+                            alt={expiredClaim.sponsor_nickname}
+                            class="w-12 h-12 rounded-full object-cover opacity-60"
+                          />
+                        {/if}
+                        <div class="flex-1">
+                          <p class="font-semibold opacity-70">{expiredClaim.sponsor_nickname || 'N/A'}</p>
+                          <p class="text-sm opacity-50">@{expiredClaim.sponsor_username}</p>
+                          <div class="flex gap-2 mt-2">
+                            <span class="badge badge-sm opacity-60">{expiredClaim.sponsor_tier}</span>
+                            <span class="badge badge-sm badge-warning">{$_('profile.sponsor.expired')}</span>
+                          </div>
+                          <p class="text-xs opacity-50 mt-2">
+                            {$_('profile.sponsor.expiredOn')} {new Date(expiredClaim.expired_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+                      <div class="text-right flex flex-col items-end gap-2">
+                        <p class="text-xs text-warning font-semibold">
+                          {#if sponsorUrl}
+                            <a href={sponsorUrl} target="_blank" rel="noopener noreferrer" class="link link-warning">
+                              {$_('profile.sponsor.renewReminder')}
+                            </a>
+                          {:else}
+                            {$_('profile.sponsor.renewReminder')}
+                          {/if}
+                        </p>
+                        <button 
+                          class="btn btn-xs btn-primary" 
+                          onclick={() => {
+                            sponsorUsername = expiredClaim.sponsor_username;
+                            searchSponsor();
+                          }}
+                          disabled={searchingSponsor || claimingSponso || sponsorFeatureDisabled}
+                        >
+                          {searchingSponsor ? $_('profile.sponsor.checking') : $_('profile.sponsor.checkForUpdates')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
         {:else}
           <!-- Claim New Sponsorship -->
           <p class="text-sm opacity-70 mb-4">{$_('profile.sponsor.claimDescription')}</p>
@@ -564,6 +628,68 @@
               {$_('profile.sponsor.usernameHelp')}
             </p>
           </div>
+
+          <!-- Expired Sponsor Claims -->
+          {#if expiredClaims.length > 0}
+            <div class="divider mt-6 mb-6"></div>
+            <h3 class="text-lg font-semibold mb-4 flex items-center gap-2 text-warning">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+              </svg>
+              {$_('profile.sponsor.expiredSponsorship')}
+            </h3>
+            <div class="space-y-3">
+              {#each expiredClaims as expiredClaim}
+                <div class="card bg-base-300/50 shadow">
+                  <div class="card-body p-4">
+                    <div class="flex items-start justify-between gap-4">
+                      <div class="flex items-start gap-3 flex-1">
+                        {#if expiredClaim.sponsor_avatar}
+                          <img 
+                            src={expiredClaim.sponsor_avatar} 
+                            alt={expiredClaim.sponsor_nickname}
+                            class="w-12 h-12 rounded-full object-cover opacity-60"
+                          />
+                        {/if}
+                        <div class="flex-1">
+                          <p class="font-semibold opacity-70">{expiredClaim.sponsor_nickname || 'N/A'}</p>
+                          <p class="text-sm opacity-50">@{expiredClaim.sponsor_username}</p>
+                          <div class="flex gap-2 mt-2">
+                            <span class="badge badge-sm opacity-60">{expiredClaim.sponsor_tier}</span>
+                            <span class="badge badge-sm badge-warning">{$_('profile.sponsor.expired')}</span>
+                          </div>
+                          <p class="text-xs opacity-50 mt-2">
+                            {$_('profile.sponsor.expiredOn')} {new Date(expiredClaim.expired_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+                      <div class="text-right flex flex-col items-end gap-2">
+                        <p class="text-xs text-warning font-semibold">
+                          {#if sponsorUrl}
+                            <a href={sponsorUrl} target="_blank" rel="noopener noreferrer" class="link link-warning">
+                              {$_('profile.sponsor.renewReminder')}
+                            </a>
+                          {:else}
+                            {$_('profile.sponsor.renewReminder')}
+                          {/if}
+                        </p>
+                        <button 
+                          class="btn btn-xs btn-primary" 
+                          onclick={() => {
+                            sponsorUsername = expiredClaim.sponsor_username;
+                            searchSponsor();
+                          }}
+                          disabled={searchingSponsor || claimingSponso || sponsorFeatureDisabled}
+                        >
+                          {searchingSponsor ? $_('profile.sponsor.checking') : $_('profile.sponsor.checkForUpdates')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
         {/if}
       </div>
     </div>

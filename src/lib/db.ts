@@ -220,12 +220,20 @@ export async function getSponsorClaimsByUser(userId: string) {
   return db.getSponsorClaimsByUser(userId);
 }
 
-export async function createSponsorClaim(claim: Omit<import('./IDatabase').SponsorClaim, 'id' | 'claimed_at'>) {
+export async function createSponsorClaim(claim: Omit<import('./IDatabase').SponsorClaim, 'id' | 'claimed_at' | 'expired_at'>) {
   return db.createSponsorClaim(claim);
 }
 
 export async function deleteSponsorClaim(id: string) {
   return db.deleteSponsorClaim(id);
+}
+
+export async function expireSponsorClaim(id: string) {
+  return db.expireSponsorClaim(id);
+}
+
+export async function renewSponsorClaim(id: string) {
+  return db.renewSponsorClaim(id);
 }
 
 export async function getAllSponsorClaims() {
