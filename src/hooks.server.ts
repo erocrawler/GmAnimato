@@ -179,6 +179,19 @@ async function revalidateSponsors() {
               updatedCount++;
             }
           }
+        } else {
+          // Tier matches - ensure user has the correct role (synchronization check)
+          const expectedRole = tierToRoleMap.get(sponsorInfo.tier);
+          if (expectedRole) {
+            const user = await getUserById(claim.user_id);
+            if (user && !user.roles.includes(expectedRole)) {
+              // User is missing the expected role - restore it
+              const updatedRoles = [...user.roles, expectedRole];
+              await updateUser(claim.user_id, { roles: updatedRoles });
+              console.log(`[Background Tasks] Synchronized role '${expectedRole}' to user ${user.username} (sponsor claim was active but role was missing)`);
+              updatedCount++;
+            }
+          }
         }
       }
     }
