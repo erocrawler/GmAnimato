@@ -186,37 +186,33 @@ export function add720pUpscaleNodes(
  * Add WanMotionScale node to workflow if motion scale value is provided
  * @param workflow The workflow object
  * @param motionScale Optional motion scale value (0.5 to 2.0)
- * @param samplerNodeId The sampler node ID to connect to
+ * @param modelProducerNodeId The node ID that produces the model output (e.g., UnetLoaderGGUF)
  * @returns The motion scale node ID if created, otherwise null
  */
-export function addMotionScaleNode(workflow: any, motionScale?: number, samplerNodeId?: string): string | null {
-  if (motionScale !== undefined && samplerNodeId) {
+export function addMotionScaleNode(workflow: any, motionScale?: number, modelProducerNodeId?: string): string | null {
+  if (motionScale !== undefined && modelProducerNodeId) {
     const motionScaleValue = Math.max(0.5, Math.min(2.0, motionScale));
     const motionScaleNodeId = '996:motionscale';
     
-    // Get the current model input from the sampler
-    const samplerInputs = getNodeInputs(workflow, samplerNodeId);
-    if (!samplerInputs) return null;
+    // Ensure node_weights exists
+    if (!workflow.input.node_weights) {
+      workflow.input.node_weights = {};
+    }
     
-    const originalModelInput = samplerInputs.model;
-    
-    // Create the WanMotionScale node
+    // Create the WanMotionScale node that consumes the model producer's output
     workflow.input.workflow[motionScaleNodeId] = {
       inputs: {
         enabled: true,
         scale_t: motionScaleValue,
         scale_y: 1,
         scale_x: 1,
-        model: originalModelInput // Connect to the original model source
+        model: [modelProducerNodeId, 0] // Connect to the model producer
       },
       class_type: 'WanMotionScale',
       _meta: {
         title: 'Wan Motion Scale (Experimental)'
       }
     };
-    
-    // Update sampler to use the motion scale node's output
-    samplerInputs.model = [motionScaleNodeId, 0];
     
     // Add node weight
     workflow.input.node_weights[motionScaleNodeId] = 1.0;
@@ -231,34 +227,27 @@ export function addMotionScaleNode(workflow: any, motionScale?: number, samplerN
  * @param workflow The workflow object
  * @param blendStrength Optional blend strength (0 to 1), default 0.8. 0 = off, 1 = full
  * @param totalFrames Total number of frames in the video (for calculating local_window_frames)
- * @param samplerNodeId The sampler node ID to connect to
- * @param motionScaleNodeId Optional motion scale node ID if it was created (to chain properly)
+ * @param modelProducerNodeId The node ID that produces the model output (e.g., WanMotionScale or UnetLoaderGGUF)
  * @returns The freelong node ID if created, otherwise null
  */
 export function addFreeLongNode(
   workflow: any, 
   blendStrength?: number, 
   totalFrames: number = 81,
-  samplerNodeId?: string,
-  motionScaleNodeId?: string | null
+  modelProducerNodeId?: string
 ): string | null {
-  if (blendStrength !== undefined && samplerNodeId) {
+  if (blendStrength !== undefined && modelProducerNodeId) {
     const clampedStrength = Math.max(0, Math.min(1, blendStrength));
     // Calculate local_window_frames as 40% of total frames, rounded to nearest integer
     const localWindowFrames = Math.round(totalFrames * 0.4);
     const freeLongNodeId = '995:freelong';
     
-    // Get the current model input from the sampler (or motion scale node if present)
-    const samplerInputs = getNodeInputs(workflow, samplerNodeId);
-    if (!samplerInputs) return null;
+    // Ensure node_weights exists
+    if (!workflow.input.node_weights) {
+      workflow.input.node_weights = {};
+    }
     
-    // If motion scale node exists, freelong should connect to its output
-    // Otherwise, connect to whatever the sampler was connected to
-    const originalModelInput = motionScaleNodeId 
-      ? [motionScaleNodeId, 0] 
-      : samplerInputs.model;
-    
-    // Create the WanFreeLong node
+    // Create the WanFreeLong node that consumes the model producer's output
     workflow.input.workflow[freeLongNodeId] = {
       inputs: {
         enabled: true,
@@ -267,16 +256,13 @@ export function addFreeLongNode(
         local_window_frames: localWindowFrames,
         blend_start_block: 0,
         blend_end_block: -1,
-        model: originalModelInput // Connect to the model chain
+        model: [modelProducerNodeId, 0] // Connect to the model producer
       },
       class_type: 'WanFreeLong',
       _meta: {
         title: 'Wan FreeLong'
       }
     };
-    
-    // Update sampler to use the freelong node's output
-    samplerInputs.model = [freeLongNodeId, 0];
     
     // Add node weight
     workflow.input.node_weights[freeLongNodeId] = 1.0;

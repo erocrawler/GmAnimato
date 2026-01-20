@@ -178,8 +178,8 @@ export async function buildFL2VWorkflow(params: FL2VWorkflowParams): Promise<obj
   if (highUnetNode) {
     const motionScaleNodeId = addMotionScaleNode(workflow, params.motionScale, highUnetNode as string);
     highChainStart = motionScaleNodeId 
-      ? (addFreeLongNode(workflow, params.freeLongBlendStrength, frames, motionScaleNodeId, null) || motionScaleNodeId)
-      : (addFreeLongNode(workflow, params.freeLongBlendStrength, frames, highUnetNode as string, null) || highUnetNode);
+      ? (addFreeLongNode(workflow, params.freeLongBlendStrength, frames, motionScaleNodeId) || motionScaleNodeId)
+      : (addFreeLongNode(workflow, params.freeLongBlendStrength, frames, highUnetNode as string) || highUnetNode);
   }
 
   // Override LoRA strengths when provided and dynamically build chains
