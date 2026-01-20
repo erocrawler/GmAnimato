@@ -95,6 +95,7 @@ async function revalidateSponsors() {
     let expiredCount = 0;
     let updatedCount = 0;
     let renewedCount = 0;
+    let syncedCount = 0;
 
     // Check each claim against current sponsors
     for (const claim of claims) {
@@ -179,11 +180,22 @@ async function revalidateSponsors() {
               updatedCount++;
             }
           }
+        } else {
+          // Tier matches - ensure user has the correct role (synchronization check)
+          // Use the applied_role from the claim record to ensure consistency
+          const user = await getUserById(claim.user_id);
+          if (user && claim.applied_role && !user.roles.includes(claim.applied_role)) {
+            // User is missing the expected role - restore it
+            const updatedRoles = [...user.roles, claim.applied_role];
+            await updateUser(claim.user_id, { roles: updatedRoles });
+            console.log(`[Background Tasks] Synchronized role '${claim.applied_role}' to user ${user.username} (sponsor claim was active but role was missing)`);
+            syncedCount++;
+          }
         }
       }
     }
     
-    console.log(`[Background Tasks] Sponsor validation complete: ${expiredCount} expired, ${updatedCount} tier changes, ${renewedCount} renewed`);
+    console.log(`[Background Tasks] Sponsor validation complete: ${expiredCount} expired, ${updatedCount} tier changes, ${renewedCount} renewed, ${syncedCount} synchronized`);
   } catch (err) {
     console.error('[Background Tasks] Sponsor revalidation error:', err);
   }
