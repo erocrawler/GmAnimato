@@ -289,43 +289,28 @@
     }
   });
 
-  // Save settings to localStorage whenever they change
-  function saveSettingsToLocalStorage() {
-    if (typeof window === 'undefined') return;
+  // Automatically save settings to localStorage whenever any setting changes
+  $: if (typeof window !== 'undefined') {
+    // This reactive statement will trigger whenever any of these variables change
+    // Using a block with dependency tracking ensures all changes are captured
+    const settings = {
+      iterationSteps,
+      videoDuration,
+      videoResolution,
+      motionScale,
+      freeLongBlendStrength,
+      loraEnabled,
+      loraWeights,
+      selectedWorkflowId
+    };
     
     try {
-      const settings = {
-        iterationSteps,
-        videoDuration,
-        videoResolution,
-        motionScale,
-        freeLongBlendStrength,
-        loraEnabled,
-        loraWeights,
-        selectedWorkflowId
-      };
       localStorage.setItem('video_generation_settings', JSON.stringify(settings));
     } catch (err) {
       console.error('Failed to save settings to localStorage:', err);
     }
   }
 
-  // Watch for changes and save to localStorage
-  $: if (iterationSteps || videoDuration || videoResolution) {
-    saveSettingsToLocalStorage();
-  }
-  
-  $: if (motionScale !== undefined || freeLongBlendStrength !== undefined) {
-    saveSettingsToLocalStorage();
-  }
-  
-  $: if (loraEnabled || loraWeights) {
-    saveSettingsToLocalStorage();
-  }
-  
-  $: if (selectedWorkflowId) {
-    saveSettingsToLocalStorage();
-  }
 
 
   function updateLoraWeight(id: string, value: number) {
