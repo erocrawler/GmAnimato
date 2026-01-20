@@ -20,8 +20,6 @@ export const POST: RequestHandler = async ({ request, params }) => {
       return new Response(JSON.stringify({ error: 'missing id or status' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
-    console.log(`[Webhook] Received callback for video ${id}, webhook_job_id: ${webhook_job_id}, status: ${status}, files count: ${files?.length || 0}`);
-
     const existing = await getVideoById(id);
     if (!existing) {
       console.error(`[Webhook] Video ${id} not found`);
@@ -33,8 +31,6 @@ export const POST: RequestHandler = async ({ request, params }) => {
       console.error(`[Webhook] Job ID mismatch for job. Expected: ${existing.job_id}, got: ${webhook_job_id}`);
       return new Response(JSON.stringify({ error: 'job id mismatch' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
     }
-
-    console.log(`[Webhook] Processing update for video ${id}. Current status: ${existing.status}`);
 
     const patch: any = { status: status.toLowerCase() };
     
@@ -56,7 +52,6 @@ export const POST: RequestHandler = async ({ request, params }) => {
         current_node: progress.current_node,
         current_node_progress: progress.current_node_progress
       };
-      console.log(`[Webhook] Progress update for video ${id}: ${progress.percentage}% (${progress.completed_nodes}/${progress.total_nodes} nodes)`);
     }
     
     // Extract video URL from files array if present
@@ -69,7 +64,6 @@ export const POST: RequestHandler = async ({ request, params }) => {
       if (videoFile?.data) {
         // Convert to proxy URL if it matches our S3 endpoint
         patch.final_video_url = toProxiedUrl(videoFile.data);
-        console.log(`[Webhook] Extracted video URL from files: ${videoFile.data} -> ${patch.final_video_url}`);
       }
     }
 
@@ -96,7 +90,6 @@ export const POST: RequestHandler = async ({ request, params }) => {
 
           const uploadedUrl = await uploadBufferToS3(buffer, ext);
           patch.final_video_url = uploadedUrl;
-          console.log(`[Webhook] Uploaded base64 video for ${id} to ${uploadedUrl}`);
         } catch (err) {
           console.error(`[Webhook] Failed to upload base64 video for ${id}:`, err);
           patch.status = 'failed';
@@ -119,7 +112,6 @@ export const POST: RequestHandler = async ({ request, params }) => {
     // If we still do not have a final video URL and this is a completion event, mark as failed
     if (!patch.final_video_url && (finalStatus === 'completed' || finalStatus === 'failed')) {
       patch.status = 'failed';
-      console.log(`[Webhook] Marking video ${id} as failed - no video URL in completion event`);
     }
 
     // Clear progress when job completes or fails
@@ -133,7 +125,6 @@ export const POST: RequestHandler = async ({ request, params }) => {
       const startTime = new Date(existing.processing_started_at).getTime();
       const endTime = Date.now();
       patch.processing_time_ms = endTime - startTime;
-      console.log(`[Webhook] Processing time for video ${id}: ${patch.processing_time_ms}ms (${(patch.processing_time_ms / 1000).toFixed(1)}s)`);
     }
 
     // Validate field lengths before updating
@@ -149,9 +140,7 @@ export const POST: RequestHandler = async ({ request, params }) => {
       );
     }
 
-    console.log(`[Webhook] Updating ${id} with patch:`, patch);
     const updated = await updateVideo(id, patch);
-    console.log(`[Webhook] Update result for ${id}:`, updated);
 
     return new Response(JSON.stringify({ success: true, updated }), { status: 201, headers: { 'Content-Type': 'application/json' } });
   } catch (err) {

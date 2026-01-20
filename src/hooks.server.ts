@@ -66,7 +66,14 @@ async function revalidateSponsors() {
     }
 
     const data = await response.json();
+    console.log('[Background Tasks] Sponsor API raw response:', JSON.stringify(data, null, 2));
     const currentSponsors = data.sponsors || [];
+    
+    // Safety check: if API returns empty sponsors, don't clear everyone (may be API bug)
+    if (currentSponsors.length === 0) {
+      console.error('[Background Tasks] Sponsor API returned empty list - skipping validation to prevent false expirations');
+      return;
+    }
     
     // Create a map of current sponsors by username
     const sponsorMap = new Map<string, { tier: string; status: string }>(

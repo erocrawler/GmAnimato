@@ -35,7 +35,6 @@ export const GET: RequestHandler = async ({ params }) => {
     }
     // If video is in_queue or processing but has no job_id, reset to uploaded
     if ((video.status === 'in_queue' || video.status === 'processing') && !video.job_id) {
-      console.log(`[Status Poll] Video ${video.id} is ${video.status} but has no job_id, resetting to uploaded`);
       await updateVideo(video.id, { status: 'uploaded', processing_started_at: undefined });
       return new Response(JSON.stringify({ 
         status: 'uploaded'
@@ -53,7 +52,6 @@ export const GET: RequestHandler = async ({ params }) => {
         const elapsedMs = now - processingStartedAt;
         
         if (elapsedMs > PROCESSING_TIMEOUT_MS) {
-          console.log(`[Status Poll] Video ${video.id} has timed out after ${Math.floor(elapsedMs / 1000 / 60)} minutes`);
           await updateVideo(video.id, { status: 'failed' });
           return new Response(JSON.stringify({ 
             status: 'failed',
@@ -66,7 +64,6 @@ export const GET: RequestHandler = async ({ params }) => {
       
       // For local jobs, just return the current DB status
       if (video.is_local_job) {
-        console.log(`[Status Poll] Returning local job status for video ${video.id}: ${video.status}`);
         return new Response(JSON.stringify({ 
           status: video.status,
           is_local: true,
