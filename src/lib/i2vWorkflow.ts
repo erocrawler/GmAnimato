@@ -147,6 +147,22 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
     );
   }
 
+  // Find the high UNet node to insert motion scale and freelong
+  const highUnetNode = findNode(workflow, 'UnetLoaderGGUF', (node: any) => 
+    node.inputs?.unet_name?.toLowerCase().includes('high') || 
+    node._meta?.title?.toLowerCase().includes('high')
+  );
+  
+  // Insert WanMotionScale and WanFreeLong right after high UNet, before LoRAs
+  // This creates: High UNet → MotionScale → FreeLong → LoRAs → TeaCache
+  let highChainStart = highUnetNode as string;
+  if (highUnetNode) {
+    const motionScaleNodeId = addMotionScaleNode(workflow, params.motionScale, highUnetNode as string);
+    highChainStart = motionScaleNodeId 
+      ? (addFreeLongNode(workflow, params.freeLongBlendStrength, frames, motionScaleNodeId, null) || motionScaleNodeId)
+      : (addFreeLongNode(workflow, params.freeLongBlendStrength, frames, highUnetNode as string, null) || highUnetNode);
+  }
+
   // Override LoRA strengths when provided and dynamically build chains
   if (params.loraWeights && params.loraPresets) {
     const presets = normalizeLoraPresets(params.loraPresets);
@@ -157,10 +173,6 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
     console.log('Building LoRA chains:', { highChain, lowChain });
     
     // Find the UnetLoader and TeaCache nodes for high and low chains
-    const highUnetNode = findNode(workflow, 'UnetLoaderGGUF', (node: any) => 
-      node.inputs?.unet_name?.toLowerCase().includes('high') || 
-      node._meta?.title?.toLowerCase().includes('high')
-    );
     const lowUnetNode = findNode(workflow, 'UnetLoaderGGUF', (node: any) => 
       node.inputs?.unet_name?.toLowerCase().includes('low') || 
       node._meta?.title?.toLowerCase().includes('low')
@@ -177,8 +189,8 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
       throw new Error('Required LoRA chain nodes not found in template');
     }
     
-    // High noise chain: starts from highUnetNode output, feeds into highTeaCacheNode
-    let highPrevNodeId = highUnetNode as string;
+    // High noise chain: starts from motionScale/freeLong output (or UNet if neither enabled)
+    let highPrevNodeId = highChainStart;
     let highNodeCounter = 1;
     for (const preset of highChain) {
       const nodeId = `61:dyn${highNodeCounter}`;
@@ -241,12 +253,6 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
       lowTeaCacheInputs.model = [lowPrevNodeId, 0];
     }
   }
-
-  // Add WanMotionScale node if motion scale is requested (0.5-2.0)
-  addMotionScaleNode(workflow, params.motionScale);
-
-  // Add WanFreeLong node if blend strength is requested (0-1)
-  addFreeLongNode(workflow, params.freeLongBlendStrength, frames);
 
   return workflow;
 }

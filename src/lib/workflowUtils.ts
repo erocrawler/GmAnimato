@@ -186,23 +186,44 @@ export function add720pUpscaleNodes(
  * Add WanMotionScale node to workflow if motion scale value is provided
  * @param workflow The workflow object
  * @param motionScale Optional motion scale value (0.5 to 2.0)
+ * @param samplerNodeId The sampler node ID to connect to
+ * @returns The motion scale node ID if created, otherwise null
  */
-export function addMotionScaleNode(workflow: any, motionScale?: number): void {
-  if (motionScale !== undefined) {
+export function addMotionScaleNode(workflow: any, motionScale?: number, samplerNodeId?: string): string | null {
+  if (motionScale !== undefined && samplerNodeId) {
     const motionScaleValue = Math.max(0.5, Math.min(2.0, motionScale));
-    workflow.input.workflow['996:motionscale'] = {
+    const motionScaleNodeId = '996:motionscale';
+    
+    // Get the current model input from the sampler
+    const samplerInputs = getNodeInputs(workflow, samplerNodeId);
+    if (!samplerInputs) return null;
+    
+    const originalModelInput = samplerInputs.model;
+    
+    // Create the WanMotionScale node
+    workflow.input.workflow[motionScaleNodeId] = {
       inputs: {
         enabled: true,
         scale_t: motionScaleValue,
         scale_y: 1,
-        scale_x: 1
+        scale_x: 1,
+        model: originalModelInput // Connect to the original model source
       },
       class_type: 'WanMotionScale',
       _meta: {
         title: 'Wan Motion Scale (Experimental)'
       }
     };
+    
+    // Update sampler to use the motion scale node's output
+    samplerInputs.model = [motionScaleNodeId, 0];
+    
+    // Add node weight
+    workflow.input.node_weights[motionScaleNodeId] = 1.0;
+    
+    return motionScaleNodeId;
   }
+  return null;
 }
 
 /**
@@ -210,26 +231,57 @@ export function addMotionScaleNode(workflow: any, motionScale?: number): void {
  * @param workflow The workflow object
  * @param blendStrength Optional blend strength (0 to 1), default 0.8. 0 = off, 1 = full
  * @param totalFrames Total number of frames in the video (for calculating local_window_frames)
+ * @param samplerNodeId The sampler node ID to connect to
+ * @param motionScaleNodeId Optional motion scale node ID if it was created (to chain properly)
+ * @returns The freelong node ID if created, otherwise null
  */
-export function addFreeLongNode(workflow: any, blendStrength?: number, totalFrames: number = 81): void {
-  if (blendStrength !== undefined) {
+export function addFreeLongNode(
+  workflow: any, 
+  blendStrength?: number, 
+  totalFrames: number = 81,
+  samplerNodeId?: string,
+  motionScaleNodeId?: string | null
+): string | null {
+  if (blendStrength !== undefined && samplerNodeId) {
     const clampedStrength = Math.max(0, Math.min(1, blendStrength));
     // Calculate local_window_frames as 40% of total frames, rounded to nearest integer
     const localWindowFrames = Math.round(totalFrames * 0.4);
+    const freeLongNodeId = '995:freelong';
     
-    workflow.input.workflow['995:freelong'] = {
+    // Get the current model input from the sampler (or motion scale node if present)
+    const samplerInputs = getNodeInputs(workflow, samplerNodeId);
+    if (!samplerInputs) return null;
+    
+    // If motion scale node exists, freelong should connect to its output
+    // Otherwise, connect to whatever the sampler was connected to
+    const originalModelInput = motionScaleNodeId 
+      ? [motionScaleNodeId, 0] 
+      : samplerInputs.model;
+    
+    // Create the WanFreeLong node
+    workflow.input.workflow[freeLongNodeId] = {
       inputs: {
         enabled: true,
         blend_strength: clampedStrength,
         low_freq_ratio: 0.8,
         local_window_frames: localWindowFrames,
         blend_start_block: 0,
-        blend_end_block: -1
+        blend_end_block: -1,
+        model: originalModelInput // Connect to the model chain
       },
       class_type: 'WanFreeLong',
       _meta: {
         title: 'Wan FreeLong'
       }
     };
+    
+    // Update sampler to use the freelong node's output
+    samplerInputs.model = [freeLongNodeId, 0];
+    
+    // Add node weight
+    workflow.input.node_weights[freeLongNodeId] = 1.0;
+    
+    return freeLongNodeId;
   }
+  return null;
 }
