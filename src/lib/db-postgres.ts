@@ -36,6 +36,7 @@ export class PostgresDatabase implements IDatabase {
         iterationSteps: entry.iteration_steps,
         videoDuration: entry.video_duration,
         videoResolution: entry.video_resolution,
+        additionalOptions: entry.additional_options,
         loraWeights: entry.lora_weights,
         seed: entry.seed,
         processingStartedAt: entry.processing_started_at ? new Date(entry.processing_started_at) : null,
@@ -260,6 +261,7 @@ export class PostgresDatabase implements IDatabase {
       if (patch.iteration_steps !== undefined) data.iterationSteps = patch.iteration_steps;
       if (patch.video_duration !== undefined) data.videoDuration = patch.video_duration;
       if (patch.video_resolution !== undefined) data.videoResolution = patch.video_resolution;
+      if (patch.additional_options !== undefined) data.additionalOptions = patch.additional_options;
       if (patch.lora_weights !== undefined) data.loraWeights = patch.lora_weights;
       if (patch.seed !== undefined) data.seed = patch.seed;
       // Note: likes are handled via toggleLike method now
@@ -834,6 +836,7 @@ export class PostgresDatabase implements IDatabase {
       iteration_steps: video.iterationSteps ?? undefined,
       video_duration: video.videoDuration ?? undefined,
       video_resolution: video.videoResolution || undefined,
+      additional_options: video.additionalOptions || undefined,
       lora_weights: video.loraWeights || undefined,
       seed: video.seed ?? undefined,
       likes: [], // Deprecated - use getLikeCount() and isVideoLikedByUser() instead

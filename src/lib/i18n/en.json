@@ -179,6 +179,10 @@
     "processingCompleted": "Processing Completed",
     "status": "Status",
     "workflow": "Workflow",
+    "iterationSteps": "Iteration Steps",
+    "steps": "steps",
+    "duration": "Duration",
+    "resolution": "Resolution",
     "lorasUsed": "LoRAs Used",
     "noVideoAvailable": "No video available",
     "unknownAuthor": "Unknown author",
@@ -281,6 +285,26 @@
       "standardDesc": "Standard quality",
       "hd": "720p",
       "hdDesc": "High definition (processing takes longer)"
+    },
+    "additionalOptions": {
+      "title": "Additional Options",
+      "experimental": "Experimental",
+      "motionScale": {
+        "title": "Motion Scale",
+        "enable": "Enable",
+        "intensity": "Motion intensity",
+        "slow": "Slow",
+        "normal": "Normal",
+        "fast": "Fast"
+      },
+      "freeLong": {
+        "title": "FreeLong",
+        "enable": "Enable",
+        "blendStrength": "Blend strength",
+        "detail": "Detail",
+        "balanced": "Balanced",
+        "smooth": "Smooth"
+      }
     },
     "paidOnly": "Paid",
     "loraWeights": "LoRA Weights",

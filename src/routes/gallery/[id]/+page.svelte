@@ -1,5 +1,6 @@
 <script lang="ts">
   import { _ } from 'svelte-i18n';
+  import VideoMetadata from '$lib/components/VideoMetadata.svelte';
   
   let { data } = $props<{ data: { video: any; user?: any; relatedVideos: any[]; author?: { id: string; username: string } | null; workflow?: any | null; loraPresets?: any[] } }>();
   let video = $derived(data.video);
@@ -60,14 +61,6 @@
     }
   }
   const authorName = $derived(data.author?.username ?? $_('videoDetail.unknownAuthor'));
-
-  function getLoraDisplayName(loraId: string): string {
-    const preset = data.loraPresets?.find(p => p.id === loraId);
-    if (preset?.label) return preset.label;
-    // Extract filename without path and show just the filename
-    const filename = loraId.split('/').pop() || loraId;
-    return filename;
-  }
 
   function buildGalleryUrl(id?: string) {
     if (typeof window === 'undefined') return id ? `/gallery/${id}` : '/gallery';
@@ -251,25 +244,13 @@
       <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
           <h2 class="card-title">{$_('videoDetail.info')}</h2>
-          <div class="text-sm space-y-1">
-            <p><strong>{$_('videoDetail.author')}:</strong> {authorName}</p>
-            <p><strong>{$_('videoDetail.created')}:</strong> {new Date(video.created_at).toLocaleString()}</p>
-            {#if data.workflow}
-              <p><strong>{$_('videoDetail.workflow')}:</strong> {data.workflow.name}</p>
-            {/if}
-            {#if video.lora_weights && Object.keys(video.lora_weights).length > 0}
-              <details class="mt-2">
-                <summary class="cursor-pointer font-semibold">{$_('videoDetail.lorasUsed')} ({Object.keys(video.lora_weights).length})</summary>
-                <div class="ml-4 mt-2 space-y-1">
-                  {#each Object.entries(video.lora_weights) as [loraId, weight]}
-                    <p class="text-xs">
-                      <span class="opacity-70">{getLoraDisplayName(loraId)}:</span> {weight}
-                    </p>
-                  {/each}
-                </div>
-              </details>
-            {/if}
-          </div>
+          <VideoMetadata 
+            video={video} 
+            workflow={data.workflow} 
+            loraPresets={data.loraPresets}
+            showAuthor={true}
+            authorName={authorName}
+          />
         </div>
       </div>
     </div>

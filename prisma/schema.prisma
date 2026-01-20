@@ -63,6 +63,7 @@ model Video {
   iterationSteps      Int?        @map("iteration_steps")
   videoDuration       Int?        @map("video_duration")
   videoResolution     String?     @map("video_resolution") @db.VarChar(10)
+  additionalOptions   Json?       @map("additional_options")
   loraWeights         Json?       @map("lora_weights")
   seed                Int?
   likes               VideoLike[]

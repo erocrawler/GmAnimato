@@ -70,6 +70,26 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       resolution = videoResolution as VideoResolution;
     }
 
+    // Extract motion scale (0.5 to 2.0) - optional experimental feature
+    const motionScaleRaw = body?.motionScale;
+    let motionScale: number | undefined;
+    if (motionScaleRaw !== undefined && motionScaleRaw !== null) {
+      const parsed = Number(motionScaleRaw);
+      if (Number.isFinite(parsed) && parsed >= 0.5 && parsed <= 2.0) {
+        motionScale = parsed;
+      }
+    }
+
+    // Extract freeLong blend strength (0 to 1) - optional experimental feature
+    const freeLongBlendStrengthRaw = body?.freeLongBlendStrength;
+    let freeLongBlendStrength: number | undefined;
+    if (freeLongBlendStrengthRaw !== undefined && freeLongBlendStrengthRaw !== null) {
+      const parsed = Number(freeLongBlendStrengthRaw);
+      if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) {
+        freeLongBlendStrength = parsed;
+      }
+    }
+
     // Get admin settings for thresholds
     const settings = await getAdminSettings();
 
@@ -120,6 +140,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       iteration_steps: iterationSteps,
       video_duration: videoDuration,
       video_resolution: resolution,
+      additional_options: {
+        motion_scale: motionScale,
+        freelong_blend_strength: freeLongBlendStrength
+      },
       lora_weights: filteredLoraWeights,
       seed: seed
     };
@@ -321,6 +345,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
               iterationSteps: video.iteration_steps as any,
               videoDuration: video.video_duration as any,
               videoResolution: video.video_resolution as any,
+              motionScale: video.additional_options?.motion_scale as any,
+              freeLongBlendStrength: video.additional_options?.freelong_blend_strength as any,
               loraWeights: video.lora_weights as any,
               loraPresets: settings.loraPresets,
               workflow: (await getWorkflowById(video.workflow_id!) || await getDefaultWorkflow('fl2v'))!,
@@ -335,6 +361,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
               iterationSteps: video.iteration_steps as any,
               videoDuration: video.video_duration as any,
               videoResolution: video.video_resolution as any,
+              motionScale: video.additional_options?.motion_scale as any,
+              freeLongBlendStrength: video.additional_options?.freelong_blend_strength as any,
               loraWeights: video.lora_weights as any,
               loraPresets: settings.loraPresets,
               workflow: (await getWorkflowById(video.workflow_id!) || await getDefaultWorkflow('i2v'))!,

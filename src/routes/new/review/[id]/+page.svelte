@@ -48,12 +48,32 @@
   type IterationSteps = 4 | 6;
   let stepOptions: { value: IterationSteps; label: string; description: string; requiresPaid?: boolean }[] = [];
 
-  let iterationSteps: IterationSteps = (entry.iteration_steps as IterationSteps) || 4;
-  
+  // Check if entry has non-default values (indicating it's a previously saved video)
+  const hasExistingSettings = entry.iteration_steps || entry.video_duration || entry.video_resolution || 
+                               entry.additional_options?.motion_scale !== undefined || 
+                               entry.additional_options?.freelong_blend_strength !== undefined ||
+                               entry.lora_weights;
+
+  // Load from localStorage if no existing settings
+  let savedSettings: any = null;
+  if (!hasExistingSettings && typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('video_generation_settings');
+      if (saved) {
+        savedSettings = JSON.parse(saved);
+      }
+    } catch (err) {
+      console.error('Failed to load settings from localStorage:', err);
+    }
+  }
+
   type VideoDuration = 4 | 6;
   type VideoResolution = '480p' | '720p';
-  let videoDuration: VideoDuration = (entry.video_duration as VideoDuration) || 4;
-  let videoResolution: VideoResolution = (entry.video_resolution as VideoResolution) || '480p';
+  let iterationSteps: IterationSteps = (entry.iteration_steps as IterationSteps) || (savedSettings?.iterationSteps as IterationSteps) || 4;
+  let videoDuration: VideoDuration = (entry.video_duration as VideoDuration) || (savedSettings?.videoDuration as VideoDuration) || 4;
+  let videoResolution: VideoResolution = (entry.video_resolution as VideoResolution) || (savedSettings?.videoResolution as VideoResolution) || '480p';
+  let motionScale: number | undefined = entry.additional_options?.motion_scale ?? savedSettings?.motionScale; // 0.5 to 2.0
+  let freeLongBlendStrength: number | undefined = entry.additional_options?.freelong_blend_strength ?? savedSettings?.freeLongBlendStrength; // 0 to 1
   
   let resolutionOptions: { value: VideoResolution; label: string; description: string; requiresPaid?: boolean }[] = [
     { value: '480p', label: '', description: '', requiresPaid: false },
@@ -87,17 +107,24 @@
 
 
   // Track enabled state for each LoRA - initialize with LORA_PRESETS
-  let loraEnabled: Record<string, boolean> = Object.fromEntries(
-    LORA_PRESETS.map((lora) => [
-      lora.id,
-      lora.isConfigurable === false
-        ? true
-        : lora.enabled !== undefined
-          ? lora.enabled
-          : true
-    ])
-  );
-  let loraWeights: Record<string, number> = entry.lora_weights || Object.fromEntries(
+  let loraEnabled: Record<string, boolean> = entry.lora_weights 
+    ? Object.fromEntries(
+        LORA_PRESETS.map((lora) => [
+          lora.id,
+          entry.lora_weights?.[lora.id] !== undefined
+        ])
+      )
+    : (savedSettings?.loraEnabled || Object.fromEntries(
+        LORA_PRESETS.map((lora) => [
+          lora.id,
+          lora.isConfigurable === false
+            ? true
+            : lora.enabled !== undefined
+              ? lora.enabled
+              : true
+        ])
+      ));
+  let loraWeights: Record<string, number> = entry.lora_weights || savedSettings?.loraWeights || Object.fromEntries(
     LORA_PRESETS.map((lora) => [lora.id, lora.default])
   );
 
@@ -206,8 +233,19 @@
         
         // Fallback to default workflow if no valid saved workflow
         if (!selectedWorkflowId) {
-          const defaultWorkflow = workflowsForType.find(w => w.isDefault);
-          selectedWorkflowId = defaultWorkflow?.id || (workflowsForType[0]?.id || '');
+          // Try loading from localStorage if no entry workflow
+          if (savedSettings?.selectedWorkflowId && !entry.workflow_id) {
+            const savedWorkflow = workflowsForType.find(w => w.id === savedSettings.selectedWorkflowId);
+            if (savedWorkflow) {
+              selectedWorkflowId = savedWorkflow.id;
+            }
+          }
+          
+          // Final fallback to default workflow
+          if (!selectedWorkflowId) {
+            const defaultWorkflow = workflowsForType.find(w => w.isDefault);
+            selectedWorkflowId = defaultWorkflow?.id || (workflowsForType[0]?.id || '');
+          }
         }
       }
     } catch (err) {
@@ -250,6 +288,44 @@
       clearInterval(pollInterval);
     }
   });
+
+  // Save settings to localStorage whenever they change
+  function saveSettingsToLocalStorage() {
+    if (typeof window === 'undefined') return;
+    
+    try {
+      const settings = {
+        iterationSteps,
+        videoDuration,
+        videoResolution,
+        motionScale,
+        freeLongBlendStrength,
+        loraEnabled,
+        loraWeights,
+        selectedWorkflowId
+      };
+      localStorage.setItem('video_generation_settings', JSON.stringify(settings));
+    } catch (err) {
+      console.error('Failed to save settings to localStorage:', err);
+    }
+  }
+
+  // Watch for changes and save to localStorage
+  $: if (iterationSteps || videoDuration || videoResolution) {
+    saveSettingsToLocalStorage();
+  }
+  
+  $: if (motionScale !== undefined || freeLongBlendStrength !== undefined) {
+    saveSettingsToLocalStorage();
+  }
+  
+  $: if (loraEnabled || loraWeights) {
+    saveSettingsToLocalStorage();
+  }
+  
+  $: if (selectedWorkflowId) {
+    saveSettingsToLocalStorage();
+  }
 
 
   function updateLoraWeight(id: string, value: number) {
@@ -329,7 +405,9 @@
           loraWeights: filteredLoraWeights,
           iterationSteps,
           videoDuration,
-          videoResolution
+          videoResolution,
+          motionScale,
+          freeLongBlendStrength
         }),
       });
       
@@ -685,6 +763,92 @@
                 />
               </div>
             {/each}
+          </div>
+          
+          <div class="divider"></div>
+          
+          <!-- Additional Options -->
+          <div class="space-y-3 mb-6">
+            <h3 class="font-semibold flex items-center gap-2">
+              {$_('review.additionalOptions.title')}
+              <span class="badge badge-xs badge-warning">{$_('review.additionalOptions.experimental')}</span>
+            </h3>
+            
+            <!-- Motion Scale -->
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-sm">{$_('review.additionalOptions.motionScale.title')}</span>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <span class="text-xs opacity-70">{$_('review.additionalOptions.motionScale.enable')}</span>
+                  <input
+                    type="checkbox"
+                    class="toggle toggle-primary toggle-xs"
+                    checked={motionScale !== undefined}
+                    on:change={() => motionScale = motionScale === undefined ? 1.0 : undefined}
+                    disabled={!isEditable}
+                  />
+                </label>
+              </div>
+              {#if motionScale !== undefined}
+                <div class="pl-4 border-l-2 border-base-300">
+                  <div class="flex items-center gap-2 text-xs mb-1">
+                    <span class="opacity-60">{$_('review.additionalOptions.motionScale.intensity')}</span>
+                    <span class="font-mono opacity-70">{motionScale.toFixed(1)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={2.0}
+                    step={0.1}
+                    value={motionScale}
+                    on:input={(event) => motionScale = +event.currentTarget.value}
+                    disabled={!isEditable}
+                    class="range range-xs range-primary"
+                  />
+                  <div class="text-xs opacity-60 mt-1">
+                    {$_('review.additionalOptions.motionScale.slow')} (0.5) ← {$_('review.additionalOptions.motionScale.normal')} (1.0) → {$_('review.additionalOptions.motionScale.fast')} (2.0)
+                  </div>
+                </div>
+              {/if}
+            </div>
+            
+            <!-- FreeLong -->
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-sm">{$_('review.additionalOptions.freeLong.title')}</span>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <span class="text-xs opacity-70">{$_('review.additionalOptions.freeLong.enable')}</span>
+                  <input
+                    type="checkbox"
+                    class="toggle toggle-primary toggle-xs"
+                    checked={freeLongBlendStrength !== undefined}
+                    on:change={() => freeLongBlendStrength = freeLongBlendStrength === undefined ? 0.8 : undefined}
+                    disabled={!isEditable}
+                  />
+                </label>
+              </div>
+              {#if freeLongBlendStrength !== undefined}
+                <div class="pl-4 border-l-2 border-base-300">
+                  <div class="flex items-center gap-2 text-xs mb-1">
+                    <span class="opacity-60">{$_('review.additionalOptions.freeLong.blendStrength')}</span>
+                    <span class="font-mono opacity-70">{freeLongBlendStrength.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={freeLongBlendStrength}
+                    on:input={(event) => freeLongBlendStrength = +event.currentTarget.value}
+                    disabled={!isEditable}
+                    class="range range-xs range-primary"
+                  />
+                  <div class="text-xs opacity-60 mt-1">
+                    {$_('review.additionalOptions.freeLong.detail')} (0) ← {$_('review.additionalOptions.freeLong.balanced')} (0.8) → {$_('review.additionalOptions.freeLong.smooth')} (1.0)
+                  </div>
+                </div>
+              {/if}
+            </div>
           </div>
         </div>
       </div>

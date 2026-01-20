@@ -181,3 +181,55 @@ export function add720pUpscaleNodes(
   workflow.input.node_weights[upscaleNodeId] = 8.0;
   workflow.input.node_weights[resizeNodeId] = 2.0;
 }
+
+/**
+ * Add WanMotionScale node to workflow if motion scale value is provided
+ * @param workflow The workflow object
+ * @param motionScale Optional motion scale value (0.5 to 2.0)
+ */
+export function addMotionScaleNode(workflow: any, motionScale?: number): void {
+  if (motionScale !== undefined) {
+    const motionScaleValue = Math.max(0.5, Math.min(2.0, motionScale));
+    workflow.input.workflow['996:motionscale'] = {
+      inputs: {
+        enabled: true,
+        scale_t: motionScaleValue,
+        scale_y: 1,
+        scale_x: 1
+      },
+      class_type: 'WanMotionScale',
+      _meta: {
+        title: 'Wan Motion Scale (Experimental)'
+      }
+    };
+  }
+}
+
+/**
+ * Add WanFreeLong node to workflow if blend strength is provided
+ * @param workflow The workflow object
+ * @param blendStrength Optional blend strength (0 to 1), default 0.8. 0 = off, 1 = full
+ * @param totalFrames Total number of frames in the video (for calculating local_window_frames)
+ */
+export function addFreeLongNode(workflow: any, blendStrength?: number, totalFrames: number = 81): void {
+  if (blendStrength !== undefined) {
+    const clampedStrength = Math.max(0, Math.min(1, blendStrength));
+    // Calculate local_window_frames as 40% of total frames, rounded to nearest integer
+    const localWindowFrames = Math.round(totalFrames * 0.4);
+    
+    workflow.input.workflow['995:freelong'] = {
+      inputs: {
+        enabled: true,
+        blend_strength: clampedStrength,
+        low_freq_ratio: 0.8,
+        local_window_frames: localWindowFrames,
+        blend_start_block: 0,
+        blend_end_block: -1
+      },
+      class_type: 'WanFreeLong',
+      _meta: {
+        title: 'Wan FreeLong'
+      }
+    };
+  }
+}

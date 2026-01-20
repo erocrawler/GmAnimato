@@ -27,6 +27,11 @@ export type VideoEntry = {
   iteration_steps?: number; // 4, 6, or 8 steps
   video_duration?: number; // 4 or 6 seconds
   video_resolution?: string; // '480p' or '720p'
+  additional_options?: {
+    motion_scale?: number; // Motion scale (0.5 to 2.0)
+    freelong_blend_strength?: number; // FreeLong blend strength (0 to 1)
+    // Add future options here without DB migration
+  };
   lora_weights?: Record<string, number>; // LoRA weights for customization
   seed?: number; // Random seed for reproducibility
   likes?: string[]; // Array of user_ids who liked this video

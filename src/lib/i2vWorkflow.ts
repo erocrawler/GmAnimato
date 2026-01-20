@@ -4,7 +4,7 @@ import probe from 'probe-image-size';
 import type { LoraPreset } from './loraPresets';
 import type { Workflow } from './IDatabase';
 import { normalizeLoraPresets } from './loraPresets';
-import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes, DEFAULT_NEGATIVE_PROMPT } from './workflowUtils';
+import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes, addMotionScaleNode, addFreeLongNode, DEFAULT_NEGATIVE_PROMPT } from './workflowUtils';
 
 interface WorkflowParams {
   image_name: string;
@@ -17,6 +17,8 @@ interface WorkflowParams {
   videoResolution?: '480p' | '720p';
   loraWeights?: Record<string, number>;
   loraPresets?: LoraPreset[];
+  motionScale?: number; // 0.5 to 2.0, optional
+  freeLongBlendStrength?: number; // 0 to 1, optional (0 = off, 1 = full)
   workflow?: Workflow;
 }
 
@@ -239,6 +241,12 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
       lowTeaCacheInputs.model = [lowPrevNodeId, 0];
     }
   }
+
+  // Add WanMotionScale node if motion scale is requested (0.5-2.0)
+  addMotionScaleNode(workflow, params.motionScale);
+
+  // Add WanFreeLong node if blend strength is requested (0-1)
+  addFreeLongNode(workflow, params.freeLongBlendStrength, frames);
 
   return workflow;
 }

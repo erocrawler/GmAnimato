@@ -2,6 +2,7 @@
   import { goto } from '$app/navigation';
   import { _ } from 'svelte-i18n';
   import { createStatusTranslations, getTranslatedStatus } from '$lib/videoStatus';
+  import VideoMetadata from '$lib/components/VideoMetadata.svelte';
   
   let { data } = $props<{ data: { video: any; user: any; workflow?: any | null; loraPresets?: any[] } }>();
   let video = $derived(data.video);
@@ -11,14 +12,6 @@
 
   const statusMap = $derived(createStatusTranslations((key) => $_(key)));
   const translatedStatus = $derived(getTranslatedStatus(video.status, statusMap));
-
-  function getLoraDisplayName(loraId: string): string {
-    const preset = data.loraPresets?.find(p => p.id === loraId);
-    if (preset?.label) return preset.label;
-    // Extract filename without path and show just the filename
-    const filename = loraId.split('/').pop() || loraId;
-    return filename;
-  }
 
   async function togglePublish() {
     publishing = true;
@@ -333,35 +326,11 @@
       <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
           <h2 class="card-title">{$_('videoDetail.info')}</h2>
-          <div class="text-sm space-y-1">
-            <p><strong>{$_('videoDetail.created')}:</strong> {new Date(video.created_at).toLocaleString()}</p>
-            {#if video.processing_started_at}
-              <p><strong>{$_('videoDetail.processingStarted')}:</strong> {new Date(video.processing_started_at).toLocaleString()}</p>
-            {/if}
-            {#if video.processing_started_at && video.processing_time_ms}
-              {@const completedAt = new Date(new Date(video.processing_started_at).getTime() + video.processing_time_ms)}
-              <p><strong>{$_('videoDetail.processingCompleted')}:</strong> {completedAt.toLocaleString()}</p>
-            {/if}
-            <p><strong>{$_('videoDetail.status')}:</strong> {translatedStatus}</p>
-            {#if video.is_published}
-              <p><strong>{$_('videoDetail.published')}:</strong> {$_('common.yes')}</p>
-            {/if}
-            {#if data.workflow}
-              <p><strong>{$_('videoDetail.workflow')}:</strong> {data.workflow.name}</p>
-            {/if}
-            {#if video.lora_weights && Object.keys(video.lora_weights).length > 0}
-              <details class="mt-2">
-                <summary class="cursor-pointer font-semibold">{$_('videoDetail.lorasUsed')} ({Object.keys(video.lora_weights).length})</summary>
-                <div class="ml-4 mt-2 space-y-1">
-                  {#each Object.entries(video.lora_weights) as [loraId, weight]}
-                    <p class="text-xs">
-                      <span class="opacity-70">{getLoraDisplayName(loraId)}:</span> {weight}
-                    </p>
-                  {/each}
-                </div>
-              </details>
-            {/if}
-          </div>
+          <VideoMetadata 
+            video={video} 
+            workflow={data.workflow} 
+            loraPresets={data.loraPresets}
+          />
         </div>
       </div>
     </div>

@@ -178,6 +178,10 @@
     "processingCompleted": "完成时间",
     "status": "状态",
     "workflow": "工作流",
+    "iterationSteps": "迭代步数",
+    "steps": "步",
+    "duration": "时长",
+    "resolution": "分辨率",
     "lorasUsed": "使用的LoRA",
     "noVideoAvailable": "没有可用视频",
     "unknownAuthor": "未知作者",
@@ -280,6 +284,26 @@
       "standardDesc": "标准质量",
       "hd": "720p",
       "hdDesc": "高清（处理时间较长）"
+    },
+    "additionalOptions": {
+      "title": "附加选项",
+      "experimental": "实验性",
+      "motionScale": {
+        "title": "运动加速",
+        "enable": "启用",
+        "intensity": "运动强度",
+        "slow": "慢速",
+        "normal": "正常",
+        "fast": "快速"
+      },
+      "freeLong": {
+        "title": "长视频优化",
+        "enable": "启用",
+        "blendStrength": "控制强度（控制越强越连贯，减少回弹，但细节越少）",
+        "detail": "细节",
+        "balanced": "平衡",
+        "smooth": "流畅"
+      }
     },
     "paidOnly": "付费",
     "loraWeights": "LoRA权重",
