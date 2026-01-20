@@ -290,20 +290,20 @@
   });
 
   // Automatically save settings to localStorage whenever any setting changes
+  // Access variables first to ensure Svelte tracks them
+  $: settings = {
+    iterationSteps,
+    videoDuration,
+    videoResolution,
+    motionScale,
+    freeLongBlendStrength,
+    loraEnabled,
+    loraWeights,
+    selectedWorkflowId
+  };
+  
+  // Save to localStorage whenever settings change
   $: if (typeof window !== 'undefined') {
-    // This reactive statement will trigger whenever any of these variables change
-    // Using a block with dependency tracking ensures all changes are captured
-    const settings = {
-      iterationSteps,
-      videoDuration,
-      videoResolution,
-      motionScale,
-      freeLongBlendStrength,
-      loraEnabled,
-      loraWeights,
-      selectedWorkflowId
-    };
-    
     try {
       localStorage.setItem('video_generation_settings', JSON.stringify(settings));
     } catch (err) {
