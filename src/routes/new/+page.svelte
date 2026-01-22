@@ -19,11 +19,23 @@
   let message = '';
   let messageType: 'success' | 'error' = 'error';
   let formElement: HTMLFormElement;
+  let imageInput: HTMLInputElement;
+  let firstImageInput: HTMLInputElement;
+  let lastImageInput: HTMLInputElement;
   let isDraggingOver = false;
   let dragCounter = 0;
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
   let lastDragoverTimestamp = 0;
   let dragoverCheckInterval: ReturnType<typeof setInterval> | null = null;
+
+  function setFileInput(inputEl: HTMLInputElement | undefined, file: File | null) {
+    if (!inputEl) return;
+    const dt = new DataTransfer();
+    if (file) {
+      dt.items.add(file);
+    }
+    inputEl.files = dt.files;
+  }
 
   function swapImages() {
     // Swap the file objects
@@ -40,6 +52,10 @@
     const tempValid = validFirstFile;
     validFirstFile = validLastFile;
     validLastFile = tempValid;
+
+    // Keep the underlying file inputs in sync
+    setFileInput(firstImageInput, firstImageFile);
+    setFileInput(lastImageInput, lastImageFile);
   }
 
   function resetDragStates() {
@@ -59,6 +75,9 @@
     validFirstFile = false;
     validLastFile = false;
     message = '';
+    setFileInput(imageInput, null);
+    setFileInput(firstImageInput, null);
+    setFileInput(lastImageInput, null);
   }
 
   function onFile(e: Event) {
@@ -288,21 +307,25 @@
       }
 
       console.log('File validation passed, setting file for:', inputType);
+
       if (inputType === 'image') {
         imageFile = file;
         validFile = true;
+        setFileInput(imageInput, file);
         const reader = new FileReader();
         reader.onload = () => (preview = String(reader.result));
         reader.readAsDataURL(file);
       } else if (inputType === 'first_image') {
         firstImageFile = file;
         validFirstFile = true;
+        setFileInput(firstImageInput, file);
         const reader = new FileReader();
         reader.onload = () => (firstPreview = String(reader.result));
         reader.readAsDataURL(file);
       } else if (inputType === 'last_image') {
         lastImageFile = file;
         validLastFile = true;
+        setFileInput(lastImageInput, file);
         const reader = new FileReader();
         reader.onload = () => (lastPreview = String(reader.result));
         reader.readAsDataURL(file);
@@ -384,7 +407,7 @@
           <div class="label">
             <span class="label-text font-semibold">{$_('newVideo.mode.title')}</span>
           </div>
-          <div class="flex gap-4">
+          <div class="flex flex-col sm:flex-row gap-4">
             <label class="label cursor-pointer gap-2 flex-1 border rounded-lg p-4" class:border-primary={mode === 'i2v'} class:bg-base-200={mode === 'i2v'}>
               <input type="radio" name="mode" value="i2v" bind:group={mode} on:change={onModeChange} class="radio radio-primary" />
               <div class="flex-1">
@@ -414,7 +437,9 @@
               name="image" 
               type="file" 
               accept="image/*" 
-              on:change={onFile} 
+              bind:this={imageInput}
+              on:change={onFile}
+              on:drop={(e) => { e.preventDefault(); e.stopPropagation(); const file = e.dataTransfer?.files?.[0]; if (file) handleFileInput(file, 'image'); }}
               class="file-input file-input-bordered file-input-primary w-full"
               required 
             />
@@ -440,7 +465,9 @@
                 name="first_image" 
                 type="file" 
                 accept="image/*" 
-                on:change={onFirstFile} 
+                bind:this={firstImageInput}
+                on:change={onFirstFile}
+                on:drop={(e) => { e.preventDefault(); e.stopPropagation(); const file = e.dataTransfer?.files?.[0]; if (file) handleFileInput(file, 'first_image'); }}
                 class="file-input file-input-bordered file-input-primary w-full"
                 required 
               />
@@ -461,7 +488,9 @@
                 name="last_image" 
                 type="file" 
                 accept="image/*" 
-                on:change={onLastFile} 
+                bind:this={lastImageInput}
+                on:change={onLastFile}
+                on:drop={(e) => { e.preventDefault(); e.stopPropagation(); const file = e.dataTransfer?.files?.[0]; if (file) handleFileInput(file, 'last_image'); }}
                 class="file-input file-input-bordered file-input-primary w-full"
                 required 
               />
