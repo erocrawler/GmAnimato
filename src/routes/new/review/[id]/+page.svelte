@@ -130,22 +130,25 @@
 
   // Update loraEnabled and loraWeights when filteredLoraPresets changes
   $: if (filteredLoraPresets && Array.isArray(filteredLoraPresets)) {
-    loraEnabled = Object.fromEntries(
-      filteredLoraPresets.map((lora) => [
-        lora.id,
-        loraEnabled[lora.id] !== undefined
-          ? loraEnabled[lora.id]
-          : (lora.isConfigurable === false
-            ? true
-            : lora.enabled !== undefined
-              ? lora.enabled
-              : true
-          )
-      ])
-    );
-    loraWeights = Object.fromEntries(
-      filteredLoraPresets.map((lora) => [lora.id, loraWeights[lora.id] ?? lora.default])
-    );
+    // Preserve existing states, only add missing ones
+    const newLoraEnabled = { ...loraEnabled };
+    const newLoraWeights = { ...loraWeights };
+    
+    filteredLoraPresets.forEach((lora) => {
+      if (newLoraEnabled[lora.id] === undefined) {
+        newLoraEnabled[lora.id] = lora.isConfigurable === false
+          ? true
+          : lora.enabled !== undefined
+            ? lora.enabled
+            : true;
+      }
+      if (newLoraWeights[lora.id] === undefined) {
+        newLoraWeights[lora.id] = lora.default;
+      }
+    });
+    
+    loraEnabled = newLoraEnabled;
+    loraWeights = newLoraWeights;
   }
 
   $: isEditable = entry.status !== 'processing' && entry.status !== 'completed' && entry.status !== 'in_queue' && entry.status !== 'failed' && entry.status !== 'deleted';

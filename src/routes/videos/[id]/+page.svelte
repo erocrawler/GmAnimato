@@ -111,17 +111,25 @@
       alert($_('videoDetail.deleteError') + ': ' + err);
     }
   }
+
+  function goBack() {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      goto('/videos');
+    }
+  }
 </script>
 
 <div class="max-w-5xl mx-auto">
   <div class="flex justify-between items-center mb-8">
     <div>
-      <a href="/videos" class="btn btn-ghost btn-sm mb-2">
+      <button onclick={goBack} class="btn btn-ghost btn-sm mb-2">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
         </svg>
         {$_('videoDetail.backToMyVideos')}
-      </a>
+      </button>
       <h1 class="text-4xl font-bold">{$_('videoDetail.title')}</h1>
     </div>
     <div class="badge badge-lg" 
