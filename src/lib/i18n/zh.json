@@ -212,6 +212,8 @@
     "preview": "预览",
     "startProcessing": "开始处理",
     "uploading": "上传中...",
+    "dragAndDrop": "将图像拖到此处",
+    "swapImages": "交换首尾帧",
     "mode": {
       "title": "生成模式",
       "i2v": {
@@ -253,6 +255,7 @@
     "promptHelp": "编辑或输入您的自定义提示词（支持中英文）。点击上方建议即可使用。",
     "promptPlaceholder": "描述您希望视频的样子...",
     "advancedSettings": "高级设置",
+    "resetAll": "重置为默认值",
     "workflow": {
       "title": "工作流",
       "help": "选择AI模型和视频生成工作流"

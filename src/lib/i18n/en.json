@@ -213,6 +213,8 @@
     "preview": "Preview",
     "startProcessing": "Start Processing",
     "uploading": "Uploading...",
+    "dragAndDrop": "Drop your image here",
+    "swapImages": "Swap First & Last Frame",
     "mode": {
       "title": "Generation Mode",
       "i2v": {
@@ -254,6 +256,7 @@
     "promptHelp": "Edit or enter your custom prompt in English or Chinese. Click a suggestion above to use it.",
     "promptPlaceholder": "Describe how you want your video to look...",
     "advancedSettings": "Advanced Settings",
+    "resetAll": "Reset All to Defaults",
     "workflow": {
       "title": "Workflow",
       "help": "Select the AI model and workflow for video generation"

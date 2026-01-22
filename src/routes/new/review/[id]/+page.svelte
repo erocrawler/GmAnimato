@@ -342,6 +342,21 @@
     );
   }
 
+  function resetAdvancedSettings() {
+    iterationSteps = 4;
+    videoDuration = 4;
+    videoResolution = '480p';
+    motionScale = undefined;
+    freeLongBlendStrength = undefined;
+    resetLoraWeights();
+    
+    // Reset to default workflow for current type
+    const defaultWorkflow = filteredWorkflows.find(w => w.isDefault);
+    if (defaultWorkflow) {
+      selectedWorkflowId = defaultWorkflow.id;
+    }
+  }
+
   const {
     elements: { root, input, tag, deleteTrigger, edit },
     states: { tags },
@@ -591,9 +606,20 @@
       <div class="collapse collapse-arrow bg-base-200">
         <input type="checkbox" bind:checked={showAdvancedSettings} />
         <div class="collapse-title text-lg font-medium">
-          {$_('review.advancedSettings')}
+          <span>{$_('review.advancedSettings')}</span>
         </div>
         <div class="collapse-content">
+          {#if showAdvancedSettings}
+            <div class="flex justify-end mb-4">
+              <button 
+                class="btn btn-ghost btn-sm"
+                on:click={resetAdvancedSettings}
+                disabled={!isEditable}
+              >
+                {$_('review.resetAll')}
+              </button>
+            </div>
+          {/if}
           {#if !loadingWorkflows}
             <div class="space-y-4 mb-6">
               <div class="flex items-center justify-between">
