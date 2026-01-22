@@ -135,12 +135,14 @@
     const newLoraWeights = { ...loraWeights };
     
     filteredLoraPresets.forEach((lora) => {
-      if (newLoraEnabled[lora.id] === undefined) {
-        newLoraEnabled[lora.id] = lora.isConfigurable === false
-          ? true
-          : lora.enabled !== undefined
-            ? lora.enabled
-            : true;
+      // Always enable required LoRAs (isConfigurable === false) to fix bug where
+      // they could remain disabled when switching between workflows
+      if (lora.isConfigurable === false) {
+        newLoraEnabled[lora.id] = true;
+      } else if (newLoraEnabled[lora.id] === undefined) {
+        newLoraEnabled[lora.id] = lora.enabled !== undefined
+          ? lora.enabled
+          : true;
       }
       if (newLoraWeights[lora.id] === undefined) {
         newLoraWeights[lora.id] = lora.default;
