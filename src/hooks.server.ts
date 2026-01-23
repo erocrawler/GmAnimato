@@ -274,7 +274,6 @@ export const handle: Handle = async ({ event, resolve }) => {
     '/',
     '/login',
     '/api/auth',
-    '/gallery',
     '/api/logout',
     '/api/i2v-webhook',
     '/api/worker/task',

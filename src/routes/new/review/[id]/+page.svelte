@@ -1,8 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { page } from "$app/stores";
   import { goto } from "$app/navigation";
-  import { _, locale } from 'svelte-i18n';
+  import { _ } from 'svelte-i18n';
   import { get } from 'svelte/store';
   import { createTagsInput, melt } from '@melt-ui/svelte';
   import { DEFAULT_LORA_PRESETS } from '$lib/loraPresets';
@@ -188,7 +187,7 @@
 
         // If job is completed, redirect to videos page
         if (statusData.status === 'completed') {
-          await goto('/videos');
+          await goto(`/videos/${entry.id}?returnTo=/videos`);
         }
       }
     } catch (err) {
@@ -204,7 +203,6 @@
       
       if (res.ok) {
         const result = await res.json();
-        console.log('Retry initiated:', result);
         message = get(_)('review.jobResubmitted');
         // Update status from server response
         if (result.status) {
@@ -231,29 +229,27 @@
     // Initialize workflow selection from loaded data
     const workflowsForType = workflows.filter(w => w.workflowType === videoWorkflowType);
     
-    // Use workflow_id from entry if available and matches current type
-    if (entry.workflow_id) {
+    // For editable entries, prefer localStorage (user's last choice)
+    // For processing/completed entries, respect the entry's workflow_id
+    if (isEditable && savedSettings?.selectedWorkflowId) {
+      const savedWorkflow = workflowsForType.find(w => w.id === savedSettings.selectedWorkflowId);
+      if (savedWorkflow) {
+        selectedWorkflowId = savedWorkflow.id;
+      }
+    }
+    
+    // Fallback to entry.workflow_id if we haven't set one yet
+    if (!selectedWorkflowId && entry.workflow_id) {
       const savedWorkflow = workflowsForType.find(w => w.id === entry.workflow_id);
       if (savedWorkflow) {
         selectedWorkflowId = savedWorkflow.id;
       }
     }
     
-    // Fallback to default workflow if no valid saved workflow
+    // Final fallback to default workflow
     if (!selectedWorkflowId) {
-      // Try loading from localStorage if no entry workflow
-      if (savedSettings?.selectedWorkflowId && !entry.workflow_id) {
-        const savedWorkflow = workflowsForType.find(w => w.id === savedSettings.selectedWorkflowId);
-        if (savedWorkflow) {
-          selectedWorkflowId = savedWorkflow.id;
-        }
-      }
-      
-      // Final fallback to default workflow
-      if (!selectedWorkflowId) {
-        const defaultWorkflow = workflowsForType.find(w => w.isDefault);
-        selectedWorkflowId = defaultWorkflow?.id || (workflowsForType[0]?.id || '');
-      }
+      const defaultWorkflow = workflowsForType.find(w => w.isDefault);
+      selectedWorkflowId = defaultWorkflow?.id || (workflowsForType[0]?.id || '');
     }
 
 
@@ -273,7 +269,7 @@
     // Redirect to video details if already completed
     if (entry.status === 'completed') {
       setInterval(() => {
-        goto(`/videos/${entry.id}`);
+        goto(`/videos/${entry.id}?returnTo=/videos`);
       }, 1000); // wait 1 second before redirecting, otherwise the entry may not be ready
       return;
     }

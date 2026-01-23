@@ -9,6 +9,8 @@ interface GrokVisionResponse {
   is_nsfw: boolean;
 }
 
+const GROK_VERSION = 'grok-4-1-fast-non-reasoning';
+
 export async function annotateImage(
   filePath: string,
   grokApiKey?: string,
@@ -43,6 +45,49 @@ export async function annotateImage(
   return {
     tags: [],
     suggested_prompts: [],
+    is_photo_realistic: undefined,
+    is_nsfw: undefined,
+  };
+}
+
+export async function evaluatePromptProperties(
+  editedPrompt: string,
+  grokApiKey?: string,
+  imagePath?: string,
+  originalPrompts?: string[]
+): Promise<{ 
+  is_photo_realistic?: boolean;
+  is_nsfw?: boolean;
+}> {
+  // If no API key or the prompt hasn't changed, skip re-evaluation
+  if (!grokApiKey || !editedPrompt) {
+    return {
+      is_photo_realistic: undefined,
+      is_nsfw: undefined,
+    };
+  }
+
+  // Check if prompt was actually edited (different from suggestions)
+  if (originalPrompts && originalPrompts.some(p => p === editedPrompt)) {
+    return {
+      is_photo_realistic: undefined,
+      is_nsfw: undefined,
+    };
+  }
+
+  try {
+    const result = await evaluatePromptWithGrok(editedPrompt, grokApiKey, imagePath);
+    if (result) {
+      return {
+        is_photo_realistic: result.is_photo_realistic,
+        is_nsfw: result.is_nsfw,
+      };
+    }
+  } catch (error) {
+    console.error('[Grok Vision] Prompt evaluation error:', error);
+  }
+
+  return {
     is_photo_realistic: undefined,
     is_nsfw: undefined,
   };
@@ -96,7 +141,7 @@ IMPORTANT:
 
   try {
     const xaiProvider = createXai({ apiKey });
-    const model = xaiProvider('grok-4-1-fast-non-reasoning');
+    const model = xaiProvider(GROK_VERSION);
     console.log(`[Grok Vision] Sending ${isFL2V ? 'FL2V (two images)' : 'I2V (single image)'} for analysis:`, imageUrl);
     
     const messageContent: Array<{ type: 'text' | 'image'; text?: string; image?: string }> = [
@@ -178,6 +223,85 @@ IMPORTANT:
     return result;
   } catch (error) {
     console.error('[Grok Vision] Request failed:', error);
+    return null;
+  }
+}
+
+async function evaluatePromptWithGrok(
+  prompt: string,
+  apiKey: string,
+  imagePath?: string
+): Promise<{ is_photo_realistic: boolean; is_nsfw: boolean } | null> {
+  const evaluationPrompt = `Analyze the following video generation prompt in context with the provided image and determine two properties:
+
+1. is_photo_realistic: Whether the prompt describes a photographic/realistic scene (true) or artistic/illustrated scene (false)
+2. is_nsfw: Whether the prompt contains or describes NSFW content (true) or is safe (false)
+
+Prompt: "${prompt}"
+
+Return ONLY a JSON object with these two boolean properties. Example:
+{"is_photo_realistic": true, "is_nsfw": false}`;
+
+  try {
+    const xaiProvider = createXai({ apiKey });
+    const model = xaiProvider(GROK_VERSION);
+    console.log('[Grok Vision] Re-evaluating prompt properties for edited prompt');
+
+    const messageContent: Array<{ type: 'text' | 'image'; text?: string; image?: string }> = [
+      {
+        type: 'text',
+        text: evaluationPrompt,
+      },
+    ];
+
+    // Add image if provided
+    if (imagePath) {
+      messageContent.push({
+        type: 'image',
+        image: imagePath,
+      });
+    }
+
+    const { text } = await generateText({
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: messageContent,
+        },
+      ],
+      temperature: 0.5,
+    });
+
+    // Parse JSON response
+    let jsonStr = text.trim();
+    if (jsonStr.startsWith('```json')) {
+      jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+    } else if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.replace(/```\n?/g, '');
+    }
+
+    let parsed: { is_photo_realistic: boolean; is_nsfw: boolean };
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (parseError) {
+      console.error('[Grok Vision] JSON parse error in prompt evaluation:', parseError);
+      console.error('[Grok Vision] Failed to parse:', jsonStr);
+      return null;
+    }
+
+    // Validate response structure
+    if (
+      typeof parsed.is_photo_realistic !== 'boolean' ||
+      typeof parsed.is_nsfw !== 'boolean'
+    ) {
+      console.error('[Grok Vision] Invalid response structure:', parsed);
+      return null;
+    }
+
+    return parsed;
+  } catch (error) {
+    console.error('[Grok Vision] Prompt evaluation request failed:', error);
     return null;
   }
 }

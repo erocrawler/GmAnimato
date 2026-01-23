@@ -264,7 +264,6 @@ export class PostgresDatabase implements IDatabase {
       if (patch.additional_options !== undefined) data.additionalOptions = patch.additional_options;
       if (patch.lora_weights !== undefined) data.loraWeights = patch.lora_weights;
       if (patch.seed !== undefined) data.seed = patch.seed;
-      // Note: likes are handled via toggleLike method now
 
       const video = await this.prisma.video.update({
         where: { id },

@@ -189,11 +189,6 @@
       e.dataTransfer.dropEffect = 'copy';
     }
     lastDragoverTimestamp = Date.now();
-    
-    if (!isDraggingOver) {
-      console.log('Drag started, mode:', mode);
-    }
-    
     dragCounter++;
     isDraggingOver = true;
   }
@@ -213,7 +208,6 @@
   }
 
   function handleDrop(e: DragEvent) {
-    console.log('handleDrop called, mode:', mode);
     e.preventDefault();
     e.stopPropagation();
     dragCounter = 0;
@@ -250,7 +244,6 @@
   }
 
   function handleDropFirstImage(e: DragEvent) {
-    console.log('handleDropFirstImage called');
     e.preventDefault();
     e.stopPropagation();
     dragCounter = 0;
@@ -259,21 +252,16 @@
 
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) {
-      console.warn('No files in drop event for first image');
       return;
     }
 
     const imageFile = Array.from(files).find((f) => f.type.startsWith('image/'));
     if (imageFile) {
-      console.log('Dropping file to first image:', imageFile.name);
       handleFileInput(imageFile, 'first_image');
-    } else {
-      console.warn('No image files found in drop');
     }
   }
 
   function handleDropLastImage(e: DragEvent) {
-    console.log('handleDropLastImage called');
     e.preventDefault();
     e.stopPropagation();
     dragCounter = 0;
@@ -282,31 +270,23 @@
 
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) {
-      console.warn('No files in drop event for last image');
       return;
     }
 
     const imageFile = Array.from(files).find((f) => f.type.startsWith('image/'));
     if (imageFile) {
-      console.log('Dropping file to last image:', imageFile.name);
       handleFileInput(imageFile, 'last_image');
-    } else {
-      console.warn('No image files found in drop');
     }
   }
 
   function handleFileInput(file: File, inputType: 'image' | 'first_image' | 'last_image') {
-    console.log('handleFileInput called with:', inputType, file.name);
     validateFile(file).then((err) => {
       if (err) {
-        console.error('File validation error:', err);
         message = err;
         messageType = 'error';
         setTimeout(() => (message = ''), 4000);
         return;
       }
-
-      console.log('File validation passed, setting file for:', inputType);
 
       if (inputType === 'image') {
         imageFile = file;

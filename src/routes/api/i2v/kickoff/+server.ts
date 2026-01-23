@@ -7,6 +7,7 @@ import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { submitJob } from '$lib/local-queue';
 import { filterLoraWeights } from '$lib/workflows';
 import { toOriginalUrl } from '$lib/serverImageUrl';
+import { evaluatePromptProperties } from '$lib/imageRecognition';
 
 async function delay(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
@@ -134,6 +135,23 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     // Generate seed for reproducibility
     const seed = Math.floor(Math.random() * 1000000);
 
+    // Re-evaluate prompt properties if prompt was edited
+    let evaluatedProperties: { is_photo_realistic?: boolean; is_nsfw?: boolean } = {};
+    if (prompt) {
+      const grokApiKey = env.GROK_API_KEY;
+      const evaluationResult = await evaluatePromptProperties(
+        prompt,
+        grokApiKey,
+        toOriginalUrl(existing.original_image_url),
+        existing.suggested_prompts || []
+      );
+      evaluatedProperties = {
+        is_photo_realistic: evaluationResult.is_photo_realistic,
+        is_nsfw: evaluationResult.is_nsfw,
+      };
+      console.log(`[I2V] Re-evaluated prompt properties - is_realistic: ${evaluatedProperties.is_photo_realistic}, is_nsfw: ${evaluatedProperties.is_nsfw}`);
+    }
+
     // Save user's settings first (before quota check) so their preferences are preserved
     const settingsPayload: any = { 
       workflow_id: workflow.id,
@@ -154,6 +172,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     
     if (tags !== undefined) {
       settingsPayload.tags = tags;
+    }
+
+    // Add re-evaluated properties to payload
+    if (evaluatedProperties.is_photo_realistic !== undefined) {
+      settingsPayload.is_photo_realistic = evaluatedProperties.is_photo_realistic;
+    }
+    if (evaluatedProperties.is_nsfw !== undefined) {
+      settingsPayload.is_nsfw = evaluatedProperties.is_nsfw;
     }
 
     await updateVideo(id, settingsPayload);

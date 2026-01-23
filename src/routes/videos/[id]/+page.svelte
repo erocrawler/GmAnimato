@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import { _ } from 'svelte-i18n';
   import { createStatusTranslations, getTranslatedStatus } from '$lib/videoStatus';
   import VideoMetadata from '$lib/components/VideoMetadata.svelte';
@@ -113,9 +114,15 @@
   }
 
   function goBack() {
-    if (window.history.length > 1) {
+    // Check if there's a returnTo query parameter (set when redirected from review page)
+    const returnTo = $page.url.searchParams.get('returnTo');
+    if (returnTo) {
+      goto(returnTo);
+    } else if (window.history.length > 1) {
+      // Use browser back if there's history available
       window.history.back();
     } else {
+      // Fallback to videos list
       goto('/videos');
     }
   }
