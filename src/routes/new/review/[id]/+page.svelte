@@ -28,10 +28,10 @@
   let quotaRemaining: number | null = null;
   let quotaLoading = true;
 
-  // Workflow management
-  let workflows: Workflow[] = [];
+  // Workflow management - initialize from loaded data
+  let workflows: Workflow[] = data.workflows || [];
   let selectedWorkflowId: string = '';
-  let loadingWorkflows = true;
+  let loadingWorkflows = false;
   
   // Detect workflow type based on video mode
   $: videoWorkflowType = entry.last_image_url ? 'fl2v' : 'i2v';
@@ -228,45 +228,34 @@
   }
 
   onMount(async () => {
-    // Fetch available workflows
-    try {
-      const res = await fetch('/api/workflows');
-      if (res.ok) {
-        workflows = await res.json();
-        // Filter workflows by type and set default workflow for this type
-        const workflowsForType = workflows.filter(w => w.workflowType === videoWorkflowType);
-        
-        // Use workflow_id from entry if available and matches current type
-        if (entry.workflow_id) {
-          const savedWorkflow = workflowsForType.find(w => w.id === entry.workflow_id);
-          if (savedWorkflow) {
-            selectedWorkflowId = savedWorkflow.id;
-          }
-        }
-        
-        // Fallback to default workflow if no valid saved workflow
-        if (!selectedWorkflowId) {
-          // Try loading from localStorage if no entry workflow
-          if (savedSettings?.selectedWorkflowId && !entry.workflow_id) {
-            const savedWorkflow = workflowsForType.find(w => w.id === savedSettings.selectedWorkflowId);
-            if (savedWorkflow) {
-              selectedWorkflowId = savedWorkflow.id;
-            }
-          }
-          
-          // Final fallback to default workflow
-          if (!selectedWorkflowId) {
-            const defaultWorkflow = workflowsForType.find(w => w.isDefault);
-            selectedWorkflowId = defaultWorkflow?.id || (workflowsForType[0]?.id || '');
-          }
+    // Initialize workflow selection from loaded data
+    const workflowsForType = workflows.filter(w => w.workflowType === videoWorkflowType);
+    
+    // Use workflow_id from entry if available and matches current type
+    if (entry.workflow_id) {
+      const savedWorkflow = workflowsForType.find(w => w.id === entry.workflow_id);
+      if (savedWorkflow) {
+        selectedWorkflowId = savedWorkflow.id;
+      }
+    }
+    
+    // Fallback to default workflow if no valid saved workflow
+    if (!selectedWorkflowId) {
+      // Try loading from localStorage if no entry workflow
+      if (savedSettings?.selectedWorkflowId && !entry.workflow_id) {
+        const savedWorkflow = workflowsForType.find(w => w.id === savedSettings.selectedWorkflowId);
+        if (savedWorkflow) {
+          selectedWorkflowId = savedWorkflow.id;
         }
       }
-    } catch (err) {
-      console.error('Failed to fetch workflows:', err);
-      // Fallback to empty list, will use default LoRAs
-    } finally {
-      loadingWorkflows = false;
+      
+      // Final fallback to default workflow
+      if (!selectedWorkflowId) {
+        const defaultWorkflow = workflowsForType.find(w => w.isDefault);
+        selectedWorkflowId = defaultWorkflow?.id || (workflowsForType[0]?.id || '');
+      }
     }
+
 
     // Fetch remaining quota
     try {
