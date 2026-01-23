@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { error } from '@sveltejs/kit';
-import { getVideoById, getAdminSettings, checkDailyQuota } from '$lib/db';
+import { getVideoById, getAdminSettings, getWorkflows } from '$lib/db';
 import { normalizeLoraPresets } from '$lib/loraPresets';
 import { env } from '$env/dynamic/private';
 
@@ -22,10 +22,14 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     });
   }
   
+  // Load workflows directly instead of requiring client-side fetch
+  const workflows = await getWorkflows();
+  
   return { 
     entry, 
     loraPresets: normalizeLoraPresets(adminSettings.loraPresets),
     hasAdvancedFeatures,
-    sponsorUrl: env.SPONSOR_URL
+    sponsorUrl: env.SPONSOR_URL,
+    workflows
   } as any;
 };

@@ -28,10 +28,10 @@
   let quotaRemaining: number | null = null;
   let quotaLoading = true;
 
-  // Workflow management
-  let workflows: Workflow[] = [];
+  // Workflow management - initialize from loaded data
+  let workflows: Workflow[] = data.workflows || [];
   let selectedWorkflowId: string = '';
-  let loadingWorkflows = true;
+  let loadingWorkflows = false;
   
   // Detect workflow type based on video mode
   $: videoWorkflowType = entry.last_image_url ? 'fl2v' : 'i2v';
@@ -56,11 +56,17 @@
 
   // Load from localStorage if no existing settings
   let savedSettings: any = null;
+  let savedWorkflowLoraSettings: Record<string, { loraEnabled: Record<string, boolean>, loraWeights: Record<string, number> }> = {};
   if (!hasExistingSettings && typeof window !== 'undefined') {
     try {
       const saved = localStorage.getItem('video_generation_settings');
       if (saved) {
         savedSettings = JSON.parse(saved);
+      }
+      // Load per-workflow lora settings
+      const savedLora = localStorage.getItem('workflow_lora_settings');
+      if (savedLora) {
+        savedWorkflowLoraSettings = JSON.parse(savedLora);
       }
     } catch (err) {
       console.error('Failed to load settings from localStorage:', err);
@@ -106,7 +112,8 @@
   ];
 
 
-  // Track enabled state for each LoRA - initialize with LORA_PRESETS
+  // Track enabled state for each LoRA - initialize with defaults
+  // Will be updated by reactive statement when workflow is selected
   let loraEnabled: Record<string, boolean> = entry.lora_weights 
     ? Object.fromEntries(
         LORA_PRESETS.map((lora) => [
@@ -114,7 +121,7 @@
           entry.lora_weights?.[lora.id] !== undefined
         ])
       )
-    : (savedSettings?.loraEnabled || Object.fromEntries(
+    : Object.fromEntries(
         LORA_PRESETS.map((lora) => [
           lora.id,
           lora.isConfigurable === false
@@ -123,28 +130,31 @@
               ? lora.enabled
               : true
         ])
-      ));
-  let loraWeights: Record<string, number> = entry.lora_weights || savedSettings?.loraWeights || Object.fromEntries(
+      );
+  let loraWeights: Record<string, number> = entry.lora_weights || Object.fromEntries(
     LORA_PRESETS.map((lora) => [lora.id, lora.default])
   );
 
-  // Update loraEnabled and loraWeights when filteredLoraPresets changes
-  $: if (filteredLoraPresets && Array.isArray(filteredLoraPresets)) {
-    // Preserve existing states, only add missing ones
-    const newLoraEnabled = { ...loraEnabled };
-    const newLoraWeights = { ...loraWeights };
+  // When workflow changes, load the saved lora settings for that workflow
+  $: if (selectedWorkflowId && filteredLoraPresets && Array.isArray(filteredLoraPresets)) {
+    // Check if we have saved settings for this workflow
+    const workflowSettings = savedWorkflowLoraSettings[selectedWorkflowId];
+    
+    const newLoraEnabled: Record<string, boolean> = {};
+    const newLoraWeights: Record<string, number> = {};
     
     filteredLoraPresets.forEach((lora) => {
-      if (newLoraEnabled[lora.id] === undefined) {
-        newLoraEnabled[lora.id] = lora.isConfigurable === false
-          ? true
-          : lora.enabled !== undefined
-            ? lora.enabled
-            : true;
+      // For required LoRAs, always enable them
+      if (lora.isConfigurable === false) {
+        newLoraEnabled[lora.id] = true;
+      } else {
+        // Use saved value for this workflow, or lora default
+        newLoraEnabled[lora.id] = workflowSettings?.loraEnabled?.[lora.id] ?? 
+          (lora.enabled !== undefined ? lora.enabled : true);
       }
-      if (newLoraWeights[lora.id] === undefined) {
-        newLoraWeights[lora.id] = lora.default;
-      }
+      
+      // Use saved weight for this workflow, or lora default
+      newLoraWeights[lora.id] = workflowSettings?.loraWeights?.[lora.id] ?? lora.default;
     });
     
     loraEnabled = newLoraEnabled;
@@ -218,45 +228,34 @@
   }
 
   onMount(async () => {
-    // Fetch available workflows
-    try {
-      const res = await fetch('/api/workflows');
-      if (res.ok) {
-        workflows = await res.json();
-        // Filter workflows by type and set default workflow for this type
-        const workflowsForType = workflows.filter(w => w.workflowType === videoWorkflowType);
-        
-        // Use workflow_id from entry if available and matches current type
-        if (entry.workflow_id) {
-          const savedWorkflow = workflowsForType.find(w => w.id === entry.workflow_id);
-          if (savedWorkflow) {
-            selectedWorkflowId = savedWorkflow.id;
-          }
-        }
-        
-        // Fallback to default workflow if no valid saved workflow
-        if (!selectedWorkflowId) {
-          // Try loading from localStorage if no entry workflow
-          if (savedSettings?.selectedWorkflowId && !entry.workflow_id) {
-            const savedWorkflow = workflowsForType.find(w => w.id === savedSettings.selectedWorkflowId);
-            if (savedWorkflow) {
-              selectedWorkflowId = savedWorkflow.id;
-            }
-          }
-          
-          // Final fallback to default workflow
-          if (!selectedWorkflowId) {
-            const defaultWorkflow = workflowsForType.find(w => w.isDefault);
-            selectedWorkflowId = defaultWorkflow?.id || (workflowsForType[0]?.id || '');
-          }
+    // Initialize workflow selection from loaded data
+    const workflowsForType = workflows.filter(w => w.workflowType === videoWorkflowType);
+    
+    // Use workflow_id from entry if available and matches current type
+    if (entry.workflow_id) {
+      const savedWorkflow = workflowsForType.find(w => w.id === entry.workflow_id);
+      if (savedWorkflow) {
+        selectedWorkflowId = savedWorkflow.id;
+      }
+    }
+    
+    // Fallback to default workflow if no valid saved workflow
+    if (!selectedWorkflowId) {
+      // Try loading from localStorage if no entry workflow
+      if (savedSettings?.selectedWorkflowId && !entry.workflow_id) {
+        const savedWorkflow = workflowsForType.find(w => w.id === savedSettings.selectedWorkflowId);
+        if (savedWorkflow) {
+          selectedWorkflowId = savedWorkflow.id;
         }
       }
-    } catch (err) {
-      console.error('Failed to fetch workflows:', err);
-      // Fallback to empty list, will use default LoRAs
-    } finally {
-      loadingWorkflows = false;
+      
+      // Final fallback to default workflow
+      if (!selectedWorkflowId) {
+        const defaultWorkflow = workflowsForType.find(w => w.isDefault);
+        selectedWorkflowId = defaultWorkflow?.id || (workflowsForType[0]?.id || '');
+      }
     }
+
 
     // Fetch remaining quota
     try {
@@ -300,17 +299,34 @@
     videoResolution,
     motionScale,
     freeLongBlendStrength,
-    loraEnabled,
-    loraWeights,
     selectedWorkflowId
   };
   
-  // Save to localStorage whenever settings change
+  // Save global settings to localStorage whenever they change
   $: if (typeof window !== 'undefined') {
     try {
       localStorage.setItem('video_generation_settings', JSON.stringify(settings));
     } catch (err) {
       console.error('Failed to save settings to localStorage:', err);
+    }
+  }
+  
+  // Save per-workflow lora settings to localStorage
+  $: if (typeof window !== 'undefined' && selectedWorkflowId) {
+    try {
+      // Load existing workflow lora settings
+      const saved = localStorage.getItem('workflow_lora_settings');
+      const allSettings = saved ? JSON.parse(saved) : {};
+      
+      // Update settings for current workflow
+      allSettings[selectedWorkflowId] = {
+        loraEnabled,
+        loraWeights
+      };
+      
+      localStorage.setItem('workflow_lora_settings', JSON.stringify(allSettings));
+    } catch (err) {
+      console.error('Failed to save workflow lora settings to localStorage:', err);
     }
   }
 
