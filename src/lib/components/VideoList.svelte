@@ -53,6 +53,17 @@
     }
   }
 
+  // Generate a resized image URL using the Cloudflare media worker (?w=&h=)
+  function getResizedImageUrl(url: string | null | undefined): string | null {
+    if (!url) return null;
+
+    // Choose size based on layout
+    const width = $layoutMode === 'compact' ? 320 : 640;
+    // Preserve relative URLs; only append width for aspect-ratio safe resize
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}w=${width}`;
+  }
+
   const gridClasses = $derived(
     $layoutMode === 'compact' 
       ? (type === 'gallery' 
@@ -108,7 +119,7 @@
         <a href="/gallery/{v.id}{queryParams ? `?${queryParams}` : ''}" class="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow cursor-pointer">
           {#if v.original_image_url}
             <figure class="{$layoutMode === 'compact' ? 'h-32' : 'aspect-video'} bg-base-200">
-              <img src={v.original_image_url} alt={v.prompt || 'Video thumbnail'} class="w-full h-full object-cover" />
+              <img src={getResizedImageUrl(v.original_image_url)} alt={v.prompt || 'Video thumbnail'} class="w-full h-full object-cover" />
             </figure>
             {#if $layoutMode === 'grid'}
               <div class="card-body p-4">
@@ -156,7 +167,7 @@
         <div class="card bg-base-100 shadow-xl {$layoutMode === 'grid' ? 'image-full' : ''}">
           {#if v.original_image_url}
             <figure class={$layoutMode === 'compact' ? 'h-32' : ''}>
-              <img src={v.original_image_url} alt="thumbnail" class="w-full h-full object-cover" />
+              <img src={getResizedImageUrl(v.original_image_url)} alt="thumbnail" class="w-full h-full object-cover" />
             </figure>
           {:else}
             <figure class="bg-base-300 {$layoutMode === 'compact' ? 'h-32' : 'h-48'}">

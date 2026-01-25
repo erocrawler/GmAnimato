@@ -2,7 +2,13 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { authenticateUser, registerUser } from '$lib/auth';
 import { validateUser, formatValidationErrors } from '$lib/validation';
 import { getAdminSettings, createSession } from '$lib/db';
-import { generateSessionToken, getSessionExpiry, SESSION_COOKIE_OPTIONS } from '$lib/session';
+import {
+  generateJWT,
+  generateSessionToken,
+  getSessionExpiry,
+  SESSION_COOKIE_OPTIONS,
+  JWT_ENABLED,
+} from '$lib/session';
 
 export const POST: RequestHandler = async ({ request, cookies }) => {
   const body = await request.json();
@@ -36,15 +42,41 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
       });
     }
 
-    // Create session in database
+    if (JWT_ENABLED) {
+      // Generate JWT token (used for both cookie and API)
+      const jwt = generateJWT({
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        roles: user.roles,
+      });
+
+      if (!jwt) {
+        return new Response(JSON.stringify({ error: 'JWT not available' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Set JWT as httpOnly cookie (no DB session needed when JWT is enabled)
+      cookies.set('session', jwt, SESSION_COOKIE_OPTIONS);
+
+      return new Response(JSON.stringify({ success: true, user, jwt }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Fallback: use legacy DB-backed session when JWT keys are not configured
     const sessionToken = generateSessionToken();
     const expiresAt = getSessionExpiry();
     await createSession(user.id, sessionToken, expiresAt);
 
-    // Set session cookie
-    cookies.set('session', sessionToken, SESSION_COOKIE_OPTIONS);
+    cookies.set('session', sessionToken, {
+      ...SESSION_COOKIE_OPTIONS,
+      expires: expiresAt,
+    });
 
-    return new Response(JSON.stringify({ success: true, user }), {
+    return new Response(JSON.stringify({ success: true, user, session: sessionToken }), {
       headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -67,15 +99,41 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
       });
     }
 
-    // Create session in database
+    if (JWT_ENABLED) {
+      // Generate JWT token (used for both cookie and API)
+      const jwt = generateJWT({
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        roles: user.roles,
+      });
+
+      if (!jwt) {
+        return new Response(JSON.stringify({ error: 'JWT not available' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Set JWT as httpOnly cookie (no DB session needed when JWT is enabled)
+      cookies.set('session', jwt, SESSION_COOKIE_OPTIONS);
+
+      return new Response(JSON.stringify({ success: true, user, jwt }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Fallback: use legacy DB-backed session when JWT keys are not configured
     const sessionToken = generateSessionToken();
     const expiresAt = getSessionExpiry();
     await createSession(user.id, sessionToken, expiresAt);
 
-    // Set session cookie
-    cookies.set('session', sessionToken, SESSION_COOKIE_OPTIONS);
+    cookies.set('session', sessionToken, {
+      ...SESSION_COOKIE_OPTIONS,
+      expires: expiresAt,
+    });
 
-    return new Response(JSON.stringify({ success: true, user }), {
+    return new Response(JSON.stringify({ success: true, user, session: sessionToken }), {
       headers: { 'Content-Type': 'application/json' },
     });
   }

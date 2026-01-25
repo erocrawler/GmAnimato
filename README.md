@@ -1,8 +1,19 @@
 # GmAnimato - Image-to-Video Generator
 
-NOTE: Under Development
+A SvelteKit application for generating videos from images. Upload an image, refine a prompt, and queue a video generation job. Minimal setup by default; PostgreSQL optional.
 
-A full-stack SvelteKit application for generating videos from images using AI. Upload an image, refine a prompt, and queue a video generation job.
+## Quick Start
+
+- Prerequisites: Node.js 18+, npm
+- Install: `npm install`
+- Run dev: `npm run dev`
+- Visit: http://localhost:5173
+
+Demo account:
+- Username: `demo`
+- Password: `demo123`
+
+See [QUICK_SETUP.md](./QUICK_SETUP.md) for environment variables and optional PostgreSQL setup.
 
 ## Project Structure
 
@@ -10,21 +21,23 @@ A full-stack SvelteKit application for generating videos from images using AI. U
 GmAnimato/
   src/
     lib/
-      auth.ts          # In-memory user management (dev)
-      oauth.ts         # OAuth client helpers for GmGard
-      db.ts            # Database factory & backward-compatible exports
-      IDatabase.ts     # Database interface definition
-      db-json.ts       # JSON file-based implementation
-      db-sqlserver.ts  # SQL Server implementation (Prisma)
+      auth.ts          # Authentication helpers
+      oauth.ts         # OAuth client helpers (GmGard)
+      db.ts            # Database factory & exports
+      IDatabase.ts     # Database interface
+      db-json.ts       # JSON file storage implementation
+      db-postgres.ts   # PostgreSQL implementation (Prisma)
     routes/
       +layout.svelte   # Root layout
-      +page.svelte     # Home page with intro
+      +page.svelte     # Home page
       login/           # Login/Register UI
       new/             # Upload & queue new video
       videos/          # User's video library (protected)
       gallery/         # Published videos (public)
+      media/[...path]  # Media proxy to S3/R2 (images/videos, range support)
+      image/[...path]  # Image resize endpoint (?w=width)
     auth/
-      gmgard/          # OAuth login + callback routes
+      gmgard/          # OAuth login + callback
       api/
         auth/          # Login/Register endpoint
         logout/        # Logout endpoint
@@ -32,79 +45,40 @@ GmAnimato/
         i2v/
           kickoff/     # Start I2V job processing
         i2v-webhook/   # Receive job completion callbacks
-  hooks.server.ts      # Session management & route protection
+  hooks.server.ts      # Auth middleware (JWT + session fallback)
   prisma/
-    schema.prisma      # Database schema for SQL Server
+    schema.prisma      # Database schema (PostgreSQL)
   data/
-    videos.json        # Persistent video metadata store (JSON mode)
+    videos.json        # Persistent video metadata (JSON mode)
+    users.json         # Persistent user store (JSON mode)
   static/
     uploads/           # Uploaded images
-```
-
-## Quick Start
-
-### Prerequisites
-- Node.js 18+
-- npm
-
-### Installation
-
-```bash
-cd d:\Projects\GmAnimato
-npm install
-```
-
-### Development
-
-Start the dev server:
-
-```bash
-npm run dev
-```
-
-Visit `http://localhost:5173/`
-
-**Demo Account:**
-- Username: `demo`
-- Password: `demo123`
-
-Or create a new account on the Register page.
-
-### Build for Production
-
-```bash
-npm run build
-npm run preview
 ```
 
 ## Features
 
 ### Authentication
-- ✅ Database-backed user storage (JSON file or SQL Server)
-- ✅ Secure password hashing with bcrypt
-- ✅ Session-based auth with httpOnly cookies
-- ✅ OAuth login with GmGard (OIDC authorization code flow)
-- ✅ Protected routes: `/new`, `/videos`, `/api/*`
-- ✅ Public routes: `/`, `/login`, `/gallery`, `/api/logout`
-- ✅ Unique username constraint
-- ✅ Optional email field
+- bcrypt-hashed passwords
+- JWT (RS256) when keys configured; session fallback when not
+- httpOnly cookies; 7-day expiry
+- Admin/public route protection
+- See [AUTHENTICATION.md](./AUTHENTICATION.md)
 
-### Video Generation Workflow
-1. **Login** → Enter credentials
-2. **Upload** (`/new`) → Select image + optional prompt
-3. **Queue Job** → Image saved locally, VideoEntry created with `status: uploaded`
-4. **Processing** → Kickoff endpoint marks status as `processing`
-5. **Completion** → Mock webhook updates status to `completed` and adds video URL
-6. **View** (`/videos`) → See completed videos with player
-7. **Publish** → Toggle `is_published` to share in gallery
-8. **Gallery** (`/gallery`) → Browse published videos
+### Media
+- `/media/*` proxy to object storage (supports HTTP Range for videos)
+- `/image/*?w=WIDTH` resizing with preserved aspect ratio (allowlist widths)
+
+### Video Workflow
+1. Login
+2. Upload (`/new`) image + optional prompt
+3. Queue job → `uploaded`
+4. Processing → `processing`
+5. Completion via webhook → `completed`
+6. View in `/videos`; publish to `/gallery`
 
 ### Data Persistence
-- **Database:** Supports both JSON file storage and SQL Server (see [DATABASE_MIGRATION.md](./DATABASE_MIGRATION.md))
-  - JSON mode: `data/videos.json` and `data/users.json` (default, auto-created)
-  - SQL Server mode: Uses Prisma ORM with SQL Server database
-- **Images:** `static/uploads/` (local files)
-- **Authentication:** Database-backed user accounts with bcrypt password hashing (see [AUTHENTICATION.md](./AUTHENTICATION.md))
+- JSON file storage (default)
+- PostgreSQL via Prisma (optional)
 
 ## API Endpoints
 
@@ -115,89 +89,29 @@ npm run preview
 | POST | `/api/upload` | Upload image file |
 | POST | `/api/i2v/kickoff` | Start I2V job (`{id}`) |
 | POST | `/api/i2v-webhook` | Receive job completion callback |
-
-## Example Workflows
-
-### Login
-```bash
-curl -X POST http://localhost:5173/api/auth \
-  -H "Content-Type: application/json" \
-  -d '{"action":"login","username":"demo","password":"demo123"}' \
-  -c cookies.txt
-```
-
-### Register
-```bash
-curl -X POST http://localhost:5173/api/auth \
-  -H "Content-Type: application/json" \
-  -d '{"action":"register","username":"newuser","password":"pass123"}'
-```
-
-### Upload Image
-```bash
-curl -X POST http://localhost:5173/api/upload \
-  -F "file=@image.png" \
-  -b cookies.txt
-```
+| GET  | `/media/{path}` | Proxy media (images/videos; supports Range) |
+| GET  | `/image/{path}?w=WIDTH` | Resize image to allowed width |
 
 ## Development Notes
 
+### Auth Middleware
+- Hybrid auth in `hooks.server.ts`: JWT first (if enabled), else session lookup
+- Valid JWT still requires user to exist in DB (deleted users rejected)
+
+### OAuth (GmGard)
+- Optional OIDC login via issuer endpoints and client secret
+
 ### Mock I2V Flow
-The `/api/i2v/kickoff` endpoint currently:
-1. Sets video status to `processing`
-2. Schedules a mock webhook call after ~1.5s
-3. Webhook updates DB with `status: completed` and a sample video URL
+- Kickoff sets `processing`; webhook sets `completed` with a sample URL
 
-This allows testing the full flow without external I2V service. Replace with real API endpoint when ready.
-
-### Session Handling
-Sessions are stored in `session` cookie (httpOnly):
-- Max age: 7 days
-- Format: JSON `{id, username}`
-- Validated on every request via `hooks.server.ts`
-- Automatic cleanup runs daily at 3 AM server local time to delete expired sessions
-
-### OAuth Setup (GmGard)
-- Copy `.env.example` to `.env.local` and set:
-  - `PUBLIC_OAUTH_ISSUER`, `PUBLIC_OAUTH_AUTHORIZATION_ENDPOINT`, `PUBLIC_OAUTH_TOKEN_ENDPOINT`, `PUBLIC_OAUTH_USERINFO_ENDPOINT`, `PUBLIC_OAUTH_LOGOUT_ENDPOINT`
-  - `OAUTH_CLIENT_SECRET`, `OAUTH_REDIRECT_URI`
-
-### Future Enhancements
-- [x] **Database abstraction layer** - Supports JSON and SQL Server
-- [x] Real database migrations to production SQL Server
-- [x] **OAuth/OIDC integration** - Sign in with GmGard account (see [OAuth Setup Guide](./docs/oauth-setup-guide.md))
-- [x] S3 storage for images and videos
-- [x] Real I2V API integration (Runpod, Replicate, etc.)
-- [ ] Video preview thumbnails
-- [ ] User profile settings
-- [ ] Comments/reactions on published videos
-- [ ] Admin panel
-- [ ] Rate limiting & quotas
-
-## Testing
-
-### End-to-End Flow (Local)
-
-1. Start server: `npm run dev`
-2. Login with `demo` / `demo123`
-3. Go to `/new` and upload a test image
-4. Monitor `/videos` to see status change to `completed` after ~1.5s
-5. Visit `/gallery` to publish/view shared videos
-
-## Deployment
-
-The app builds to a SvelteKit production artifact. For production, configure a proper adapter:
-
-```bash
-npm install -D @sveltejs/adapter-node  # or adapter-auto
-```
-
-Update `svelte.config.js` to use the adapter, then:
+## Build & Deploy
 
 ```bash
 npm run build
-node build/index.js  # Run the server
+npm run preview
 ```
+
+Use a SvelteKit adapter (e.g., `@sveltejs/adapter-node`) for production as needed.
 
 ## License
 

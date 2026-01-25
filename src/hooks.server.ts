@@ -1,7 +1,7 @@
 import type { Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
 import { getSessionByToken, getUserById, deleteSession, deleteExpiredSessions, getAllSponsorClaims, deleteSponsorClaim, expireSponsorClaim, updateSponsorClaim, updateUser, getAdminSettings } from '$lib/db';
-import { isSessionExpired } from '$lib/session';
+import { isSessionExpired, verifyJWT } from '$lib/session';
 import { building } from '$app/environment';
 import { env } from '$env/dynamic/private';
 
@@ -227,29 +227,46 @@ if (!building) {
 }
 
 /**
- * Secure session middleware
- * - Validates session token from cookie against database
- * - Checks session expiration and deletes expired sessions
- * - Attaches user data to event.locals.user
- * - Protects routes requiring authentication
+ * Secure authentication middleware (Hybrid: JWT + Legacy Sessions)
+ * 
+ * Priority:
+ * 1. Try JWT from cookie (new)
+ * 2. Try JWT from Authorization header (API)
+ * 3. Fall back to session token from DB (old/existing)
+ * 
+ * This enables gradual migration from DB sessions to JWT
  */
 export const handle: Handle = async ({ event, resolve }) => {
-  // Get session token from cookie
-  const sessionToken = event.cookies.get('session');
+  const cookieToken = event.cookies.get('session');
+  const authHeader = event.request.headers.get('authorization');
 
-  if (sessionToken) {
+  // Priority 1: Try JWT from cookie (new logins)
+  if (cookieToken) {
     try {
-      // Validate session token from database
-      const session = await getSessionByToken(sessionToken);
-      
-      if (session) {
-        // Check if session is expired
-        if (isSessionExpired(new Date(session.expires_at))) {
-          // Delete expired session
-          await deleteSession(sessionToken);
-          event.cookies.delete('session', { path: '/' });
+      const jwtPayload = verifyJWT(cookieToken);
+      if (jwtPayload) {
+        // Valid JWT in cookie - must verify user still exists in DB
+        const user = await getUserById(jwtPayload.id);
+        if (user) {
+          // User exists and is valid, use DB data (for current roles/permissions)
+          event.locals.user = {
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            roles: user.roles,
+            created_at: user.created_at,
+            updated_at: user.updated_at,
+          };
         } else {
-          // Load user data from database
+          // User not found - account was deleted/deactivated after login
+          // Delete the invalid cookie and reject
+          event.cookies.delete('session', { path: '/' });
+          console.warn(`JWT cookie invalid: User ${jwtPayload.id} not found in database`);
+        }
+      } else {
+        // Not a JWT, try legacy session lookup
+        const session = await getSessionByToken(cookieToken);
+        if (session && !isSessionExpired(new Date(session.expires_at))) {
           const user = await getUserById(session.user_id);
           if (user) {
             event.locals.user = {
@@ -261,11 +278,46 @@ export const handle: Handle = async ({ event, resolve }) => {
               updated_at: user.updated_at,
             };
           }
+        } else if (session) {
+          // Session expired, delete it
+          await deleteSession(cookieToken);
+          event.cookies.delete('session', { path: '/' });
         }
       }
     } catch (err) {
-      // Invalid session, ignore
-      console.error('Session validation error:', err);
+      console.error('Cookie validation error:', err);
+    }
+  }
+
+  // Priority 2: If no cookie, try JWT from Authorization header (API)
+  if (!event.locals.user && authHeader) {
+    try {
+      const tokenMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+      if (tokenMatch) {
+        const jwt = tokenMatch[1];
+        const payload = verifyJWT(jwt);
+        
+        if (payload) {
+          // Valid JWT - must verify user still exists in DB
+          const user = await getUserById(payload.id);
+          if (user) {
+            // User exists, use DB data for current roles/permissions
+            event.locals.user = {
+              id: user.id,
+              username: user.username,
+              email: user.email,
+              roles: user.roles,
+              created_at: user.created_at,
+              updated_at: user.updated_at,
+            };
+          } else {
+            // User not found - reject even though JWT is valid
+            console.warn(`JWT header invalid: User ${payload.id} not found in database`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('JWT validation error:', err);
     }
   }
 
