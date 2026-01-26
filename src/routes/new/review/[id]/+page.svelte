@@ -268,7 +268,7 @@
 
     // Redirect to video details if already completed
     if (entry.status === 'completed') {
-      setInterval(() => {
+      setTimeout(() => {
         goto(`/videos/${entry.id}?returnTo=/videos`);
       }, 1000); // wait 1 second before redirecting, otherwise the entry may not be ready
       return;
