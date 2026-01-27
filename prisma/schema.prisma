@@ -105,8 +105,7 @@ model AdminSettings {
   freeUserQueueLimit     Int      @default(3) @map("free_user_queue_limit")
   paidUserQueueLimit     Int      @default(5) @map("paid_user_queue_limit")
   loraPresets            Json?    @map("lora_presets")
-  sponsorApiUrl          String?  @map("sponsor_api_url") @db.VarChar(500)
-  sponsorApiToken        String?  @map("sponsor_api_token") @db.VarChar(500)
+  sponsorConfig          Json?    @map("sponsor_config")
   updatedAt              DateTime @updatedAt @map("updated_at")
 
   @@map("admin_settings")

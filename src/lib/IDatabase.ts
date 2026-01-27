@@ -94,6 +94,7 @@ export type AdminSettings = {
   loraPresets?: LoraPreset[];
   sponsorApiUrl?: string; // GmCrawler sponsor API endpoint
   sponsorApiToken?: string; // Auth token for sponsor API
+  deviceId?: string; // Device ID for sponsor API requests
   updatedAt?: string;
 };
 

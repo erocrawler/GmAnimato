@@ -773,8 +773,13 @@ export class PostgresDatabase implements IDatabase {
     if (patch.freeUserQueueLimit !== undefined) data.freeUserQueueLimit = patch.freeUserQueueLimit;
     if (patch.paidUserQueueLimit !== undefined) data.paidUserQueueLimit = patch.paidUserQueueLimit;
     if (patch.loraPresets !== undefined) data.loraPresets = normalizeLoraPresets(patch.loraPresets);
-    if (patch.sponsorApiUrl !== undefined) data.sponsorApiUrl = patch.sponsorApiUrl;
-    if (patch.sponsorApiToken !== undefined) data.sponsorApiToken = patch.sponsorApiToken;
+    
+    // Store sponsor config as JSON for flexibility
+    const sponsorConfig: any = {};
+    if (patch.sponsorApiUrl !== undefined) sponsorConfig.sponsorApiUrl = patch.sponsorApiUrl;
+    if (patch.sponsorApiToken !== undefined) sponsorConfig.sponsorApiToken = patch.sponsorApiToken;
+    if (patch.deviceId !== undefined) sponsorConfig.deviceId = patch.deviceId;
+    if (Object.keys(sponsorConfig).length > 0) data.sponsorConfig = sponsorConfig;
 
     const settings = await this.prisma.adminSettings.upsert({
       where: { id: 'default' },
@@ -865,6 +870,11 @@ export class PostgresDatabase implements IDatabase {
       ? (typeof settings.roles === 'string' ? JSON.parse(settings.roles) : settings.roles)
       : undefined;
     
+    // Parse sponsor config from JSON
+    const sponsorConfig = typeof settings.sponsorConfig === 'string'
+      ? JSON.parse(settings.sponsorConfig)
+      : (settings.sponsorConfig || {});
+    
     return {
       id: settings.id,
       registrationEnabled: settings.registrationEnabled,
@@ -878,8 +888,9 @@ export class PostgresDatabase implements IDatabase {
       freeUserQueueLimit: settings.freeUserQueueLimit || 3,
       paidUserQueueLimit: settings.paidUserQueueLimit || 5,
       loraPresets: normalizeLoraPresets(settings.loraPresets ?? DEFAULT_LORA_PRESETS),
-      sponsorApiUrl: settings.sponsorApiUrl || undefined,
-      sponsorApiToken: settings.sponsorApiToken || undefined,
+      sponsorApiUrl: sponsorConfig.sponsorApiUrl || undefined,
+      sponsorApiToken: sponsorConfig.sponsorApiToken || undefined,
+      deviceId: sponsorConfig.deviceId || undefined,
       updatedAt: settings.updatedAt.toISOString(),
     };
   }

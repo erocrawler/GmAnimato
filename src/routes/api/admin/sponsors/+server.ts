@@ -13,13 +13,19 @@ async function fetchSponsorsFromCrawler(): Promise<CrawlerSponsor[]> {
   const settings = await getAdminSettings();
   const crawlerUrl = settings.sponsorApiUrl || env.SPONSOR_API_URL || 'http://localhost:3999';
   const token = settings.sponsorApiToken || env.SPONSOR_API_TOKEN || '';
+  const deviceId = settings.deviceId || '';
 
   if (!token) {
     console.warn('[Admin Sponsors] Sponsor API token not configured');
     return [];
   }
 
-  const response = await fetch(`${crawlerUrl}/sponsors`, {
+  const url = new URL(`${crawlerUrl}/sponsors`);
+  if (deviceId) {
+    url.searchParams.set('deviceId', deviceId);
+  }
+
+  const response = await fetch(url.toString(), {
     headers: {
       Authorization: `${token}`,
       Accept: 'application/json',

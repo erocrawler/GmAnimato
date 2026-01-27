@@ -812,6 +812,14 @@
             </div>
           {/if}
         </div>
+        
+        <div class="form-control">
+          <label class="label" for="device-id">
+            <span class="label-text">Device ID</span>
+            <span class="label-text-alt text-xs opacity-70">Unique identifier for device (sent as query param)</span>
+          </label>
+          <input id="device-id" type="text" bind:value={settings.deviceId} class="input input-bordered" placeholder="123456" />
+        </div>
       </div>
       
       <p class="text-xs opacity-60 mt-3">Used for sponsor claim validation and daily revalidation. Environment variables will be used as fallback if not set.</p>
