@@ -1,9 +1,24 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { Buffer } from 'node:buffer';
 import { claimLocalJob, getAdminSettings, getWorkflowById, getDefaultWorkflow } from '$lib/db';
 import { buildWorkflow } from '$lib/i2vWorkflow';
 import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
 import { toOriginalUrl } from '$lib/serverImageUrl';
+
+const DEFAULT_IMAGE_MIME = 'image/png';
+
+async function fetchImageAsBase64(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+  }
+
+  const contentType = response.headers.get('content-type') ?? DEFAULT_IMAGE_MIME;
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const base64 = buffer.toString('base64');
+  return `data:${contentType};base64,${base64}`;
+}
 
 /**
  * GET /api/worker/task
@@ -69,11 +84,21 @@ export const GET: RequestHandler = async ({ request }) => {
     
     console.log(`[Worker] Using workflow: ${workflow.name} (${workflow.id}) for ${workflowType.toUpperCase()} job ${job.id}`);
     
-    let payload;
+    const imageInputMode = (env.WORKER_IMAGE_INPUT_MODE ?? 'base64').toLowerCase();
+    const shouldSendBase64 = imageInputMode !== 'url';
+
+    let payload: any;
     if (isFL2V) {
       // Convert proxy URLs to original S3 URLs for worker
       const originalImageUrl = toOriginalUrl(job.original_image_url);
       const lastImageUrl = toOriginalUrl(job.last_image_url!);
+
+      const [firstImageBase64, lastImageBase64] = shouldSendBase64
+        ? await Promise.all([
+            fetchImageAsBase64(originalImageUrl),
+            fetchImageAsBase64(lastImageUrl),
+          ])
+        : [null, null];
       
       payload = await buildFL2VWorkflow({
         first_image_name: `${job.id}_first.png`,
@@ -92,9 +117,20 @@ export const GET: RequestHandler = async ({ request }) => {
         loraPresets: settings.loraPresets,
         workflow: workflow,
       });
+
+      if (shouldSendBase64 && payload?.input?.images) {
+        payload.input.images = [
+          { name: `${job.id}_first.png`, image: firstImageBase64 },
+          { name: `${job.id}_last.png`, image: lastImageBase64 },
+        ];
+      }
     } else {
       // Convert proxy URL to original S3 URL for worker
       const originalImageUrl = toOriginalUrl(job.original_image_url);
+
+      const imageBase64 = shouldSendBase64
+        ? await fetchImageAsBase64(originalImageUrl)
+        : null;
       
       payload = await buildWorkflow({
         image_name: `${job.id}.png`,
@@ -111,6 +147,10 @@ export const GET: RequestHandler = async ({ request }) => {
         loraPresets: settings.loraPresets,
         workflow: workflow,
       });
+
+      if (shouldSendBase64 && payload?.input?.images) {
+        payload.input.images = [{ name: `${job.id}.png`, image: imageBase64 }];
+      }
     }
     
     // Return the complete workflow payload for the worker
