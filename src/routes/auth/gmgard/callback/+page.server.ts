@@ -2,6 +2,7 @@ import type { PageServerLoad } from './$types';
 import { error, redirect } from '@sveltejs/kit';
 import { exchangeCodeForTokens, getUserInfo } from '$lib/oauth';
 import { getUserByUsername, createUser, createSession } from '$lib/db';
+import { generateJWT, generateSessionToken, getSessionExpiry, SESSION_COOKIE_OPTIONS, JWT_ENABLED } from '$lib/session';
 
 export const load: PageServerLoad = async ({ url, cookies }) => {
   const code = url.searchParams.get('code');
@@ -63,31 +64,54 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
       console.log('User found:', user);
     }
     
-    // Create session
-    const sessionData = {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      roles: user.roles,
-      oauth_provider: 'gmgard',
-      oauth_sub: userInfo.sub
-    };
-    
-    console.log('Setting session cookie...');
-    // Generate a unique session token
-    const sessionToken = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + 60 * 60 * 24 * 7 * 1000); // 7 days
-    
-    // Create session in database
+    if (JWT_ENABLED) {
+      // Generate short-lived JWT
+      const jwt = generateJWT({
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        roles: user.roles,
+      });
+
+      if (!jwt) {
+        throw error(500, 'Failed to generate authentication token');
+      }
+
+      // Generate long-lived refresh token
+      const refreshToken = generateSessionToken();
+      const expiresAt = getSessionExpiry();
+      await createSession(user.id, refreshToken, expiresAt);
+
+      console.log('Setting JWT cookie...');
+      
+      // Store JWT in cookie
+      cookies.set('session', jwt, SESSION_COOKIE_OPTIONS);
+      
+      // Set refresh token in separate cookie for seamless auto-refresh
+      cookies.set('refresh_token', refreshToken, {
+        ...SESSION_COOKIE_OPTIONS,
+        expires: expiresAt,
+      });
+      
+      // Clean up temporary OAuth cookies
+      cookies.delete('oauth_state', { path: '/' });
+      cookies.delete('oauth_verifier', { path: '/' });
+      
+      console.log('OAuth callback successful, redirecting to home...');
+      // Redirect to home page
+      throw redirect(302, '/');
+    }
+
+    // Fallback: use session token when JWT is not enabled
+    const sessionToken = generateSessionToken();
+    const expiresAt = getSessionExpiry();
     await createSession(user.id, sessionToken, expiresAt);
+
+    console.log('Setting session cookie...');
     
-    // Store session token in cookie (not the whole session data)
     cookies.set('session', sessionToken, {
-      path: '/',
-      httpOnly: true,
-      secure: false, // Set to true in production
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7 // 7 days
+      ...SESSION_COOKIE_OPTIONS,
+      expires: expiresAt,
     });
     
     // Clean up temporary OAuth cookies

@@ -1,7 +1,7 @@
 import type { Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
 import { getSessionByToken, getUserById, deleteSession, deleteExpiredSessions, getAllSponsorClaims, deleteSponsorClaim, expireSponsorClaim, updateSponsorClaim, updateUser, getAdminSettings } from '$lib/db';
-import { isSessionExpired, verifyJWT } from '$lib/session';
+import { isSessionExpired, verifyJWT, JWT_ENABLED, generateJWT, SESSION_COOKIE_OPTIONS } from '$lib/session';
 import { building } from '$app/environment';
 import { env } from '$env/dynamic/private';
 
@@ -227,23 +227,25 @@ if (!building) {
 }
 
 /**
- * Secure authentication middleware (Hybrid: JWT + Legacy Sessions)
+ * Secure authentication middleware (Hybrid: JWT + Refresh Token Sessions)
  * 
  * Priority:
- * 1. Try JWT from cookie (new)
- * 2. Try JWT from Authorization header (API)
- * 3. Fall back to session token from DB (old/existing)
+ * 1. Try JWT from cookie (short-lived access token)
+ * 2. Try JWT from Authorization header (API access token)
+ * 3. Fall back to session token from DB (long-lived refresh token for token refresh)
  * 
- * This enables gradual migration from DB sessions to JWT
+ * JWT: 30-minute access tokens, validated instantly without DB lookup
+ * Session: 7-day refresh tokens stored in DB, allow token refresh and revocation
  */
 export const handle: Handle = async ({ event, resolve }) => {
-  const cookieToken = event.cookies.get('session');
+  const jwtCookie = event.cookies.get('session');
+  const refreshCookie = event.cookies.get('refresh_token');
   const authHeader = event.request.headers.get('authorization');
 
-  // Priority 1: Try JWT from cookie (new logins)
-  if (cookieToken) {
+  // Priority 1: Try JWT from cookie (primary)
+  if (jwtCookie) {
     try {
-      const jwtPayload = verifyJWT(cookieToken);
+      const jwtPayload = verifyJWT(jwtCookie);
       if (jwtPayload) {
         // Valid JWT in cookie - must verify user still exists in DB
         const user = await getUserById(jwtPayload.id);
@@ -259,13 +261,46 @@ export const handle: Handle = async ({ event, resolve }) => {
           };
         } else {
           // User not found - account was deleted/deactivated after login
-          // Delete the invalid cookie and reject
+          // Delete the invalid cookies and reject
           event.cookies.delete('session', { path: '/' });
+          event.cookies.delete('refresh_token', { path: '/' });
           console.warn(`JWT cookie invalid: User ${jwtPayload.id} not found in database`);
         }
-      } else {
-        // Not a JWT, try legacy session lookup
-        const session = await getSessionByToken(cookieToken);
+      } else if (refreshCookie && JWT_ENABLED) {
+        // JWT expired/invalid but we have refresh token - auto-refresh
+        const session = await getSessionByToken(refreshCookie);
+        if (session && !isSessionExpired(new Date(session.expires_at))) {
+          const user = await getUserById(session.user_id);
+          if (user) {
+            event.locals.user = {
+              id: user.id,
+              username: user.username,
+              email: user.email,
+              roles: user.roles,
+              created_at: user.created_at,
+              updated_at: user.updated_at,
+            };
+
+            // Auto-refresh: generate new JWT and update cookie seamlessly
+            const newJwt = generateJWT({
+              id: user.id,
+              username: user.username,
+              email: user.email,
+              roles: user.roles,
+            });
+            if (newJwt) {
+              event.cookies.set('session', newJwt, SESSION_COOKIE_OPTIONS);
+            }
+          }
+        } else if (session) {
+          // Session expired, delete it
+          await deleteSession(refreshCookie);
+          event.cookies.delete('session', { path: '/' });
+          event.cookies.delete('refresh_token', { path: '/' });
+        }
+      } else if (!JWT_ENABLED) {
+        // Fallback: JWT disabled, treat session cookie as session token
+        const session = await getSessionByToken(jwtCookie);
         if (session && !isSessionExpired(new Date(session.expires_at))) {
           const user = await getUserById(session.user_id);
           if (user) {
@@ -279,8 +314,7 @@ export const handle: Handle = async ({ event, resolve }) => {
             };
           }
         } else if (session) {
-          // Session expired, delete it
-          await deleteSession(cookieToken);
+          await deleteSession(jwtCookie);
           event.cookies.delete('session', { path: '/' });
         }
       }
@@ -294,8 +328,8 @@ export const handle: Handle = async ({ event, resolve }) => {
     try {
       const tokenMatch = authHeader.match(/^Bearer\s+(.+)$/i);
       if (tokenMatch) {
-        const jwt = tokenMatch[1];
-        const payload = verifyJWT(jwt);
+        const token = tokenMatch[1];
+        const payload = verifyJWT(token);
         
         if (payload) {
           // Valid JWT - must verify user still exists in DB

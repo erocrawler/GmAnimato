@@ -1,6 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { getUserById, updateUser, deleteUserSessions, createSession } from '$lib/db';
-import { generateSessionToken, getSessionExpiry, SESSION_COOKIE_OPTIONS } from '$lib/session';
+import { generateJWT, generateSessionToken, getSessionExpiry, SESSION_COOKIE_OPTIONS, JWT_ENABLED } from '$lib/session';
 import bcrypt from 'bcrypt';
 
 const SALT_ROUNDS = 10;
@@ -82,7 +82,42 @@ export const POST: RequestHandler = async ({ request, locals, cookies }) => {
   // Invalidate all existing sessions for security
   await deleteUserSessions(user.id);
 
-  // Create new session
+  if (JWT_ENABLED) {
+    // Generate new JWT for the user
+    const newJwt = generateJWT({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      roles: user.roles,
+    });
+
+    if (!newJwt) {
+      return new Response(JSON.stringify({ error: 'Failed to generate token' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Generate new refresh token
+    const refreshToken = generateSessionToken();
+    const expiresAt = getSessionExpiry();
+    await createSession(user.id, refreshToken, expiresAt);
+
+    // Set new JWT cookie
+    cookies.set('session', newJwt, SESSION_COOKIE_OPTIONS);
+    
+    // Set new refresh token cookie
+    cookies.set('refresh_token', refreshToken, {
+      ...SESSION_COOKIE_OPTIONS,
+      expires: expiresAt,
+    });
+
+    return new Response(JSON.stringify({ success: true, jwt: newJwt, refreshToken }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Fallback: create new session token
   const sessionToken = generateSessionToken();
   const expiresAt = getSessionExpiry();
   await createSession(user.id, sessionToken, expiresAt);

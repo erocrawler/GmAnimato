@@ -3,12 +3,15 @@ import { redirect } from '@sveltejs/kit';
 import { deleteSession } from '$lib/db';
 
 export const POST: RequestHandler = async ({ cookies }) => {
-  // Get session token and delete from database
-  const sessionToken = cookies.get('session');
-  if (sessionToken) {
-    await deleteSession(sessionToken);
+  // Get refresh token and delete from database
+  const refreshToken = cookies.get('refresh_token');
+  if (refreshToken) {
+    // Delete refresh token from database
+    await deleteSession(refreshToken).catch(() => {});
   }
   
+  // Delete both cookies
   cookies.delete('session', { path: '/' });
+  cookies.delete('refresh_token', { path: '/' });
   throw redirect(303, '/login');
 };

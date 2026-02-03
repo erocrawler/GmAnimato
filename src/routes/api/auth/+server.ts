@@ -43,7 +43,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
     }
 
     if (JWT_ENABLED) {
-      // Generate JWT token (used for both cookie and API)
+      // Generate short-lived JWT (30 min) for API access
       const jwt = generateJWT({
         id: user.id,
         username: user.username,
@@ -58,10 +58,21 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
         });
       }
 
-      // Set JWT as httpOnly cookie (no DB session needed when JWT is enabled)
-      cookies.set('session', jwt, SESSION_COOKIE_OPTIONS);
+      // Generate long-lived refresh token (7 days) for token refresh
+      const refreshToken = generateSessionToken();
+      const expiresAt = getSessionExpiry();
+      await createSession(user.id, refreshToken, expiresAt);
 
-      return new Response(JSON.stringify({ success: true, user, jwt }), {
+      // Set JWT as httpOnly cookie (short-lived)
+      cookies.set('session', jwt, SESSION_COOKIE_OPTIONS);
+      
+      // Set refresh token in separate cookie for seamless auto-refresh
+      cookies.set('refresh_token', refreshToken, {
+        ...SESSION_COOKIE_OPTIONS,
+        expires: expiresAt,
+      });
+
+      return new Response(JSON.stringify({ success: true, user, jwt, refreshToken }), {
         headers: { 'Content-Type': 'application/json' },
       });
     }
@@ -100,7 +111,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
     }
 
     if (JWT_ENABLED) {
-      // Generate JWT token (used for both cookie and API)
+      // Generate short-lived JWT (30 min) for API access
       const jwt = generateJWT({
         id: user.id,
         username: user.username,
@@ -115,10 +126,21 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
         });
       }
 
-      // Set JWT as httpOnly cookie (no DB session needed when JWT is enabled)
-      cookies.set('session', jwt, SESSION_COOKIE_OPTIONS);
+      // Generate long-lived refresh token (7 days) for token refresh
+      const refreshToken = generateSessionToken();
+      const expiresAt = getSessionExpiry();
+      await createSession(user.id, refreshToken, expiresAt);
 
-      return new Response(JSON.stringify({ success: true, user, jwt }), {
+      // Set JWT as httpOnly cookie (short-lived)
+      cookies.set('session', jwt, SESSION_COOKIE_OPTIONS);
+      
+      // Set refresh token in separate cookie for seamless auto-refresh
+      cookies.set('refresh_token', refreshToken, {
+        ...SESSION_COOKIE_OPTIONS,
+        expires: expiresAt,
+      });
+
+      return new Response(JSON.stringify({ success: true, user, jwt, refreshToken }), {
         headers: { 'Content-Type': 'application/json' },
       });
     }

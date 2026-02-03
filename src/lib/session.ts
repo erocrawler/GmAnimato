@@ -5,8 +5,14 @@ import type { UserPublic } from './IDatabase';
 
 /**
  * Session management utilities for secure authentication
+ * 
+ * Hybrid approach:
+ * - Access Token (JWT): Short-lived (30 min), validated without DB lookup
+ * - Refresh Token (DB Session): Long-lived (7 days), allows token refresh and revocation
+ * - Fallback: If JWT keys not configured, use session token auth exclusively
  */
 
+const ACCESS_TOKEN_EXPIRY_MINUTES = 30;
 const SESSION_EXPIRY_DAYS = 7;
 const TOKEN_LENGTH = 32;
 
@@ -29,7 +35,7 @@ export interface JWTPayload {
 }
 
 /**
- * Generate a cryptographically secure random session token
+ * Generate a cryptographically secure random session token (refresh token)
  */
 export function generateSessionToken(): string {
   return randomBytes(TOKEN_LENGTH).toString('base64url');
@@ -37,6 +43,7 @@ export function generateSessionToken(): string {
 
 /**
  * Generate a JWT token using private key (RS256 - RSA asymmetric)
+ * Short-lived access token (30 minutes)
  * Private key is kept secret on GmAnimato server
  * Public key is shared with Cloudflare Workers for verification
  */
@@ -44,7 +51,7 @@ export function generateJWT(user: JWTPayload): string | null {
   if (!JWT_ENABLED) return null;
 
   return jwt.sign(user, JWT_PRIVATE_KEY, {
-    expiresIn: `${SESSION_EXPIRY_DAYS}d`,
+    expiresIn: `${ACCESS_TOKEN_EXPIRY_MINUTES}m`,
     algorithm: JWT_ALGORITHM as 'RS256',
   });
 }
@@ -66,7 +73,7 @@ export function verifyJWT(token: string): JWTPayload | null {
 }
 
 /**
- * Calculate session expiration date
+ * Calculate session expiration date (7 days for refresh tokens)
  */
 export function getSessionExpiry(): Date {
   const expiry = new Date();

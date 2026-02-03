@@ -171,7 +171,7 @@ export interface IDatabase {
   updateUser(id: string, patch: Partial<Omit<User, 'id' | 'created_at'>>): Promise<User | null>;
   deleteUser(id: string): Promise<boolean>;
   
-  // Session methods
+  // Session/Refresh token methods (used for token refresh)
   createSession(userId: string, token: string, expiresAt: Date): Promise<Session>;
   getSessionByToken(token: string): Promise<Session | undefined>;
   deleteSession(token: string): Promise<boolean>;
