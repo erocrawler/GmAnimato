@@ -1,6 +1,8 @@
 import path from 'path';
+import fs from 'fs';
 import { createXai } from '@ai-sdk/xai';
 import { generateText } from 'ai';
+import { env } from '$env/dynamic/private';
 
 interface GrokVisionResponse {
   suggested_prompts: [string, string]; // [normal, dramatic]
@@ -10,11 +12,93 @@ interface GrokVisionResponse {
 }
 
 const GROK_VERSION = 'grok-4-1-fast-non-reasoning';
+const POLICY_VIOLATION_LOG = env.GROK_POLICY_VIOLATION_LOG || path.join(process.cwd(), 'logs', 'grok-policy-violations.log');
+
+function logPolicyViolation(context: string, error: any, details: Record<string, any>) {
+  const timestamp = new Date().toISOString();
+  const logEntry = {
+    timestamp,
+    context,
+    error: {
+      message: error?.message || String(error),
+      stack: error?.stack,
+      response: error?.response?.data || error?.response,
+    },
+    request_details: details,
+  };
+
+  const logLine = `\n${'='.repeat(80)}\n${JSON.stringify(logEntry, null, 2)}\n`;
+  
+  try {
+    fs.appendFileSync(POLICY_VIOLATION_LOG, logLine, 'utf8');
+    console.error(`[Grok Policy Violation] Logged to ${POLICY_VIOLATION_LOG}`);
+  } catch (logError) {
+    console.error('[Grok Policy Violation] Failed to write log:', logError);
+  }
+}
+
+function isPolicyViolationError(error: any): boolean {
+  const errorStr = String(error?.message || error).toLowerCase();
+  const responseStr = String(error?.response?.data || error?.responseBody || '').toLowerCase();
+  
+  // Check for 403 status code
+  return (error?.response?.status === 403 || error?.statusCode === 403);
+}
+
+function repairIncompleteJson(jsonStr: string): string {
+  let repaired = jsonStr;
+  
+  // Remove trailing commas that break JSON parsing (e.g., ["a", "b",])
+  repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
+  
+  // Fix missing ] before object field (e.g., ["a", "b", "field": -> ["a", "b"], "field":)
+  // Pattern: array element followed by comma, then a quoted string with colon (indicating object field)
+  const missingArrayClose = /"([^"]*)",\s*"([^"]+)":/g;
+  let match;
+  const fixes: Array<{index: number, type: string}> = [];
+  
+  while ((match = missingArrayClose.exec(repaired)) !== null) {
+    // Check if this looks like a field name (common field names in our response)
+    const potentialField = match[2];
+    if (['suggested_prompts', 'tags', 'is_photo_realistic', 'is_nsfw', 'prompts'].includes(potentialField)) {
+      // Find position right before the field name quote
+      const fixPosition = match.index + match[1].length + 2; // after the first quoted string and comma
+      fixes.push({index: fixPosition, type: 'array_close'});
+    }
+  }
+  
+  // Apply fixes from end to start (so indices remain valid)
+  for (const fix of fixes.reverse()) {
+    repaired = repaired.slice(0, fix.index) + '],' + repaired.slice(fix.index + 1);
+  }
+  
+  // Count opening and closing brackets/braces
+  const openBrackets = (repaired.match(/\[/g) || []).length;
+  const closeBrackets = (repaired.match(/\]/g) || []).length;
+  const openBraces = (repaired.match(/\{/g) || []).length;
+  const closeBraces = (repaired.match(/\}/g) || []).length;
+  
+  // Add missing closing brackets at the end
+  if (openBrackets > closeBrackets) {
+    const missing = openBrackets - closeBrackets;
+    repaired += ']'.repeat(missing);
+  }
+  
+  // Add missing closing braces at the end
+  if (openBraces > closeBraces) {
+    const missing = openBraces - closeBraces;
+    repaired += '}'.repeat(missing);
+  }
+  
+  return repaired;
+}
 
 export async function annotateImage(
   filePath: string,
   grokApiKey?: string,
-  lastImagePath?: string
+  lastImagePath?: string,
+  userId?: string,
+  videoId?: string
 ): Promise<{ 
   tags: string[]; 
   suggested_prompts: string[];
@@ -24,7 +108,7 @@ export async function annotateImage(
   // Try Grok Vision API if API key is provided
   if (grokApiKey) {
     try {
-      const grokResult = await annotateWithGrok(filePath, grokApiKey, lastImagePath);
+      const grokResult = await annotateWithGrok(filePath, grokApiKey, lastImagePath, userId, videoId);
       if (grokResult) {
         return {
           tags: grokResult.tags,
@@ -54,7 +138,9 @@ export async function evaluatePromptProperties(
   editedPrompt: string,
   grokApiKey?: string,
   imagePath?: string,
-  originalPrompts?: string[]
+  originalPrompts?: string[],
+  userId?: string,
+  videoId?: string
 ): Promise<{ 
   is_photo_realistic?: boolean;
   is_nsfw?: boolean;
@@ -76,7 +162,7 @@ export async function evaluatePromptProperties(
   }
 
   try {
-    const result = await evaluatePromptWithGrok(editedPrompt, grokApiKey, imagePath);
+    const result = await evaluatePromptWithGrok(editedPrompt, grokApiKey, imagePath, userId, videoId);
     if (result) {
       return {
         is_photo_realistic: result.is_photo_realistic,
@@ -96,7 +182,9 @@ export async function evaluatePromptProperties(
 async function annotateWithGrok(
   imageUrl: string,
   apiKey: string,
-  lastImageUrl?: string
+  lastImageUrl?: string,
+  userId?: string,
+  videoId?: string
 ): Promise<GrokVisionResponse | null> {
   const isFL2V = !!lastImageUrl;
   
@@ -142,7 +230,6 @@ IMPORTANT:
   try {
     const xaiProvider = createXai({ apiKey });
     const model = xaiProvider(GROK_VERSION);
-    console.log(`[Grok Vision] Sending ${isFL2V ? 'FL2V (two images)' : 'I2V (single image)'} for analysis:`, imageUrl);
     
     const messageContent: Array<{ type: 'text' | 'image'; text?: string; image?: string }> = [
       {
@@ -188,17 +275,21 @@ IMPORTANT:
     } else if (jsonStr.startsWith('```')) {
       jsonStr = jsonStr.replace(/```\n?/g, '');
     }
-    
-    // Remove trailing commas that break JSON parsing (e.g., ["a", "b",])
-    jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
 
     let parsed: GrokVisionResponse;
     try {
+      // Try parsing as-is first
       parsed = JSON.parse(jsonStr);
     } catch (parseError) {
-      console.error('[Grok Vision] JSON parse error:', parseError);
-      console.error('[Grok Vision] Failed to parse:', jsonStr);
-      return null;
+      // If parsing fails, try repairing the JSON
+      const repairedStr = repairIncompleteJson(jsonStr);
+      try {
+        parsed = JSON.parse(repairedStr);
+      } catch (repairError) {
+        console.error('[Grok Vision] JSON parse error:', repairError);
+        console.error('[Grok Vision] Failed to parse:', repairedStr);
+        return null;
+      }
     }
 
     // Validate response structure
@@ -223,6 +314,19 @@ IMPORTANT:
     return result;
   } catch (error) {
     console.error('[Grok Vision] Request failed:', error);
+    
+    // Log policy violations for audit
+    if (isPolicyViolationError(error)) {
+      logPolicyViolation('annotateImage', error, {
+        user_id: userId,
+        video_id: videoId,
+        imageUrl,
+        lastImageUrl,
+        mode: isFL2V ? 'FL2V (first-last-to-video)' : 'I2V (image-to-video)',
+        grok_version: GROK_VERSION,
+      });
+    }
+    
     return null;
   }
 }
@@ -230,8 +334,10 @@ IMPORTANT:
 async function evaluatePromptWithGrok(
   prompt: string,
   apiKey: string,
-  imagePath?: string
-): Promise<{ is_photo_realistic: boolean; is_nsfw: boolean } | null> {
+  imagePath?: string,
+  userId?: string,
+  videoId?: string
+): Promise<{ is_photo_realistic: boolean | undefined; is_nsfw: boolean } | null> {
   const evaluationPrompt = `Analyze the following video generation prompt in context with the provided image and determine two properties:
 
 1. is_photo_realistic: Whether the prompt describes a photographic/realistic scene (true) or artistic/illustrated scene (false)
@@ -245,7 +351,6 @@ Return ONLY a JSON object with these two boolean properties. Example:
   try {
     const xaiProvider = createXai({ apiKey });
     const model = xaiProvider(GROK_VERSION);
-    console.log('[Grok Vision] Re-evaluating prompt properties for edited prompt');
 
     const messageContent: Array<{ type: 'text' | 'image'; text?: string; image?: string }> = [
       {
@@ -283,11 +388,18 @@ Return ONLY a JSON object with these two boolean properties. Example:
 
     let parsed: { is_photo_realistic: boolean; is_nsfw: boolean };
     try {
+      // Try parsing as-is first
       parsed = JSON.parse(jsonStr);
     } catch (parseError) {
-      console.error('[Grok Vision] JSON parse error in prompt evaluation:', parseError);
-      console.error('[Grok Vision] Failed to parse:', jsonStr);
-      return null;
+      // If parsing fails, try repairing the JSON
+      const repairedStr = repairIncompleteJson(jsonStr);
+      try {
+        parsed = JSON.parse(repairedStr);
+      } catch (repairError) {
+        console.error('[Grok Vision] JSON parse error in prompt evaluation:', repairError);
+        console.error('[Grok Vision] Failed to parse:', repairedStr);
+        return null;
+      }
     }
 
     // Validate response structure
@@ -302,6 +414,22 @@ Return ONLY a JSON object with these two boolean properties. Example:
     return parsed;
   } catch (error) {
     console.error('[Grok Vision] Prompt evaluation request failed:', error);
+    
+    // Log policy violations for audit
+    if (isPolicyViolationError(error)) {
+      logPolicyViolation('evaluatePromptProperties', error, {        user_id: userId,
+        video_id: videoId,        prompt,
+        imagePath,
+        grok_version: GROK_VERSION,
+      });
+      
+      // If content violates policy, assume it's NSFW
+      return {
+        is_photo_realistic: undefined,
+        is_nsfw: true,
+      };
+    }
+    
     return null;
   }
 }

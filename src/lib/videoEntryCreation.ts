@@ -34,28 +34,19 @@ export async function createVideoEntryWithRecognition(
     const originalForGrok = toOriginalUrl(originalImageUrl);
     const lastForGrok = lastImageUrl ? toOriginalUrl(lastImageUrl) : undefined;
 
-    // Run image recognition
-    const annotation = mode === 'fl2v'
-      ? await annotateImage(originalForGrok, grokApiKey, lastForGrok)
-      : await annotateImage(originalForGrok, grokApiKey);
+    // Run image recognition (videoId not available yet during upload)
+    const annotation = await annotateImage(originalForGrok, grokApiKey, lastForGrok, userId);
 
     const recognitionFailed = annotation.tags.length === 0;
 
     // Validate field lengths
-    const validationData = mode === 'fl2v'
-      ? {
-          original_image_url: originalImageUrl,
-          last_image_url: lastImageUrl,
-          prompt: '',
-          tags: annotation.tags,
-          suggested_prompts: annotation.suggested_prompts,
-        }
-      : {
-          original_image_url: originalImageUrl,
-          prompt: '',
-          tags: annotation.tags,
-          suggested_prompts: annotation.suggested_prompts,
-        };
+    const validationData = {
+      original_image_url: originalImageUrl,
+      last_image_url: lastImageUrl,
+      prompt: '',
+      tags: annotation.tags,
+      suggested_prompts: annotation.suggested_prompts,
+    };
 
     const validationErrors = validateVideoEntry(validationData);
     if (validationErrors.length > 0) {
@@ -74,7 +65,7 @@ export async function createVideoEntryWithRecognition(
       user_id: userId,
       workflow_id: defaultWorkflow?.id,
       original_image_url: originalImageUrl,
-      last_image_url: mode === 'fl2v' ? lastImageUrl : undefined,
+      last_image_url: lastImageUrl,
       prompt: '',
       tags: annotation.tags,
       suggested_prompts: annotation.suggested_prompts,

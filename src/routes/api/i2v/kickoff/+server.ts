@@ -143,7 +143,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         prompt,
         grokApiKey,
         toOriginalUrl(existing.original_image_url),
-        existing.suggested_prompts || []
+        existing.suggested_prompts || [],
+        existing.user_id,
+        id
       );
       evaluatedProperties = {
         is_photo_realistic: evaluationResult.is_photo_realistic,
