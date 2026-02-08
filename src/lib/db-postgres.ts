@@ -147,12 +147,20 @@ export class PostgresDatabase implements IDatabase {
         orderBy,
         skip,
         take: pageSize,
+        include: {
+          _count: {
+            select: { likes: true }
+          }
+        }
       }),
       this.prisma.video.count({ where })
     ]);
 
     return {
-      videos: videos.map(this.mapToVideoEntry),
+      videos: videos.map((video: any) => ({
+        ...this.mapToVideoEntry(video),
+        likesCount: video._count?.likes ?? 0
+      })),
       total,
       page,
       pageSize,
@@ -860,7 +868,6 @@ export class PostgresDatabase implements IDatabase {
       additional_options: video.additionalOptions || undefined,
       lora_weights: video.loraWeights || undefined,
       seed: video.seed ?? undefined,
-      likes: [], // Deprecated - use getLikeCount() and isVideoLikedByUser() instead
       created_at: video.createdAt.toISOString(),
     };
   }

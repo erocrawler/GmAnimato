@@ -34,7 +34,7 @@ export type VideoEntry = {
   };
   lora_weights?: Record<string, number>; // LoRA weights for customization
   seed?: number; // Random seed for reproducibility
-  likes?: string[]; // Array of user_ids who liked this video
+  likesCount?: number; // Total like count (when available)
   created_at: string;
 };
 

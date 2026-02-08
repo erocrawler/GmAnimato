@@ -8,6 +8,19 @@ const DB_FILE = path.join(DATA_DIR, 'videos.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'admin_settings.json');
 
+/**
+ * JSON File-based Database Implementation
+ * 
+ * This is a simplified database for local development/testing only.
+ * It does NOT need feature parity with PostgresDatabase - only core functionality.
+ * 
+ * Features not implemented in JSON DB (intentionally):
+ * - Like functionality (videoLike table operations)
+ * - Filtering by liked videos
+ * - Advanced features that require SQL
+ * 
+ * For production use or full feature support, use PostgresDatabase instead.
+ */
 export class JsonFileDatabase implements IDatabase {
   // ==================== Video Methods ====================
   
@@ -120,7 +133,10 @@ export class JsonFileDatabase implements IDatabase {
     
     const total = filtered.length;
     const skip = (page - 1) * pageSize;
-    const videos = filtered.slice(skip, skip + pageSize);
+    const videos = filtered.slice(skip, skip + pageSize).map((video) => ({
+      ...video,
+      likesCount: (video as any).likesCount ?? 0
+    }));
     
     return {
       videos,
@@ -146,7 +162,8 @@ export class JsonFileDatabase implements IDatabase {
     
     // Filter by liked videos if likedBy is provided
     if (likedBy) {
-      filtered = filtered.filter((r) => r.likes?.includes(likedBy));
+      // Likes are not supported in JSON DB; return empty to avoid misleading results
+      filtered = [];
     }
     
     // Exclude specific video if excludeId is provided
@@ -166,7 +183,7 @@ export class JsonFileDatabase implements IDatabase {
     
     // Sort by likes or date
     if (sortBy === 'likes') {
-      filtered.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+      filtered.sort((a, b) => ((b as any).likesCount ?? 0) - ((a as any).likesCount ?? 0));
     } else {
       filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
