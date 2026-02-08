@@ -118,16 +118,33 @@ export class PostgresDatabase implements IDatabase {
   async getVideosByUser(user_id: string, page: number = 1, pageSize: number = 12, options?: import('./IDatabase').GetVideosByUserOptions): Promise<import('./IDatabase').PaginatedVideos> {
     const skip = (page - 1) * pageSize;
     const includeDeleted = options?.includeDeleted ?? false;
+    const sortBy = options?.sortBy ?? 'upload';
+    const sortDirection = options?.sortDirection ?? 'desc';
 
     const where: any = { userId: user_id };
     if (!includeDeleted) {
       where.status = { not: 'deleted' };
     }
+
+    // Apply status filter if provided
+    if (options?.status) {
+      where.status = options.status;
+    }
+
+    // Apply isPublished filter if provided
+    if (options?.isPublished !== undefined) {
+      where.isPublished = options.isPublished;
+    }
+
+    // Determine sort order
+    // Note: 'completion' sort uses createdAt as proxy since we don't have a dedicated completedAt field
+    // For completed videos, this represents when they finished processing (approximately)
+    const orderBy = sortBy === 'completion' ? { createdAt: sortDirection } : { createdAt: sortDirection };
     
     const [videos, total] = await Promise.all([
       this.prisma.video.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take: pageSize,
       }),

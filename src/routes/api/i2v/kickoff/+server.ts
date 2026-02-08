@@ -135,9 +135,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     // Generate seed for reproducibility
     const seed = Math.floor(Math.random() * 1000000);
 
-    // Re-evaluate prompt properties if prompt was edited
+    // Re-evaluate prompt properties if prompt was edited for non-NSFW content to ensure accurate flagging based on latest prompt and image
     let evaluatedProperties: { is_photo_realistic?: boolean; is_nsfw?: boolean } = {};
-    if (prompt) {
+    if (prompt && !existing.is_nsfw) {
       const grokApiKey = env.GROK_API_KEY;
       const evaluationResult = await evaluatePromptProperties(
         prompt,

@@ -134,12 +134,27 @@
     "title": "My Videos",
     "createNew": "Create New",
     "filters": {
-      "status": "Status"
+      "status": "Status",
+      "sortBy": "Sort By",
+      "sortDirection": "Order",
+      "uploadTime": "Upload Time",
+      "completionTime": "Completion Time",
+      "allVideos": "All Videos",
+      "uploaded": "Uploaded",
+      "inQueue": "In Queue",
+      "processing": "Processing",
+      "completed": "Completed (All)",
+      "completedPublished": "Completed & Published",
+      "completedUnpublished": "Completed & Unpublished",
+      "failed": "Failed",
+      "asc": "Ascending",
+      "desc": "Descending"
     },
     "empty": {
       "title": "No videos yet",
       "message": "Start creating amazing videos from your images!",
-      "button": "Create Your First Video"
+      "button": "Create Your First Video",
+      "filtered": "No videos match your filters"
     },
     "status": {
       "uploaded": "Uploaded",

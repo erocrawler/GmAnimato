@@ -120,6 +120,10 @@ export type PaginatedVideos = {
 
 export type GetVideosByUserOptions = {
   includeDeleted?: boolean;
+  sortBy?: 'upload' | 'completion'; // Sort by upload time (created_at) or completion time (when status became 'completed')
+  sortDirection?: 'asc' | 'desc'; // Sort ascending or descending
+  status?: VideoEntry['status']; // Filter by video status
+  isPublished?: boolean; // Filter by published status
 };
 
 export type GetPublishedVideosOptions = {

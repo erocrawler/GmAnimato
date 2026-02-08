@@ -93,10 +93,30 @@ export class JsonFileDatabase implements IDatabase {
   async getVideosByUser(user_id: string, page: number = 1, pageSize: number = 12, options?: import('./IDatabase').GetVideosByUserOptions): Promise<import('./IDatabase').PaginatedVideos> {
     const rows = await this.readAll();
     const includeDeleted = options?.includeDeleted ?? false;
+    const sortBy = options?.sortBy ?? 'upload';
+    const sortDirection = options?.sortDirection ?? 'desc';
+    
     let filtered = rows.filter((r) => r.user_id === user_id && (includeDeleted || r.status !== 'deleted'));
     
-    // Sort by created_at descending (newest first)
-    filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    // Apply status filter if provided
+    if (options?.status) {
+      filtered = filtered.filter((r) => r.status === options.status);
+    }
+
+    // Apply isPublished filter if provided
+    if (options?.isPublished !== undefined) {
+      filtered = filtered.filter((r) => r.is_published === options.isPublished);
+    }
+    
+    // Sort based on sortBy option
+    // Note: 'completion' sort uses created_at as proxy since we don't have a dedicated completed_at field
+    const directionMultiplier = sortDirection === 'asc' ? 1 : -1;
+    if (sortBy === 'completion') {
+      filtered.sort((a, b) => (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * directionMultiplier);
+    } else {
+      // Default: sort by upload time (created_at)
+      filtered.sort((a, b) => (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * directionMultiplier);
+    }
     
     const total = filtered.length;
     const skip = (page - 1) * pageSize;

@@ -134,12 +134,27 @@
     "title": "我的视频",
     "createNew": "创建新视频",
     "filters": {
-      "status": "状态"
+      "status": "状态",
+      "sortBy": "排序方式",
+      "sortDirection": "顺序",
+      "uploadTime": "上传时间",
+      "completionTime": "完成时间",
+      "allVideos": "所有视频",
+      "uploaded": "已上传",
+      "inQueue": "排队中",
+      "processing": "处理中",
+      "completed": "已完成（全部）",
+      "completedPublished": "已完成且已发布",
+      "completedUnpublished": "已完成未发布",
+      "failed": "失败",
+      "asc": "升序",
+      "desc": "降序"
     },
     "empty": {
       "title": "还没有视频",
       "message": "开始从您的图像创建精彩视频吧！",
-      "button": "创建您的第一个视频"
+      "button": "创建您的第一个视频",
+      "filtered": "没有符合筛选条件的视频"
     },
     "status": {
       "uploaded": "已上传",
