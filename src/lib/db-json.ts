@@ -122,14 +122,30 @@ export class JsonFileDatabase implements IDatabase {
     }
     
     // Sort based on sortBy option
-    // Note: 'completion' sort uses created_at as proxy since we don't have a dedicated completed_at field
+    // Completion time = processing_started_at + processing_time_ms
     const directionMultiplier = sortDirection === 'asc' ? 1 : -1;
-    if (sortBy === 'completion') {
-      filtered.sort((a, b) => (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * directionMultiplier);
-    } else {
-      // Default: sort by upload time (created_at)
-      filtered.sort((a, b) => (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * directionMultiplier);
-    }
+    filtered.sort((a, b) => {
+      let aVal: number;
+      let bVal: number;
+
+      if (sortBy === 'completion') {
+        const aCompletionTime = a.processing_started_at 
+          ? new Date(a.processing_started_at).getTime() + (a.processing_time_ms || 0)
+          : new Date(a.created_at).getTime();
+        const bCompletionTime = b.processing_started_at 
+          ? new Date(b.processing_started_at).getTime() + (b.processing_time_ms || 0)
+          : new Date(b.created_at).getTime();
+        
+        aVal = aCompletionTime;
+        bVal = bCompletionTime;
+      } else {
+        // Default: sort by upload time (created_at)
+        aVal = new Date(a.created_at).getTime();
+        bVal = new Date(b.created_at).getTime();
+      }
+
+      return (bVal - aVal) * directionMultiplier;
+    });
     
     const total = filtered.length;
     const skip = (page - 1) * pageSize;

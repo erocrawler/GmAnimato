@@ -58,6 +58,7 @@ model Video {
   processingStartedAt DateTime?   @map("processing_started_at")
   dequeuedAt          DateTime?   @map("dequeued_at")
   processingTimeMs    Int?        @map("processing_time_ms")
+  completionTime      BigInt?     @map("completion_time") @db.BigInt
   progressPercentage  Float?      @map("progress_percentage")
   progressDetails     Json?       @map("progress_details")
   iterationSteps      Int?        @map("iteration_steps")
@@ -76,6 +77,7 @@ model Video {
   @@index([isPublished])
   @@index([isPublished, createdAt])
   @@index([isLocalJob, status, processingStartedAt])
+  @@index([userId, completionTime(sort: Desc)])
   @@map("videos")
 }
 

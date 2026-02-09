@@ -136,22 +136,22 @@ export class PostgresDatabase implements IDatabase {
       where.isPublished = options.isPublished;
     }
 
-    // Determine sort order
-    // Note: 'completion' sort uses createdAt as proxy since we don't have a dedicated completedAt field
-    // For completed videos, this represents when they finished processing (approximately)
-    const orderBy = sortBy === 'completion' ? { createdAt: sortDirection } : { createdAt: sortDirection };
-    
+    // Determine sort order using the generated completionTime column
+    const orderBy = sortBy === 'completion'
+      ? { completionTime: sortDirection }
+      : { createdAt: sortDirection };
+
     const [videos, total] = await Promise.all([
       this.prisma.video.findMany({
         where,
-        orderBy,
-        skip,
-        take: pageSize,
         include: {
           _count: {
             select: { likes: true }
           }
-        }
+        },
+        orderBy,
+        skip,
+        take: pageSize,
       }),
       this.prisma.video.count({ where })
     ]);
