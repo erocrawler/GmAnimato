@@ -74,6 +74,7 @@ async function convertWithFfmpeg(
       '-i', inputUrl,
       '-vf', `${scaleFilter},split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse`,
       '-loop', '0',
+      '-f', 'gif',
       '-y', tmpPath,
     ];
   } else {
@@ -81,6 +82,7 @@ async function convertWithFfmpeg(
       '-i', inputUrl,
       '-vf', scaleFilter,
       '-loop', '0',
+      '-f', 'webp',
       '-y', tmpPath,
     ];
   }

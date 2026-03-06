@@ -1,6 +1,7 @@
 <script lang="ts">
   import { _ } from 'svelte-i18n';
   import VideoMetadata from '$lib/components/VideoMetadata.svelte';
+  import DownloadDropdown from '$lib/components/DownloadDropdown.svelte';
   
   let { data } = $props<{ data: { video: any; user?: any; relatedVideos: any[]; author?: { id: string; username: string } | null; workflow?: any | null; loraPresets?: any[] } }>();
   let video = $derived(data.video);
@@ -187,16 +188,7 @@
                 {isLiked ? $_('videoDetail.unlike') : $_('videoDetail.like')} ({likesCount})
               </button>
               
-              <a 
-                href={video.final_video_url}
-                download="video-{video.id}.mp4"
-                class="btn btn-primary gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                {$_('videoDetail.download')}
-              </a>
+              <DownloadDropdown videoId={video.id} videoUrl={video.final_video_url} />
 
               {#if video.original_image_url && data.user}
                 <button 
