@@ -59,7 +59,7 @@
       {$_('videoDetail.download')}
     </a>
     <button
-      class="btn btn-primary join-item px-2"
+      class="btn btn-primary join-item px-2 flex-grow"
       aria-label={$_('videoDetail.moreDownloads')}
       aria-expanded={showMenu}
       onclick={() => showMenu = true}
