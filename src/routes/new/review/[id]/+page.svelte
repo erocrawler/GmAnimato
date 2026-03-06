@@ -25,6 +25,7 @@
   let showAdvancedSettings = false;
   let progressPercentage: number | null = null;
   let quotaRemaining: number | null = null;
+  let quotaLimit: number | null = null;
   let quotaLoading = true;
 
   // Workflow management - initialize from loaded data
@@ -259,6 +260,7 @@
       if (quotaRes.ok) {
         const quotaData = await quotaRes.json();
         quotaRemaining = quotaData.remaining;
+        quotaLimit = quotaData.limit;
       }
     } catch (err) {
       console.error('Failed to fetch quota:', err);
@@ -432,7 +434,15 @@
           // User hit their personal limit
           showBusyModal = true;
           limitType = 'user';
-          busyModalMessage = j.error || t('review.serverBusy.userLimit');
+          if (j.errorCode === 'quota_none') {
+            busyModalMessage = t('review.quotaLimit.none');
+          } else if (j.errorCode === 'quota_exceeded') {
+            busyModalMessage = t('review.quotaLimit.exceeded', { values: { limit: j.limit, used: j.used } });
+          } else if (j.errorCode === 'queue_limit') {
+            busyModalMessage = t('review.quotaLimit.queueLimit', { values: { limit: j.limit } });
+          } else {
+            busyModalMessage = j.error || t('review.serverBusy.userLimit');
+          }
         } else if (res.status === 503) {
           // System-wide queue full
           showBusyModal = true;
@@ -892,9 +902,15 @@
         </button>
         <div class="flex gap-2 flex-col sm:flex-row sm:items-center">
           {#if !quotaLoading && quotaRemaining !== null}
-            <div class="badge badge-lg" class:badge-error={quotaRemaining === 0} class:badge-warning={quotaRemaining < 3} class:badge-success={quotaRemaining > 0}>
-              {$_('review.quotaRemaining', { values: { count: quotaRemaining } })}
-            </div>
+            {#if quotaLimit === 0}
+              <div class="badge badge-lg badge-error">
+                {$_('review.quotaNoAccess')}
+              </div>
+            {:else}
+              <div class="badge badge-lg" class:badge-error={quotaRemaining === 0} class:badge-warning={quotaRemaining > 0 && quotaRemaining < 3} class:badge-success={quotaRemaining > 0}>
+                {$_('review.quotaRemaining', { values: { count: quotaRemaining } })}
+              </div>
+            {/if}
           {/if}
           {#if entry.status === "failed"}
             <button 

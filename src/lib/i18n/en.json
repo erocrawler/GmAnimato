@@ -105,7 +105,13 @@
     },
     "errors": {
       "authFailed": "Authentication failed",
-      "loginToAccess": "Please login to access this page"
+      "loginToAccess": "Please login to access this page",
+      "invalidCredentials": "Invalid username or password",
+      "registrationDisabled": "Registration is currently disabled",
+      "invalidPasscode": "Invalid registration code",
+      "usernameTaken": "That username is already taken",
+      "missingFields": "Please fill in all required fields",
+      "validationError": "Invalid input — please check your username and try again"
     }
   },
   "gallery": {
@@ -361,7 +367,10 @@
     "quotaLimit": {
       "title": "Daily Quota Reached",
       "message": "Become a sponsor to get more video generation quota!",
-      "sponsorButton": "Become a Sponsor"
+      "sponsorButton": "Become a Sponsor",
+      "none": "You don't have video generation quota. Become a sponsor to start creating videos!",
+      "exceeded": "You've used all {limit} video{limit,plural,=1{} other{s}} for today ({used} created). Please try again tomorrow, or become a sponsor for a higher limit.",
+      "queueLimit": "You already have {limit} video{limit,plural,=1{} other{s}} in the queue. Please wait for some to complete before starting new ones."
     },
     "warnings": {
       "noTags": {
@@ -374,7 +383,8 @@
       }
     },
     "videoDeleted": "This video has been deleted.",
-    "quotaRemaining": "Quota: {count} video{count,plural,=1{} other{s}} left"
+    "quotaRemaining": "Quota: {count} video{count,plural,=1{} other{s}} left",
+    "quotaNoAccess": "No quota — sponsor to unlock"
   },
   "users": {
     "username": "Username"

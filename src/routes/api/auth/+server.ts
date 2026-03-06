@@ -19,7 +19,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
   if (!action || !username || !password) {
     return new Response(
-      JSON.stringify({ error: 'Missing required fields (action, username, password)' }),
+      JSON.stringify({ error: 'Missing required fields (action, username, password)', errorCode: 'missing_fields' }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -28,7 +28,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
   const validationErrors = validateUser({ username, email });
   if (validationErrors.length > 0) {
     return new Response(
-      JSON.stringify({ error: formatValidationErrors(validationErrors) }),
+      JSON.stringify({ error: formatValidationErrors(validationErrors), errorCode: 'validation_error' }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -36,7 +36,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
   if (action === 'login') {
     const user = await authenticateUser(username, password);
     if (!user) {
-      return new Response(JSON.stringify({ error: 'Invalid credentials' }), {
+      return new Response(JSON.stringify({ error: 'Invalid credentials', errorCode: 'invalid_credentials' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -96,7 +96,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
     // Check if registration is enabled
     const settings = await getAdminSettings();
     if (!settings.registrationEnabled) {
-      return new Response(JSON.stringify({ error: 'Registration is currently disabled' }), {
+      return new Response(JSON.stringify({ error: 'Registration is currently disabled', errorCode: 'registration_disabled' }), {
         status: 403,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -106,7 +106,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
     if (settings.registrationPasscode) {
       const passcode = body.passcode as string | undefined;
       if (!passcode || passcode !== settings.registrationPasscode) {
-        return new Response(JSON.stringify({ error: 'Invalid registration passcode' }), {
+        return new Response(JSON.stringify({ error: 'Invalid registration passcode', errorCode: 'invalid_passcode' }), {
           status: 403,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -115,7 +115,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
     const user = await registerUser(username, password, email);
     if (!user) {
-      return new Response(JSON.stringify({ error: 'Username already exists' }), {
+      return new Response(JSON.stringify({ error: 'Username already exists', errorCode: 'username_taken' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });

@@ -33,7 +33,17 @@
       const json = await res.json();
 
       if (!res.ok) {
-        error = json.error || $_('auth.errors.authFailed');
+        const code = json.errorCode as string | undefined;
+        const t = $_;
+        const codeMap: Record<string, string> = {
+          invalid_credentials: t('auth.errors.invalidCredentials'),
+          registration_disabled: t('auth.errors.registrationDisabled'),
+          invalid_passcode: t('auth.errors.invalidPasscode'),
+          username_taken: t('auth.errors.usernameTaken'),
+          missing_fields: t('auth.errors.missingFields'),
+          validation_error: json.error || t('auth.errors.validationError'),
+        };
+        error = (code && codeMap[code]) || json.error || t('auth.errors.authFailed');
         return;
       }
 

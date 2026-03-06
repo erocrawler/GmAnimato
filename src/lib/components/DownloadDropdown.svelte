@@ -51,7 +51,7 @@
     <a
       href={videoUrl}
       download="video-{videoId}.mp4"
-      class="btn btn-primary join-item gap-2"
+      class="btn btn-primary join-item gap-2 flex-grow"
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -59,7 +59,7 @@
       {$_('videoDetail.download')}
     </a>
     <button
-      class="btn btn-primary join-item px-2 flex-grow"
+      class="btn btn-primary join-item px-2"
       aria-label={$_('videoDetail.moreDownloads')}
       aria-expanded={showMenu}
       onclick={() => showMenu = true}

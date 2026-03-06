@@ -190,8 +190,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     if (locals.user) {
       const quotaCheck = await checkDailyQuota(locals.user, settings);
       if (quotaCheck.exceeded) {
+        const errorCode = quotaCheck.limit === 0 ? 'quota_none' : 'quota_exceeded';
         return new Response(JSON.stringify({ 
-          error: `You have reached your daily limit of ${quotaCheck.limit} videos. You've created ${quotaCheck.used} videos today. Please try again tomorrow.` 
+          error: `You have reached your daily limit of ${quotaCheck.limit} videos. You've created ${quotaCheck.used} videos today.`,
+          errorCode,
+          limit: quotaCheck.limit,
+          used: quotaCheck.used,
         }), { 
           status: 429, 
           headers: { 'Content-Type': 'application/json' } 
@@ -295,7 +299,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     
     if (activeJobCount >= queueLimit) {
       return new Response(JSON.stringify({ 
-        error: `You have reached your queue limit of ${queueLimit} jobs. Please wait for some to complete.` 
+        error: `You have reached your queue limit of ${queueLimit} jobs. Please wait for some to complete.`,
+        errorCode: 'queue_limit',
+        limit: queueLimit,
       }), { 
         status: 429, 
         headers: { 'Content-Type': 'application/json' } 
