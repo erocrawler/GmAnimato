@@ -298,7 +298,7 @@
             <div class="divider"></div>
 
             <!-- Download split-button dropdown -->
-            <DownloadDropdown videoId={video.id} videoUrl={video.final_video_url} />
+            <DownloadDropdown videoId={video.id} videoUrl={video.final_video_url} fullWidth />
           {/if}
 
           <div class="divider"></div>

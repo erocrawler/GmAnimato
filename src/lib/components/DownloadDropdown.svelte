@@ -1,7 +1,7 @@
 <script lang="ts">
   import { _ } from 'svelte-i18n';
 
-  let { videoId, videoUrl } = $props<{ videoId: string; videoUrl: string }>();
+  let { videoId, videoUrl, fullWidth = false } = $props<{ videoId: string; videoUrl: string; fullWidth?: boolean }>();
 
   let showMenu = $state(false);
   let converting = $state<'gif' | 'gif-small' | 'webp' | null>(null);
@@ -43,10 +43,11 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="dropdown dropdown-end"
+  class:w-full={fullWidth}
   class:dropdown-open={showMenu}
   use:clickOutside={() => showMenu = false}
 >
-  <div class="join">
+  <div class:join={true} class:w-full={fullWidth}>
     <a
       href={videoUrl}
       download="video-{videoId}.mp4"
@@ -61,9 +62,9 @@
       class="btn btn-primary join-item px-2"
       aria-label={$_('videoDetail.moreDownloads')}
       aria-expanded={showMenu}
-      onclick={() => showMenu = !showMenu}
+      onclick={() => showMenu = true}
     >
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transition-transform" class:rotate-180={showMenu} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
       </svg>
     </button>

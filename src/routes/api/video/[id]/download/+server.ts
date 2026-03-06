@@ -142,13 +142,6 @@ async function getConverted(
 }
 
 export const GET: RequestHandler = async ({ params, locals, url }) => {
-  if (!locals.user) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
   const id = params.id;
   if (!id) {
     return new Response(JSON.stringify({ error: 'Missing video id' }), {
@@ -186,7 +179,8 @@ export const GET: RequestHandler = async ({ params, locals, url }) => {
     });
   }
 
-  if (video.user_id !== locals.user.id) {
+  const isOwner = locals.user && video.user_id === locals.user.id;
+  if (!isOwner && !video.is_published) {
     return new Response(JSON.stringify({ error: 'Forbidden' }), {
       status: 403,
       headers: { 'Content-Type': 'application/json' },
