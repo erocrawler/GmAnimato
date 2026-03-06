@@ -804,6 +804,7 @@ export class PostgresDatabase implements IDatabase {
     if (patch.sponsorApiUrl !== undefined) sponsorConfig.sponsorApiUrl = patch.sponsorApiUrl;
     if (patch.sponsorApiToken !== undefined) sponsorConfig.sponsorApiToken = patch.sponsorApiToken;
     if (patch.deviceId !== undefined) sponsorConfig.deviceId = patch.deviceId;
+    if (patch.registrationPasscode !== undefined) sponsorConfig.registrationPasscode = patch.registrationPasscode;
     if (Object.keys(sponsorConfig).length > 0) data.sponsorConfig = sponsorConfig;
 
     const settings = await this.prisma.adminSettings.upsert({
@@ -915,6 +916,7 @@ export class PostgresDatabase implements IDatabase {
       sponsorApiUrl: sponsorConfig.sponsorApiUrl || undefined,
       sponsorApiToken: sponsorConfig.sponsorApiToken || undefined,
       deviceId: sponsorConfig.deviceId || undefined,
+      registrationPasscode: sponsorConfig.registrationPasscode || undefined,
       updatedAt: settings.updatedAt.toISOString(),
     };
   }

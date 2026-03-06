@@ -9,7 +9,9 @@
   let error = '';
   let loading = false;
   let isRegister = false;
+  let passcode = '';
   let registrationEnabled = data.registrationEnabled ?? true;
+  let registrationPasscodeRequired: boolean = (data as any).registrationPasscodeRequired ?? false;
 
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
@@ -24,6 +26,7 @@
           action: isRegister ? 'register' : 'login',
           username,
           password,
+          ...(isRegister ? { passcode } : {}),
         }),
       });
 
@@ -120,6 +123,23 @@
             required
           />
         </div>
+
+        {#if isRegister && registrationPasscodeRequired}
+          <div class="form-control">
+            <label class="label" for="passcode">
+              <span class="label-text">{$_('auth.register.passcode')}</span>
+            </label>
+            <input
+              id="passcode"
+              type="text"
+              bind:value={passcode}
+              placeholder={$_('auth.register.enterPasscode')}
+              class="input input-bordered"
+              disabled={loading}
+              required
+            />
+          </div>
+        {/if}
 
         <div class="form-control mt-6">
           <button type="submit" class="btn btn-primary" disabled={loading}>

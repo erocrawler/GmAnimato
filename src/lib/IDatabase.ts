@@ -82,6 +82,7 @@ export type Workflow = {
 export type AdminSettings = {
   id: string;
   registrationEnabled: boolean;
+  registrationPasscode?: string; // Optional passcode required to register
   roles?: RoleConfig[]; // Configurable roles with tier mapping
   quotaPerDay: Record<string, number>; // Role-based quota map, e.g. { "free": 10, "gmgard-user": 50, "paid": 100, "premium": 100 }
   maxConcurrentJobs: number;

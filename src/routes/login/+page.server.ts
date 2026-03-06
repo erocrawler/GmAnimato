@@ -6,5 +6,6 @@ export const load: PageServerLoad = async () => {
   
   return {
     registrationEnabled: settings.registrationEnabled,
+    registrationPasscodeRequired: !!(settings.registrationPasscode),
   };
 };

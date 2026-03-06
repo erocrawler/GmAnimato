@@ -650,6 +650,13 @@
             <input id="registration-enabled" type="checkbox" bind:checked={settings.registrationEnabled} class="toggle toggle-primary" />
           </label>
         </div>
+        <div class="form-control">
+          <label class="label" for="registration-passcode">
+            <span class="label-text">{$_('admin.settings.registrationPasscode')}</span>
+            <span class="label-text-alt text-xs opacity-70">{$_('admin.settings.registrationPasscodeHelp')}</span>
+          </label>
+          <input id="registration-passcode" type="text" bind:value={settings.registrationPasscode} class="input input-bordered" placeholder={$_('admin.settings.registrationPasscodePlaceholder')} />
+        </div>
       </div>
 
       <div class="divider">Role Configuration</div>

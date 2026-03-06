@@ -102,6 +102,17 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
       });
     }
 
+    // Validate passcode if configured
+    if (settings.registrationPasscode) {
+      const passcode = body.passcode as string | undefined;
+      if (!passcode || passcode !== settings.registrationPasscode) {
+        return new Response(JSON.stringify({ error: 'Invalid registration passcode' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
     const user = await registerUser(username, password, email);
     if (!user) {
       return new Response(JSON.stringify({ error: 'Username already exists' }), {

@@ -42,6 +42,33 @@
   let likesCount = $derived(video.likesCount || 0);
   let isLiked = $derived(video.isLiked || false);
   let reusing = $state(false);
+  let showDownloadMenu = $state(false);
+  let converting = $state<'gif' | 'gif-small' | 'webp' | null>(null);
+
+  async function downloadConverted(format: 'gif' | 'webp', quality?: 'small') {
+    converting = format === 'gif' ? (quality === 'small' ? 'gif-small' : 'gif') : 'webp';
+    try {
+      const qs = new URLSearchParams({ format });
+      if (quality) qs.set('quality', quality);
+      const res = await fetch(`/api/video/${video.id}/download?${qs}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        alert($_('videoDetail.downloadConvertError') + ': ' + (err.error || res.statusText));
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `video-${video.id}${quality === 'small' ? '-small' : ''}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert($_('videoDetail.downloadConvertError') + ': ' + err);
+    } finally {
+      converting = null;
+    }
+  }
 
   async function reuseImage() {
     reusing = true;
@@ -296,16 +323,82 @@
 
             <div class="divider"></div>
 
-            <a 
-              href={video.final_video_url}
-              download="video-{video.id}.mp4"
-              class="btn btn-primary"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              {$_('videoDetail.download')}
-            </a>
+            <!-- Download split-button dropdown -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div class="dropdown dropdown-end w-full" class:dropdown-open={showDownloadMenu}>
+              <div class="join w-full">
+                <a
+                  href={video.final_video_url}
+                  download="video-{video.id}.mp4"
+                  class="btn btn-primary join-item flex-1"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  {$_('videoDetail.download')}
+                </a>
+                <button
+                  class="btn btn-primary join-item px-2"
+                  aria-label={$_('videoDetail.moreDownloads')}
+                  aria-expanded={showDownloadMenu}
+                  onclick={() => showDownloadMenu = !showDownloadMenu}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transition-transform" class:rotate-180={showDownloadMenu} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
+              <ul class="dropdown-content menu bg-base-100 rounded-box z-10 w-full shadow-lg border border-base-300 mt-1 p-1">
+                <li>
+                  <button
+                    onclick={() => { downloadConverted('gif'); showDownloadMenu = false; }}
+                    disabled={converting !== null}
+                    class="flex items-center gap-2"
+                  >
+                    {#if converting === 'gif'}
+                      <span class="loading loading-spinner loading-xs"></span>
+                    {:else}
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                    {/if}
+                    {converting === 'gif' ? $_('videoDetail.downloadConverting') : $_('videoDetail.downloadGif')}
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onclick={() => { downloadConverted('gif', 'small'); showDownloadMenu = false; }}
+                    disabled={converting !== null}
+                    class="flex items-center gap-2"
+                  >
+                    {#if converting === 'gif-small'}
+                      <span class="loading loading-spinner loading-xs"></span>
+                    {:else}
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                    {/if}
+                    {converting === 'gif-small' ? $_('videoDetail.downloadConverting') : $_('videoDetail.downloadGifSmall')}
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onclick={() => { downloadConverted('webp'); showDownloadMenu = false; }}
+                    disabled={converting !== null}
+                    class="flex items-center gap-2"
+                  >
+                    {#if converting === 'webp'}
+                      <span class="loading loading-spinner loading-xs"></span>
+                    {:else}
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                    {/if}
+                    {converting === 'webp' ? $_('videoDetail.downloadConverting') : $_('videoDetail.downloadWebp')}
+                  </button>
+                </li>
+              </ul>
+            </div>
           {/if}
 
           <div class="divider"></div>
