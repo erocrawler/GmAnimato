@@ -27,6 +27,16 @@ export type VideoEntry = {
   iteration_steps?: number; // 4, 6, or 8 steps
   video_duration?: number; // 4 or 6 seconds
   video_resolution?: string; // '480p' or '720p'
+  validation_metadata?: {
+    manual_recognition_done?: boolean;
+    manual_recognition_requested_at?: string;
+    manual_recognition_completed_at?: string;
+    manual_recognition_error?: string;
+    revalidation_status?: 'idle' | 'pending' | 'processing' | 'completed' | 'failed';
+    revalidation_requested_at?: string;
+    revalidation_completed_at?: string;
+    revalidation_error?: string;
+  };
   additional_options?: {
     motion_scale?: number; // Motion scale (0.5 to 2.0)
     freelong_blend_strength?: number; // FreeLong blend strength (0 to 1)

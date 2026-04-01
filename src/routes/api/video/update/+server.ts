@@ -40,17 +40,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 
     // Prevent publishing NSFW photo-realistic content to gallery
-    if (is_published && existing.is_nsfw && existing.is_photo_realistic) {
+    if (is_published && existing.is_nsfw === true && existing.is_photo_realistic === true) {
       return new Response(
         JSON.stringify({ error: 'Cannot publish NSFW photo-realistic content to gallery' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Prevent publishing if image recognition failed (no suggested prompts)
-    if (is_published && (!existing.suggested_prompts || existing.suggested_prompts.length === 0)) {
-      return new Response(
-        JSON.stringify({ error: 'Cannot publish to gallery - image recognition failed. Please try uploading again.' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }

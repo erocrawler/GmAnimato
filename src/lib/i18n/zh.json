@@ -278,8 +278,13 @@
     "addTag": "添加",
     "tagPlaceholder": "输入后按回车...",
     "aiSuggestions": "AI建议",
+    "analyzeWithCustomVL": "使用 AI 分析",
+    "analyzing": "分析中...",
+    "analysisSuccess": "分析完成，建议和标签已刷新。",
+    "analysisUnavailable": "当前无法完成分析。请稍后再重试。",
+    "analysisFailed": "分析失败：{error}",
     "suggestedPrompts": "建议的提示词：",
-    "noSuggestions": "没有AI建议",
+    "noSuggestions": "没有AI建议，点击使用AI分析获取建议。",
     "yourPrompt": "您的提示词",
     "promptHelp": "编辑或输入您的自定义提示词（支持中英文）。点击上方建议即可使用。",
     "promptPlaceholder": "描述您希望视频的样子...",
@@ -372,10 +377,6 @@
       "queueLimit": "您已有 {limit} 个视频在队列中。请等待其中一些完成后再开始新的。"
     },
     "warnings": {
-      "noTags": {
-        "title": "图像识别失败",
-        "message": "您仍可以生成视频，但无法将其发布到视频库。考虑重新上传图像或尝试其他图像。"
-      },
       "nsfwRealistic": {
         "title": "发布受限制",
         "message": "该图像被检测为 NSFW 和照片级真实性。您可以生成视频，但无法将其发布到视频库。"

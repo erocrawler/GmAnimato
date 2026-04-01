@@ -279,8 +279,13 @@
     "addTag": "Add",
     "tagPlaceholder": "Type and press Enter...",
     "aiSuggestions": "AI Suggestions",
+    "analyzeWithCustomVL": "Analyze with AI",
+    "analyzing": "Analyzing...",
+    "analysisSuccess": "Analysis completed. Suggestions and tags were refreshed.",
+    "analysisUnavailable": "Analysis is currently unavailable. Please retry later.",
+    "analysisFailed": "Analysis failed: {error}",
     "suggestedPrompts": "Suggested Prompts:",
-    "noSuggestions": "No AI suggestions available",
+    "noSuggestions": "No AI suggestions available. Click 'Analyze with AI' to get suggestions based on your image.",
     "yourPrompt": "Your Prompt",
     "promptHelp": "Edit or enter your custom prompt in English or Chinese. Click a suggestion above to use it.",
     "promptPlaceholder": "Describe how you want your video to look...",
@@ -373,10 +378,6 @@
       "queueLimit": "You already have {limit} video{limit,plural,=1{} other{s}} in the queue. Please wait for some to complete before starting new ones."
     },
     "warnings": {
-      "noTags": {
-        "title": "Image Recognition Failed",
-        "message": "You can still generate a video, but you won't be able to publish it to the gallery. Consider re-uploading the image or try a different image."
-      },
       "nsfwRealistic": {
         "title": "Publishing Restricted",
         "message": "This image is detected as NSFW and photo-realistic. You can generate a video, but it cannot be published to the gallery."

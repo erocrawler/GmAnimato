@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { createVideoEntryWithRecognition } from '$lib/videoEntryCreation';
+import { createVideoEntryForReview } from '$lib/videoEntryCreation';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
   try {
@@ -20,8 +20,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       return new Response(JSON.stringify({ error: 'missing lastImageUrl for fl2v mode' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
-    // Create video entry with image recognition
-    const result = await createVideoEntryWithRecognition({
+    // Create video entry without auto recognition (manual analysis on review page)
+    const result = await createVideoEntryForReview({
       userId: locals.user.id,
       mode,
       originalImageUrl,

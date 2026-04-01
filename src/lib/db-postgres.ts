@@ -16,32 +16,35 @@ export class PostgresDatabase implements IDatabase {
   // ==================== Video Methods ====================
 
   async createVideoEntry(entry: Omit<VideoEntry, 'id' | 'created_at'> & { id?: string }): Promise<VideoEntry> {
+    const data: any = {
+      id: entry.id,
+      userId: entry.user_id,
+      workflowId: entry.workflow_id,
+      originalImageUrl: entry.original_image_url,
+      lastImageUrl: entry.last_image_url,
+      prompt: entry.prompt,
+      tags: entry.tags ? JSON.stringify(entry.tags) : null,
+      suggestedPrompts: entry.suggested_prompts ? JSON.stringify(entry.suggested_prompts) : null,
+      isPhotoRealistic: entry.is_photo_realistic,
+      isNsfw: entry.is_nsfw,
+      status: entry.status,
+      jobId: entry.job_id,
+      isLocalJob: entry.is_local_job ?? false,
+      finalVideoUrl: entry.final_video_url,
+      isPublished: entry.is_published ?? false,
+      iterationSteps: entry.iteration_steps,
+      videoDuration: entry.video_duration,
+      videoResolution: entry.video_resolution,
+      validationMetadata: entry.validation_metadata,
+      additionalOptions: entry.additional_options,
+      loraWeights: entry.lora_weights,
+      seed: entry.seed,
+      processingStartedAt: entry.processing_started_at ? new Date(entry.processing_started_at) : null,
+      dequeuedAt: entry.dequeued_at ? new Date(entry.dequeued_at) : null,
+    };
+
     const video = await this.prisma.video.create({
-      data: {
-        id: entry.id,
-        userId: entry.user_id,
-        workflowId: entry.workflow_id,
-        originalImageUrl: entry.original_image_url,
-        lastImageUrl: entry.last_image_url,
-        prompt: entry.prompt,
-        tags: entry.tags ? JSON.stringify(entry.tags) : null,
-        suggestedPrompts: entry.suggested_prompts ? JSON.stringify(entry.suggested_prompts) : null,
-        isPhotoRealistic: entry.is_photo_realistic,
-        isNsfw: entry.is_nsfw,
-        status: entry.status,
-        jobId: entry.job_id,
-        isLocalJob: entry.is_local_job ?? false,
-        finalVideoUrl: entry.final_video_url,
-        isPublished: entry.is_published ?? false,
-        iterationSteps: entry.iteration_steps,
-        videoDuration: entry.video_duration,
-        videoResolution: entry.video_resolution,
-        additionalOptions: entry.additional_options,
-        loraWeights: entry.lora_weights,
-        seed: entry.seed,
-        processingStartedAt: entry.processing_started_at ? new Date(entry.processing_started_at) : null,
-        dequeuedAt: entry.dequeued_at ? new Date(entry.dequeued_at) : null,
-      },
+      data,
     });
 
     return this.mapToVideoEntry(video);
@@ -286,6 +289,7 @@ export class PostgresDatabase implements IDatabase {
       if (patch.iteration_steps !== undefined) data.iterationSteps = patch.iteration_steps;
       if (patch.video_duration !== undefined) data.videoDuration = patch.video_duration;
       if (patch.video_resolution !== undefined) data.videoResolution = patch.video_resolution;
+      if (patch.validation_metadata !== undefined) data.validationMetadata = patch.validation_metadata;
       if (patch.additional_options !== undefined) data.additionalOptions = patch.additional_options;
       if (patch.lora_weights !== undefined) data.loraWeights = patch.lora_weights;
       if (patch.seed !== undefined) data.seed = patch.seed;
@@ -841,6 +845,27 @@ export class PostgresDatabase implements IDatabase {
 
   // ==================== Mapping Methods ====================
 
+  private safeParseJsonArray(value: unknown): string[] {
+    if (!value) return [];
+
+    if (Array.isArray(value)) {
+      return value.filter((item): item is string => typeof item === 'string');
+    }
+
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((item): item is string => typeof item === 'string');
+        }
+      } catch (error) {
+        console.error('[DB] Failed to parse JSON array:', error);
+      }
+    }
+
+    return [];
+  }
+
   private mapToVideoEntry(video: any): VideoEntry {
     return {
       id: video.id,
@@ -849,8 +874,8 @@ export class PostgresDatabase implements IDatabase {
       original_image_url: video.originalImageUrl,
       last_image_url: video.lastImageUrl || undefined,
       prompt: video.prompt || undefined,
-      tags: video.tags ? JSON.parse(video.tags) : undefined,
-      suggested_prompts: video.suggestedPrompts ? JSON.parse(video.suggestedPrompts) : undefined,
+      tags: this.safeParseJsonArray(video.tags),
+      suggested_prompts: this.safeParseJsonArray(video.suggestedPrompts),
       is_photo_realistic: video.isPhotoRealistic ?? undefined,
       is_nsfw: video.isNsfw ?? undefined,
       status: video.status as VideoEntry['status'],
@@ -866,6 +891,7 @@ export class PostgresDatabase implements IDatabase {
       iteration_steps: video.iterationSteps ?? undefined,
       video_duration: video.videoDuration ?? undefined,
       video_resolution: video.videoResolution || undefined,
+      validation_metadata: video.validationMetadata || undefined,
       additional_options: video.additionalOptions || undefined,
       lora_weights: video.loraWeights || undefined,
       seed: video.seed ?? undefined,

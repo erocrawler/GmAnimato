@@ -261,13 +261,11 @@
                   class="toggle toggle-primary" 
                   checked={video.is_published}
                   onchange={togglePublish}
-                  disabled={publishing || (video.is_nsfw && video.is_photo_realistic) || (!video.suggested_prompts || video.suggested_prompts.length === 0)}
+                  disabled={publishing || (video.is_nsfw && video.is_photo_realistic)}
                 />
               </label>
               {#if video.is_nsfw && video.is_photo_realistic}
                 <p class="text-xs text-error mt-1">{$_('videoDetail.nsfw')}</p>
-              {:else if !video.suggested_prompts || video.suggested_prompts.length === 0}
-                <p class="text-xs text-warning mt-1">{$_('videoDetail.recognitionFailed')}</p>
               {/if}
             </div>
 

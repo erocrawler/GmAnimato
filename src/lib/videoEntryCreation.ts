@@ -1,8 +1,5 @@
 import { createVideoEntry, getDefaultWorkflow } from '$lib/db';
-import { annotateImage } from '$lib/imageRecognition';
 import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
-import { toOriginalUrl } from '$lib/serverImageUrl';
-import { env } from '$env/dynamic/private';
 
 export interface CreateVideoEntryParams {
   userId: string;
@@ -14,38 +11,26 @@ export interface CreateVideoEntryParams {
 export interface CreateVideoEntryResult {
   success: boolean;
   entry?: any;
-  recognitionFailed?: boolean;
   error?: string;
 }
 
 /**
- * Shared logic for creating video entries with image recognition.
+ * Shared logic for creating review-ready video entries.
  * Handles both new uploads and reused images.
  */
-export async function createVideoEntryWithRecognition(
+export async function createVideoEntryForReview(
   params: CreateVideoEntryParams
 ): Promise<CreateVideoEntryResult> {
   const { userId, mode, originalImageUrl, lastImageUrl } = params;
 
   try {
-    const grokApiKey = env.GROK_API_KEY;
-    
-    // Convert proxy URLs to original S3 URLs for Grok
-    const originalForGrok = toOriginalUrl(originalImageUrl);
-    const lastForGrok = lastImageUrl ? toOriginalUrl(lastImageUrl) : undefined;
-
-    // Run image recognition (videoId not available yet during upload)
-    const annotation = await annotateImage(originalForGrok, grokApiKey, lastForGrok, userId);
-
-    const recognitionFailed = annotation.tags.length === 0;
-
     // Validate field lengths
     const validationData = {
       original_image_url: originalImageUrl,
       last_image_url: lastImageUrl,
       prompt: '',
-      tags: annotation.tags,
-      suggested_prompts: annotation.suggested_prompts,
+      tags: [],
+      suggested_prompts: [],
     };
 
     const validationErrors = validateVideoEntry(validationData);
@@ -67,18 +52,21 @@ export async function createVideoEntryWithRecognition(
       original_image_url: originalImageUrl,
       last_image_url: lastImageUrl,
       prompt: '',
-      tags: annotation.tags,
-      suggested_prompts: annotation.suggested_prompts,
-      is_photo_realistic: annotation.is_photo_realistic,
-      is_nsfw: annotation.is_nsfw,
+      tags: [],
+      suggested_prompts: [],
+      is_photo_realistic: undefined,
+      is_nsfw: undefined,
       status: 'uploaded',
-      is_published: false
+      is_published: false,
+      validation_metadata: {
+        manual_recognition_done: false,
+        revalidation_status: 'idle'
+      }
     });
 
     return {
       success: true,
-      entry,
-      recognitionFailed
+      entry
     };
   } catch (error) {
     console.error('Create video entry error:', error);

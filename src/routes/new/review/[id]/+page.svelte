@@ -27,6 +27,7 @@
   let quotaRemaining: number | null = null;
   let quotaLimit: number | null = null;
   let quotaLoading = true;
+  let analyzing = false;
 
   // Workflow management - initialize from loaded data
   let workflows: Workflow[] = data.workflows || [];
@@ -163,6 +164,43 @@
 
   $: isEditable = entry.status !== 'processing' && entry.status !== 'completed' && entry.status !== 'in_queue' && entry.status !== 'failed' && entry.status !== 'deleted';
 
+  function getDefaultPrompt(nextEntry: any) {
+    return nextEntry.prompt ||
+      (nextEntry.suggested_prompts && nextEntry.suggested_prompts[0]) ||
+      "";
+  }
+
+  function shouldRefreshPrompt(nextEntry: any) {
+    const previousPromptCandidates = new Set(
+      [
+        entry.prompt,
+        getDefaultPrompt(entry),
+        ...(entry.suggested_prompts || []),
+      ].filter(Boolean)
+    );
+
+    return !prompt || previousPromptCandidates.has(prompt);
+  }
+
+  function applyEntryUpdate(nextEntry: any) {
+    const shouldSyncPrompt = !prompt && shouldRefreshPrompt(nextEntry);
+
+    entry = nextEntry;
+    data = { ...data, entry: nextEntry };
+    tags.set((nextEntry.tags || []).map((value: string, index: number) => ({
+      id: `${nextEntry.id}-${index}-${value}`,
+      value,
+    })));
+
+    if (shouldSyncPrompt) {
+      prompt = getDefaultPrompt(nextEntry);
+    }
+
+    progressPercentage = typeof nextEntry.progress_percentage === 'number'
+      ? nextEntry.progress_percentage
+      : null;
+  }
+
   async function pollStatus() {
     if (entry.status === 'completed' || entry.status === 'failed' || entry.status === 'deleted') {
       return; // Stop polling if completed or failed
@@ -175,9 +213,16 @@
         console.log('Status poll result:', statusData);
         
         // Update entry status from server response
-        if (statusData.status && statusData.status !== entry.status) {
-          entry = { ...entry, status: statusData.status };
-        }
+        entry = {
+          ...entry,
+          status: statusData.status || entry.status,
+          validation_metadata: {
+            ...(entry.validation_metadata || {}),
+            revalidation_status: statusData.revalidation_status,
+            manual_recognition_done: statusData.manual_recognition_done,
+            manual_recognition_error: statusData.manual_recognition_error,
+          },
+        };
         
         // Update progress information
         if (typeof statusData.progress_percentage === 'number') {
@@ -193,6 +238,54 @@
       }
     } catch (err) {
       console.error('Failed to poll status:', err);
+    }
+  }
+
+  async function runManualAnalysis() {
+    if (analyzing || !isEditable) return;
+
+    analyzing = true;
+    message = '';
+
+    try {
+      const res = await fetch(`/api/video/${entry.id}/analyze`, {
+        method: 'POST',
+      });
+
+      const payload = await res.json();
+
+      if (!res.ok) {
+        if (payload.errorCode === 'analysis_unavailable') {
+          message = get(_)('review.analysisUnavailable');
+        } else {
+          message = get(_)('review.analysisFailed', { values: { error: payload.error || 'unknown' } });
+        }
+
+        if (payload.entry) {
+          applyEntryUpdate(payload.entry);
+        }
+        return;
+      }
+
+      if (payload.success) {
+        if (payload.entry) {
+          applyEntryUpdate(payload.entry);
+        }
+        message = get(_)('review.analysisSuccess');
+      } else {
+        if (payload.errorCode === 'analysis_unavailable') {
+          message = get(_)('review.analysisUnavailable');
+        } else {
+          message = payload.error || get(_)('review.analysisUnavailable');
+        }
+        if (payload.entry) {
+          applyEntryUpdate(payload.entry);
+        }
+      }
+    } catch (error) {
+      message = get(_)('review.analysisFailed', { values: { error: String(error) } });
+    } finally {
+      analyzing = false;
     }
   }
 
@@ -383,6 +476,36 @@
     unique: true,
     trim: true
   });
+
+  let lastAppliedEntrySnapshot = JSON.stringify({
+    status: entry.status,
+    tags: entry.tags || [],
+    suggested_prompts: entry.suggested_prompts || [],
+    prompt: entry.prompt || '',
+    is_nsfw: entry.is_nsfw,
+    is_photo_realistic: entry.is_photo_realistic,
+    validation_metadata: entry.validation_metadata || null,
+    progress_percentage: entry.progress_percentage ?? null,
+  });
+
+  $: {
+    const nextEntry = data.entry;
+    const nextSnapshot = JSON.stringify({
+      status: nextEntry?.status,
+      tags: nextEntry?.tags || [],
+      suggested_prompts: nextEntry?.suggested_prompts || [],
+      prompt: nextEntry?.prompt || '',
+      is_nsfw: nextEntry?.is_nsfw,
+      is_photo_realistic: nextEntry?.is_photo_realistic,
+      validation_metadata: nextEntry?.validation_metadata || null,
+      progress_percentage: nextEntry?.progress_percentage ?? null,
+    });
+
+    if (nextEntry && nextSnapshot !== lastAppliedEntrySnapshot) {
+      lastAppliedEntrySnapshot = nextSnapshot;
+      applyEntryUpdate(nextEntry);
+    }
+  }
 
   async function generate() {
     busy = true;
@@ -590,8 +713,30 @@
     <!-- Prompts Card -->
     <div class="card bg-base-100 shadow-xl">
       <div class="card-body">
-        <h2 class="card-title">{$_('review.aiSuggestions')}</h2>
+        <div class="flex justify-between items-center gap-3">
+          <h2 class="card-title">{$_('review.aiSuggestions')}</h2>
+          {#if !entry.validation_metadata?.manual_recognition_done}
+            <button
+              class="btn btn-sm btn-outline"
+              on:click={runManualAnalysis}
+              disabled={!isEditable || analyzing}
+            >
+              {#if analyzing}
+                <span class="loading loading-spinner loading-xs"></span>
+                {$_('review.analyzing')}
+              {:else}
+                {$_('review.analyzeWithCustomVL')}
+              {/if}
+            </button>
+          {/if}
+        </div>
         <div class="divider my-2"></div>
+
+        {#if entry.validation_metadata?.manual_recognition_error}
+          <div class="alert alert-warning py-2">
+            <span class="text-sm">{$_('review.analysisUnavailable')}</span>
+          </div>
+        {/if}
         
         {#if entry.suggested_prompts && entry.suggested_prompts.length > 0}
           <div class="space-y-2">
@@ -930,17 +1075,6 @@
               <span>{$_('review.videoDeleted')}</span>
             </div>
           {:else}
-            {#if !entry.tags || entry.tags.length === 0}
-              <div class="alert alert-warning mb-4">
-                <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <div>
-                  <h3 class="font-bold">{$_('review.warnings.noTags.title')}</h3>
-                  <div class="text-sm">{$_('review.warnings.noTags.message')}</div>
-                </div>
-              </div>
-            {/if}
             {#if entry.is_nsfw && entry.is_photo_realistic}
               <div class="alert alert-error mb-4">
                 <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">

@@ -3,7 +3,7 @@ import { redirect } from '@sveltejs/kit';
 import { uploadBufferToS3 } from '$lib/s3';
 import { Buffer } from 'buffer';
 import { validateAndConvertImage } from '$lib/imageValidation';
-import { createVideoEntryWithRecognition } from '$lib/videoEntryCreation';
+import { createVideoEntryForReview } from '$lib/videoEntryCreation';
 
 export const load: PageServerLoad = async ({ locals }) => {
   if (!locals.user) {
@@ -49,8 +49,8 @@ export const actions: Actions = {
       const firstS3Url = await uploadBufferToS3(firstBuffer, firstExt);
       const lastS3Url = await uploadBufferToS3(lastBuffer, lastExt);
 
-      // Create video entry with image recognition
-      const result = await createVideoEntryWithRecognition({
+      // Create review entry for the uploaded images
+      const result = await createVideoEntryForReview({
         userId: locals.user.id,
         mode: 'fl2v',
         originalImageUrl: firstS3Url,
@@ -61,7 +61,7 @@ export const actions: Actions = {
         return { error: result.error };
       }
 
-      return { success: true, entry: result.entry, recognitionFailed: result.recognitionFailed };
+      return { success: true, entry: result.entry };
     } else {
       // Handle I2V mode with single image
       const file = form.get('image') as File | null;
@@ -81,8 +81,8 @@ export const actions: Actions = {
       // Upload to S3; helper returns a public URL
       const s3Url = await uploadBufferToS3(buffer, ext);
 
-      // Create video entry with image recognition
-      const result = await createVideoEntryWithRecognition({
+      // Create review entry for the uploaded image
+      const result = await createVideoEntryForReview({
         userId: locals.user.id,
         mode: 'i2v',
         originalImageUrl: s3Url
@@ -92,7 +92,7 @@ export const actions: Actions = {
         return { error: result.error };
       }
 
-      return { success: true, entry: result.entry, recognitionFailed: result.recognitionFailed };
+      return { success: true, entry: result.entry };
     }
   }
 };

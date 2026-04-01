@@ -13,6 +13,91 @@ async function delay(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
 }
 
+async function runDetachedRevalidation(videoId: string): Promise<void> {
+  try {
+    const current = await getVideoById(videoId);
+    if (!current || current.status === 'deleted') {
+      return;
+    }
+
+    const startedOptions = {
+      ...(current.validation_metadata || {}),
+      revalidation_status: 'processing' as const,
+      revalidation_error: undefined,
+    };
+
+    await updateVideo(videoId, {
+      validation_metadata: {
+        ...startedOptions,
+        revalidation_requested_at: current.validation_metadata?.revalidation_requested_at || new Date().toISOString(),
+      },
+    });
+
+    const promptToEvaluate = (current.prompt || '').trim();
+    if (!promptToEvaluate) {
+      await updateVideo(videoId, {
+        validation_metadata: {
+          ...startedOptions,
+          revalidation_status: 'failed',
+          revalidation_completed_at: new Date().toISOString(),
+          revalidation_error: 'missing_prompt',
+        },
+      });
+      return;
+    }
+
+    const result = await evaluatePromptProperties(
+      promptToEvaluate,
+      toOriginalUrl(current.original_image_url),
+      current.last_image_url ? toOriginalUrl(current.last_image_url) : undefined,
+      current.user_id,
+      videoId
+    );
+
+    if (result.is_photo_realistic === undefined && result.is_nsfw === undefined) {
+      await updateVideo(videoId, {
+        validation_metadata: {
+          ...startedOptions,
+          revalidation_status: 'failed',
+          revalidation_completed_at: new Date().toISOString(),
+          revalidation_error: 'provider_unavailable',
+        },
+      });
+      return;
+    }
+
+    const patch: any = {
+      validation_metadata: {
+        ...startedOptions,
+        revalidation_status: 'completed',
+        revalidation_completed_at: new Date().toISOString(),
+        revalidation_error: undefined,
+      },
+    };
+
+    if (result.is_photo_realistic !== undefined) {
+      patch.is_photo_realistic = result.is_photo_realistic;
+    }
+    if (result.is_nsfw !== undefined) {
+      patch.is_nsfw = result.is_nsfw;
+    }
+
+    await updateVideo(videoId, patch);
+  } catch (error) {
+    console.error('[I2V] Detached revalidation failed:', error);
+    const latest = await getVideoById(videoId);
+    if (!latest) return;
+    await updateVideo(videoId, {
+      validation_metadata: {
+        ...(latest.validation_metadata || {}),
+        revalidation_status: 'failed',
+        revalidation_completed_at: new Date().toISOString(),
+        revalidation_error: String(error),
+      },
+    });
+  }
+}
+
 export const POST: RequestHandler = async ({ request, locals }) => {
   try {
     if (!locals.user) {
@@ -135,23 +220,35 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     // Generate seed for reproducibility
     const seed = Math.floor(Math.random() * 1000000);
 
-    // Re-evaluate prompt properties if prompt was edited for non-NSFW content to ensure accurate flagging based on latest prompt and image
-    let evaluatedProperties: { is_photo_realistic?: boolean; is_nsfw?: boolean } = {};
-    if (prompt && !existing.is_nsfw) {
-      const grokApiKey = env.GROK_API_KEY;
-      const evaluationResult = await evaluatePromptProperties(
-        prompt,
-        grokApiKey,
-        toOriginalUrl(existing.original_image_url),
-        existing.suggested_prompts || [],
-        existing.user_id,
-        id
-      );
-      evaluatedProperties = {
-        is_photo_realistic: evaluationResult.is_photo_realistic,
-        is_nsfw: evaluationResult.is_nsfw,
-      };
-      console.log(`[I2V] Re-evaluated prompt properties - is_realistic: ${evaluatedProperties.is_photo_realistic}, is_nsfw: ${evaluatedProperties.is_nsfw}`);
+    const hasManualRecognition = existing.validation_metadata?.manual_recognition_done === true;
+    // Revalidate when analysis has not been done yet (to establish baseline),
+    // or when prior analysis marked image as SFW (prompt edits can introduce NSFW intent).
+    // Skip only if prior result is already NSFW and manual analysis exists.
+    const shouldRevalidate = !hasManualRecognition || existing.is_nsfw === false;
+    const mergedAdditionalOptions: any = {
+      ...(existing.additional_options || {}),
+    };
+    const mergedValidationMetadata: any = {
+      ...(existing.validation_metadata || {}),
+    };
+
+    if (motionScale === undefined) {
+      delete mergedAdditionalOptions.motion_scale;
+    } else {
+      mergedAdditionalOptions.motion_scale = motionScale;
+    }
+
+    if (freeLongBlendStrength === undefined) {
+      delete mergedAdditionalOptions.freelong_blend_strength;
+    } else {
+      mergedAdditionalOptions.freelong_blend_strength = freeLongBlendStrength;
+    }
+
+    if (shouldRevalidate) {
+      mergedValidationMetadata.revalidation_status = 'pending';
+      mergedValidationMetadata.revalidation_requested_at = new Date().toISOString();
+      delete mergedValidationMetadata.revalidation_completed_at;
+      delete mergedValidationMetadata.revalidation_error;
     }
 
     // Save user's settings first (before quota check) so their preferences are preserved
@@ -160,10 +257,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       iteration_steps: iterationSteps,
       video_duration: videoDuration,
       video_resolution: resolution,
-      additional_options: {
-        motion_scale: motionScale,
-        freelong_blend_strength: freeLongBlendStrength
-      },
+      validation_metadata: mergedValidationMetadata,
+      additional_options: mergedAdditionalOptions,
       lora_weights: filteredLoraWeights,
       seed: seed
     };
@@ -174,14 +269,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     
     if (tags !== undefined) {
       settingsPayload.tags = tags;
-    }
-
-    // Add re-evaluated properties to payload
-    if (evaluatedProperties.is_photo_realistic !== undefined) {
-      settingsPayload.is_photo_realistic = evaluatedProperties.is_photo_realistic;
-    }
-    if (evaluatedProperties.is_nsfw !== undefined) {
-      settingsPayload.is_nsfw = evaluatedProperties.is_nsfw;
     }
 
     await updateVideo(id, settingsPayload);
@@ -419,6 +506,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
     // Return the updated video status
     const finalVideo = await getVideoById(id);
+
+    if (shouldRevalidate) {
+      void runDetachedRevalidation(id);
+    }
+
     return new Response(
       JSON.stringify({ success: true, job_id: jobId, is_local: isLocal, video: finalVideo }), 
       { headers: { 'Content-Type': 'application/json' } }

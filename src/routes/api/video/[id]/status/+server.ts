@@ -28,7 +28,10 @@ export const GET: RequestHandler = async ({ params }) => {
     if (video.status === 'completed' || video.status === 'failed') {
       return new Response(JSON.stringify({ 
         status: video.status,
-        final_video_url: video.final_video_url 
+        final_video_url: video.final_video_url,
+        revalidation_status: video.validation_metadata?.revalidation_status,
+        manual_recognition_done: video.validation_metadata?.manual_recognition_done,
+        manual_recognition_error: video.validation_metadata?.manual_recognition_error,
       }), { 
         headers: { 'Content-Type': 'application/json' } 
       });
@@ -37,7 +40,10 @@ export const GET: RequestHandler = async ({ params }) => {
     if ((video.status === 'in_queue' || video.status === 'processing') && !video.job_id) {
       await updateVideo(video.id, { status: 'uploaded', processing_started_at: undefined });
       return new Response(JSON.stringify({ 
-        status: 'uploaded'
+        status: 'uploaded',
+        revalidation_status: video.validation_metadata?.revalidation_status,
+        manual_recognition_done: video.validation_metadata?.manual_recognition_done,
+        manual_recognition_error: video.validation_metadata?.manual_recognition_error,
       }), { 
         headers: { 'Content-Type': 'application/json' } 
       });
@@ -69,7 +75,10 @@ export const GET: RequestHandler = async ({ params }) => {
           is_local: true,
           final_video_url: video.final_video_url,
           progress_percentage: video.progress_percentage,
-          progress_details: video.progress_details
+          progress_details: video.progress_details,
+          revalidation_status: video.validation_metadata?.revalidation_status,
+          manual_recognition_done: video.validation_metadata?.manual_recognition_done,
+          manual_recognition_error: video.validation_metadata?.manual_recognition_error,
         }), { 
           headers: { 'Content-Type': 'application/json' } 
         });
@@ -84,7 +93,10 @@ export const GET: RequestHandler = async ({ params }) => {
       if (!runpodConfig) {
         // No polling configured, just return current status
         return new Response(JSON.stringify({ 
-          status: video.status 
+          status: video.status,
+          revalidation_status: video.validation_metadata?.revalidation_status,
+          manual_recognition_done: video.validation_metadata?.manual_recognition_done,
+          manual_recognition_error: video.validation_metadata?.manual_recognition_error,
         }), { 
           headers: { 'Content-Type': 'application/json' } 
         });
@@ -128,7 +140,10 @@ export const GET: RequestHandler = async ({ params }) => {
           is_local: false,
           final_video_url: finalVideoUrl,
           progress_percentage: video.progress_percentage,
-          progress_details: video.progress_details
+          progress_details: video.progress_details,
+          revalidation_status: video.validation_metadata?.revalidation_status,
+          manual_recognition_done: video.validation_metadata?.manual_recognition_done,
+          manual_recognition_error: video.validation_metadata?.manual_recognition_error,
         }), { 
           headers: { 'Content-Type': 'application/json' } 
         });
@@ -136,7 +151,10 @@ export const GET: RequestHandler = async ({ params }) => {
         console.error(`[Status Poll] Error checking job status:`, err);
         // Return current status if polling fails
         return new Response(JSON.stringify({ 
-          status: video.status 
+          status: video.status,
+          revalidation_status: video.validation_metadata?.revalidation_status,
+          manual_recognition_done: video.validation_metadata?.manual_recognition_done,
+          manual_recognition_error: video.validation_metadata?.manual_recognition_error,
         }), { 
           headers: { 'Content-Type': 'application/json' } 
         });
@@ -145,7 +163,10 @@ export const GET: RequestHandler = async ({ params }) => {
 
     // Default: return current video status
     return new Response(JSON.stringify({ 
-      status: video.status 
+      status: video.status,
+      revalidation_status: video.validation_metadata?.revalidation_status,
+      manual_recognition_done: video.validation_metadata?.manual_recognition_done,
+      manual_recognition_error: video.validation_metadata?.manual_recognition_error,
     }), { 
       headers: { 'Content-Type': 'application/json' } 
     });
