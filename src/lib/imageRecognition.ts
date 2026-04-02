@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs';
+import sharp from 'sharp';
 import { env } from '$env/dynamic/private';
 
 interface CustomVlResponse {
@@ -24,6 +25,7 @@ const CUSTOM_VL_API_KEY = env.CUSTOM_VL_API_KEY || '';
 const CUSTOM_VL_MODAL_TOKEN_ID = env.CUSTOM_VL_MODAL_TOKEN_ID || '';
 const CUSTOM_VL_MODAL_TOKEN_SECRET = env.CUSTOM_VL_MODAL_TOKEN_SECRET || '';
 const CUSTOM_VL_TIMEOUT_MS = Number(env.CUSTOM_VL_TIMEOUT_MS || '60000');
+const CUSTOM_VL_MAX_IMAGE_PIXELS = Number(env.CUSTOM_VL_MAX_IMAGE_PIXELS || '1000000');
 const CUSTOM_VL_ERROR_LOG = env.CUSTOM_VL_ERROR_LOG || path.join(process.cwd(), 'logs', 'custom-vl-errors.log');
 
 // True when using a Modal direct endpoint (identified by Modal Proxy Auth tokens being configured)
@@ -58,6 +60,47 @@ function hasCustomVlConfig(): boolean {
   if (!CUSTOM_VL_URL) return false;
   if (isModalEndpoint()) return true;          // Modal: token ID + secret
   return Boolean(CUSTOM_VL_API_KEY && CUSTOM_VL_MODEL); // OpenAI-compatible: bearer key + model
+}
+
+async function fetchImageAsResizedBase64(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+  }
+
+  const inputBytes = new Uint8Array(await response.arrayBuffer());
+  const image = sharp(inputBytes, { failOn: 'none' });
+  const metadata = await image.metadata();
+
+  const width = metadata.width ?? 0;
+  const height = metadata.height ?? 0;
+  const currentPixels = width * height;
+
+  let processedBytes: Uint8Array = inputBytes;
+
+  if (currentPixels > CUSTOM_VL_MAX_IMAGE_PIXELS && width > 0 && height > 0) {
+    const scale = Math.sqrt(CUSTOM_VL_MAX_IMAGE_PIXELS / currentPixels);
+    const targetWidth = Math.max(1, Math.floor(width * scale));
+    const targetHeight = Math.max(1, Math.floor(height * scale));
+
+    processedBytes = await sharp(inputBytes, { failOn: 'none' })
+      .resize(targetWidth, targetHeight, { fit: 'inside', withoutEnlargement: true })
+      .toBuffer();
+  }
+
+  const contentType = response.headers.get('content-type') ?? 'image/png';
+  const base64 = Buffer.from(processedBytes).toString('base64');
+  return `data:${contentType};base64,${base64}`;
+}
+
+async function toInferenceImageUrl(url: string): Promise<string> {
+  // Keep inference resilient: if preprocessing fails, fall back to original URL.
+  try {
+    return await fetchImageAsResizedBase64(url);
+  } catch (error) {
+    console.warn('[Custom VL] Failed to preprocess image, using source URL:', error);
+    return url;
+  }
 }
 
 function repairIncompleteJson(jsonStr: string): string {
@@ -314,6 +357,9 @@ IMPORTANT:
 - Return ONLY valid JSON, no other text.`;
 
   try {
+    const processedImageUrl = await toInferenceImageUrl(imageUrl);
+    const processedLastImageUrl = lastImageUrl ? await toInferenceImageUrl(lastImageUrl) : undefined;
+
     const messageContent: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
       {
         type: 'text',
@@ -323,15 +369,15 @@ IMPORTANT:
       },
       {
         type: 'image_url',
-        image_url: { url: imageUrl },
+        image_url: { url: processedImageUrl },
       },
     ];
     
     // Add second image for FL2V
-    if (isFL2V && lastImageUrl) {
+    if (isFL2V && processedLastImageUrl) {
       messageContent.push({
         type: 'image_url',
-        image_url: { url: lastImageUrl },
+        image_url: { url: processedLastImageUrl },
       });
     }
 
@@ -415,6 +461,11 @@ Return ONLY a JSON object with these two boolean properties. Example:
 {"is_photo_realistic": true, "is_nsfw": false}`;
 
   try {
+    const [processedImagePath, processedLastImagePath] = await Promise.all([
+      imagePath ? toInferenceImageUrl(imagePath) : Promise.resolve(undefined),
+      lastImagePath ? toInferenceImageUrl(lastImagePath) : Promise.resolve(undefined),
+    ]);
+
     const messageContent: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
       {
         type: 'text',
@@ -423,16 +474,16 @@ Return ONLY a JSON object with these two boolean properties. Example:
     ];
 
     // Add image(s) if provided
-    if (imagePath) {
+    if (processedImagePath) {
       messageContent.push({
         type: 'image_url',
-        image_url: { url: imagePath },
+        image_url: { url: processedImagePath },
       });
     }
-    if (lastImagePath) {
+    if (processedLastImagePath) {
       messageContent.push({
         type: 'image_url',
-        image_url: { url: lastImagePath },
+        image_url: { url: processedLastImagePath },
       });
     }
 
