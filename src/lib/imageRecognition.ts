@@ -74,21 +74,28 @@ async function fetchImageAsResizedBase64(url: string): Promise<string> {
 
   const width = metadata.width ?? 0;
   const height = metadata.height ?? 0;
+  const hasAlpha = Boolean(metadata.hasAlpha);
   const currentPixels = width * height;
 
-  let processedBytes: Uint8Array = inputBytes;
+  const pipeline = sharp(inputBytes, { failOn: 'none' }).rotate();
 
   if (currentPixels > CUSTOM_VL_MAX_IMAGE_PIXELS && width > 0 && height > 0) {
     const scale = Math.sqrt(CUSTOM_VL_MAX_IMAGE_PIXELS / currentPixels);
     const targetWidth = Math.max(1, Math.floor(width * scale));
     const targetHeight = Math.max(1, Math.floor(height * scale));
 
-    processedBytes = await sharp(inputBytes, { failOn: 'none' })
-      .resize(targetWidth, targetHeight, { fit: 'inside', withoutEnlargement: true })
-      .toBuffer();
+    pipeline.resize(targetWidth, targetHeight, { fit: 'inside', withoutEnlargement: true });
   }
 
-  const contentType = response.headers.get('content-type') ?? 'image/png';
+  if (hasAlpha) {
+    pipeline.flatten({ background: '#ffffff' });
+  }
+
+  const processedBytes = await pipeline
+    .jpeg({ quality: 75, mozjpeg: true })
+    .toBuffer();
+
+  const contentType = 'image/jpeg';
   const base64 = Buffer.from(processedBytes).toString('base64');
   return `data:${contentType};base64,${base64}`;
 }
