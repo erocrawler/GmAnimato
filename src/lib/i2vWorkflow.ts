@@ -43,6 +43,7 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
   const samplerNode = findNode(workflow, 'WanMoeKSampler');
   const decodeNode = findNode(workflow, 'VAEDecode');
   const videoCombineNode = findNode(workflow, 'VHS_VideoCombine');
+  const samplerInputs = getNodeInputs(workflow, samplerNode);
   
   // Validate all required nodes are present
   const validationErrors: string[] = [];
@@ -74,7 +75,6 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
 
   // Configure iteration steps (default 6)
   const steps = params.iterationSteps ?? 6;
-  const samplerInputs = getNodeInputs(workflow, samplerNode);
   if (samplerInputs) {
     samplerInputs.steps = steps;
   }
@@ -147,20 +147,52 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
     );
   }
 
+  const workflowNodes = workflow?.input?.workflow ?? {};
+  const isVariantNode = (node: any, variant: 'high' | 'low') =>
+    node.inputs?.unet_name?.toLowerCase().includes(variant) ||
+    node._meta?.title?.toLowerCase().includes(variant);
+  const findUnetNodeByVariant = (variant: 'high' | 'low') =>
+    findNode(workflow, 'UNETLoader', (node: any) => isVariantNode(node, variant)) ||
+    findNode(workflow, 'UnetLoaderGGUF', (node: any) => isVariantNode(node, variant)) ||
+    findNode(workflow, 'UNETLoaderMultiGPU', (node: any) => isVariantNode(node, variant));
+
+  const setModelSourceForVariant = (
+    variant: 'high' | 'low',
+    originalSourceNodeId: string,
+    newSourceNodeId: string
+  ) => {
+    for (const node of Object.values(workflowNodes) as any[]) {
+      if (Array.isArray(node.inputs?.model) && node.inputs.model[0] === originalSourceNodeId) {
+        node.inputs.model = [newSourceNodeId, 0];
+        return true;
+      }
+    }
+
+    const samplerModelKey = variant === 'high' ? 'model_high_noise' : 'model_low_noise';
+    if (samplerInputs && Array.isArray(samplerInputs[samplerModelKey])) {
+      samplerInputs[samplerModelKey] = [newSourceNodeId, 0];
+      return true;
+    }
+
+    return false;
+  };
+
   // Find the high UNet node to insert motion scale and freelong
-  const highUnetNode = findNode(workflow, 'UnetLoaderGGUF', (node: any) => 
-    node.inputs?.unet_name?.toLowerCase().includes('high') || 
-    node._meta?.title?.toLowerCase().includes('high')
-  );
+  const highUnetNode = findUnetNodeByVariant('high');
+  const lowUnetNode = findUnetNodeByVariant('low');
   
   // Insert WanMotionScale and WanFreeLong right after high UNet, before LoRAs
-  // This creates: High UNet → MotionScale → FreeLong → LoRAs → TeaCache
+  // This creates: High UNet -> MotionScale -> FreeLong -> LoRAs -> model consumer
   let highChainStart = highUnetNode as string;
   if (highUnetNode) {
     const motionScaleNodeId = addMotionScaleNode(workflow, params.motionScale, highUnetNode as string);
     highChainStart = motionScaleNodeId 
       ? (addFreeLongNode(workflow, params.freeLongBlendStrength, frames, motionScaleNodeId) || motionScaleNodeId)
       : (addFreeLongNode(workflow, params.freeLongBlendStrength, frames, highUnetNode as string) || highUnetNode);
+
+    if (highChainStart !== highUnetNode) {
+      setModelSourceForVariant('high', highUnetNode as string, highChainStart);
+    }
   }
 
   // Override LoRA strengths when provided and dynamically build chains
@@ -172,21 +204,9 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
     const lowChain = presets.filter((p) => p.chain === 'low');
     console.log('Building LoRA chains:', { highChain, lowChain });
     
-    // Find the UnetLoader and TeaCache nodes for high and low chains
-    const lowUnetNode = findNode(workflow, 'UnetLoaderGGUF', (node: any) => 
-      node.inputs?.unet_name?.toLowerCase().includes('low') || 
-      node._meta?.title?.toLowerCase().includes('low')
-    );
-    const highTeaCacheNode = findNode(workflow, 'TeaCache', (node: any) => 
-      Array.isArray(node.inputs?.model) && node.inputs.model[0] === highUnetNode
-    );
-    const lowTeaCacheNode = findNode(workflow, 'TeaCache', (node: any) => 
-      Array.isArray(node.inputs?.model) && node.inputs.model[0] === lowUnetNode
-    );
-    
-    if (!highUnetNode || !lowUnetNode || !highTeaCacheNode || !lowTeaCacheNode) {
-      console.error('LoRA chain nodes not found:', { highUnetNode, lowUnetNode, highTeaCacheNode, lowTeaCacheNode });
-      throw new Error('Required LoRA chain nodes not found in template');
+    if (!highUnetNode || !lowUnetNode) {
+      console.error('LoRA chain UNet nodes not found:', { highUnetNode, lowUnetNode });
+      throw new Error('Required LoRA chain UNet nodes not found in template');
     }
     
     // High noise chain: starts from motionScale/freeLong output (or UNet if neither enabled)
@@ -215,13 +235,14 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
       }
     }
     
-    // Update highTeaCacheNode to consume the last high chain node
-    const highTeaCacheInputs = getNodeInputs(workflow, highTeaCacheNode);
-    if (highTeaCacheInputs && highChain.length > 0) {
-      highTeaCacheInputs.model = [highPrevNodeId, 0];
+    if (highChain.length > 0) {
+      const updated = setModelSourceForVariant('high', highChainStart, highPrevNodeId);
+      if (!updated) {
+        throw new Error('Unable to connect high LoRA chain to downstream model consumer');
+      }
     }
     
-    // Low noise chain: starts from lowUnetNode output, feeds into lowTeaCacheNode
+    // Low noise chain: starts from lowUnetNode output and feeds into the downstream model consumer
     let lowPrevNodeId = lowUnetNode as string;
     let lowNodeCounter = 1;
     for (const preset of lowChain) {
@@ -247,10 +268,11 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
       }
     }
     
-    // Update lowTeaCacheNode to consume the last low chain node
-    const lowTeaCacheInputs = getNodeInputs(workflow, lowTeaCacheNode);
-    if (lowTeaCacheInputs && lowChain.length > 0) {
-      lowTeaCacheInputs.model = [lowPrevNodeId, 0];
+    if (lowChain.length > 0) {
+      const updated = setModelSourceForVariant('low', lowUnetNode as string, lowPrevNodeId);
+      if (!updated) {
+        throw new Error('Unable to connect low LoRA chain to downstream model consumer');
+      }
     }
   }
 
