@@ -301,6 +301,7 @@ export class PostgresDatabase implements IDatabase {
 
       return this.mapToVideoEntry(video);
     } catch (error) {
+      console.error('[DB] updateVideo error for id', id, ':', error);
       return null;
     }
   }

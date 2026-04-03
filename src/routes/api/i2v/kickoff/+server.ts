@@ -449,7 +449,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         async (video) => {
           // This callback builds workflow for migrated jobs or RunPod-direct jobs
           const origin = new URL(request.url).origin;
-          const callbackUrl = `${origin}/api/i2v-webhook/${video.id}`;
+          const originHost = new URL(request.url).hostname;
+          const callbackUrl = originHost === 'localhost' || originHost === '127.0.0.1' || originHost === '::1'
+            ? undefined
+            : `${origin}/api/i2v-webhook/${video.id}`;
           
           // Check if this is FL2V workflow (has last_image_url)
           const isFL2VJob = !!video.last_image_url;

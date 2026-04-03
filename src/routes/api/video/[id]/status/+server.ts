@@ -51,8 +51,8 @@ export const GET: RequestHandler = async ({ params }) => {
 
     // If video is in_queue or processing and we have a job_id, poll for status
     if ((video.status === 'in_queue' || video.status === 'processing') && video.job_id) {
-      // Check if processing has timed out (longer than 30 minutes)
-      if (video.dequeued_at) {
+      // Check timeout only while actively processing.
+      if (video.status === 'processing' && video.dequeued_at) {
         const processingStartedAt = new Date(video.dequeued_at).getTime();
         const now = Date.now();
         const elapsedMs = now - processingStartedAt;

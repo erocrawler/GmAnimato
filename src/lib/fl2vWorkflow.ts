@@ -220,7 +220,6 @@ export async function buildFL2VWorkflow(params: FL2VWorkflowParams): Promise<obj
     // Build dynamic chains for all LoRAs (both base and configurable)
     const highChain = presets.filter((p) => p.chain === 'high');
     const lowChain = presets.filter((p) => p.chain === 'low');
-    console.log('Building FL2V LoRA chains:', { highChain, lowChain });
     
     if (!highUnetNode || !lowUnetNode) {
       console.error('FL2V LoRA chain UNet nodes not found:', { highUnetNode, lowUnetNode });

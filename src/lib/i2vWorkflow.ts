@@ -202,7 +202,6 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
     // Build dynamic chains for all LoRAs (both base and configurable)
     const highChain = presets.filter((p) => p.chain === 'high');
     const lowChain = presets.filter((p) => p.chain === 'low');
-    console.log('Building LoRA chains:', { highChain, lowChain });
     
     if (!highUnetNode || !lowUnetNode) {
       console.error('LoRA chain UNet nodes not found:', { highUnetNode, lowUnetNode });

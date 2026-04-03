@@ -12,7 +12,10 @@ import { toOriginalUrl } from '$lib/serverImageUrl';
  */
 async function submitNewRunPodJob(runpodConfig: any, video: any, origin: string) {
   const settings = await getAdminSettings();
-  const callbackUrl = `${origin}/api/i2v-webhook/${video.id}`;
+  const originHost = new URL(origin).hostname;
+  const callbackUrl = originHost === 'localhost' || originHost === '127.0.0.1' || originHost === '::1'
+    ? undefined
+    : `${origin}/api/i2v-webhook/${video.id}`;
 
   // Use stored parameters from the video, or defaults if not available
   const iterationSteps = video.iteration_steps as (4 | 6 | 8) | undefined;
@@ -140,11 +143,14 @@ export const POST: RequestHandler = async ({ params, request }) => {
         const newJob = await submitNewRunPodJob(runpodConfig, video, origin);
         
         // Update video with new job ID, set as remote job, and status
-        await updateVideo(id, { 
+        const updated = await updateVideo(id, { 
           status: 'in_queue',
           job_id: newJob.id,
           is_local_job: false
         });
+        if (!updated) {
+          throw new Error('Failed to update video status in database after job submission');
+        }
         
         return new Response(JSON.stringify({ 
           success: true, 
@@ -177,11 +183,14 @@ export const POST: RequestHandler = async ({ params, request }) => {
           const newJob = await submitNewRunPodJob(runpodConfig, video, origin);
           
           // Update video with new job ID, status, and ensure it's marked as remote
-          await updateVideo(id, { 
+          const updated = await updateVideo(id, { 
             status: 'in_queue',
             job_id: newJob.id,
             is_local_job: false
           });
+          if (!updated) {
+            throw new Error('Failed to update video status in database after job submission');
+          }
           
           return new Response(JSON.stringify({ 
             success: true, 
@@ -200,7 +209,16 @@ export const POST: RequestHandler = async ({ params, request }) => {
       
       // If job is still processing or queued, update video status and don't retry
       if (internalStatus === 'in_queue' || internalStatus === 'processing') {
-        await updateVideo(id, { status: internalStatus });
+        const statusPatch: any = { status: internalStatus };
+        if (internalStatus === 'processing') {
+          statusPatch.dequeued_at = new Date().toISOString();
+        }
+
+        const updated = await updateVideo(id, statusPatch);
+        if (!updated) {
+          throw new Error('Failed to update video status in database after status check');
+        }
+
         return new Response(JSON.stringify({ 
           success: true, 
           message: `Job is still ${internalStatus}, updated video status`, 
@@ -228,7 +246,10 @@ export const POST: RequestHandler = async ({ params, request }) => {
       await retryRunPodJob(runpodConfig, video.job_id);
       
       // Update video status back to in_queue
-      await updateVideo(id, { status: 'in_queue' });
+      const updated = await updateVideo(id, { status: 'in_queue' });
+      if (!updated) {
+        throw new Error('Failed to update video status in database after retry');
+      }
 
       return new Response(JSON.stringify({ 
         success: true, 

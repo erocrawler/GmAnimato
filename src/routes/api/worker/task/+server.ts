@@ -61,7 +61,10 @@ export const GET: RequestHandler = async ({ request }) => {
     
     // Build the workflow for this job
     const settings = await getAdminSettings();
-    const callbackUrl = `${new URL(request.url).origin}/api/i2v-webhook/${job.id}`;
+    const { origin: workerOrigin, hostname: workerHostname } = new URL(request.url);
+    const callbackUrl = workerHostname === 'localhost' || workerHostname === '127.0.0.1' || workerHostname === '::1'
+      ? undefined
+      : `${workerOrigin}/api/i2v-webhook/${job.id}`;
     
     // Detect workflow type from job
     const isFL2V = !!job.last_image_url;
