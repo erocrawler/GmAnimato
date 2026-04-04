@@ -35,6 +35,11 @@ const CUSTOM_VL_TOKEN_SECRET =
   '';
 const CUSTOM_VL_TOKEN_ID_HEADER = env.CUSTOM_VL_TOKEN_ID_HEADER || '';
 const CUSTOM_VL_TOKEN_SECRET_HEADER = env.CUSTOM_VL_TOKEN_SECRET_HEADER || '';
+const CUSTOM_VL_ROUTE_MODAL_WHEN_LOCAL_BUSY = env.CUSTOM_VL_ROUTE_MODAL_WHEN_LOCAL_BUSY === 'true';
+const CUSTOM_VL_LOCAL_BUSY_THRESHOLD = Number(env.CUSTOM_VL_LOCAL_BUSY_THRESHOLD || '0');
+const CUSTOM_VL_MODAL_FALLBACK_URL = env.CUSTOM_VL_MODAL_FALLBACK_URL || '';
+const CUSTOM_VL_MODAL_FALLBACK_TOKEN_ID = env.CUSTOM_VL_MODAL_FALLBACK_TOKEN_ID || '';
+const CUSTOM_VL_MODAL_FALLBACK_TOKEN_SECRET = env.CUSTOM_VL_MODAL_FALLBACK_TOKEN_SECRET || '';
 const CUSTOM_VL_TIMEOUT_MS = Number(env.CUSTOM_VL_TIMEOUT_MS || '60000');
 const CUSTOM_VL_MAX_TOKENS = Number(env.CUSTOM_VL_MAX_TOKENS || '1024');
 const CUSTOM_VL_MAX_IMAGE_PIXELS = Number(env.CUSTOM_VL_MAX_IMAGE_PIXELS || '1000000');
@@ -116,6 +121,30 @@ function hasCustomVlConfig(): boolean {
   if (authMode === 'bearer') return Boolean(CUSTOM_VL_API_KEY && CUSTOM_VL_MODEL);
   if (authMode === 'custom') return hasTokenPair() && hasCustomHeaders();
   return hasTokenPair();
+}
+
+function hasModalFallbackConfig(): boolean {
+  return Boolean(
+    CUSTOM_VL_MODAL_FALLBACK_URL &&
+    CUSTOM_VL_MODAL_FALLBACK_TOKEN_ID &&
+    CUSTOM_VL_MODAL_FALLBACK_TOKEN_SECRET
+  );
+}
+
+async function shouldRouteToModalFallback(): Promise<boolean> {
+  if (!CUSTOM_VL_ROUTE_MODAL_WHEN_LOCAL_BUSY || !hasModalFallbackConfig()) {
+    return false;
+  }
+
+  try {
+    const { getLocalJobStats } = await import('$lib/db');
+    const stats = await getLocalJobStats();
+    const activeLocalJobs = (stats.inQueue || 0) + (stats.processing || 0);
+    return activeLocalJobs > CUSTOM_VL_LOCAL_BUSY_THRESHOLD;
+  } catch (error) {
+    console.warn('[Custom VL] Failed to read local queue stats, skipping modal fallback routing:', error);
+    return false;
+  }
 }
 
 async function fetchImageAsResizedBase64(url: string): Promise<string> {
@@ -261,12 +290,94 @@ function parseJsonWithRepair<T>(rawText: string): T | null {
   }
 }
 
+function extractContentFromPayload(payload: any): string | null {
+  const content = payload?.choices?.[0]?.message?.content;
+
+  if (typeof content === 'string') {
+    return stripThinkingContent(content);
+  }
+
+  if (Array.isArray(content)) {
+    const merged = content
+      .map((item: any) => item?.text || '')
+      .filter(Boolean)
+      .join('\n');
+    return merged ? stripThinkingContent(merged) : null;
+  }
+
+  return null;
+}
+
+async function requestModalFallback(
+  messages: CustomVlMessage[],
+  temperature: number
+): Promise<string | null> {
+  if (!hasModalFallbackConfig()) {
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CUSTOM_VL_TIMEOUT_MS);
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Modal-Key': CUSTOM_VL_MODAL_FALLBACK_TOKEN_ID,
+      'Modal-Secret': CUSTOM_VL_MODAL_FALLBACK_TOKEN_SECRET,
+    };
+
+    const body: Record<string, unknown> = {
+      messages,
+      temperature,
+      max_tokens: CUSTOM_VL_MAX_TOKENS,
+      response_format: { type: 'json_object' },
+    };
+
+    const response = await fetch(CUSTOM_VL_MODAL_FALLBACK_URL.replace(/\/$/, ''), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(`Modal fallback request failed (${response.status}): ${errorBody}`);
+    }
+
+    const payload = await response.json();
+    console.log('[Custom VL] Raw modal fallback payload:', JSON.stringify(payload));
+    return extractContentFromPayload(payload);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function requestCustomVl(
   messages: CustomVlMessage[],
   temperature: number
 ): Promise<string | null> {
-  if (!hasCustomVlConfig()) {
+  const baseConfigReady = hasCustomVlConfig();
+  const modalFallbackReady = hasModalFallbackConfig();
+
+  if (!baseConfigReady && !modalFallbackReady) {
     return null;
+  }
+
+  if (!baseConfigReady && modalFallbackReady) {
+    return requestModalFallback(messages, temperature);
+  }
+
+  if (await shouldRouteToModalFallback()) {
+    try {
+      const modalText = await requestModalFallback(messages, temperature);
+      if (modalText) {
+        return modalText;
+      }
+      console.warn('[Custom VL] Modal fallback returned empty content, falling back to base endpoint.');
+    } catch (error) {
+      console.warn('[Custom VL] Modal fallback failed, falling back to base endpoint:', error);
+    }
   }
 
   const controller = new AbortController();
@@ -292,6 +403,7 @@ async function requestCustomVl(
       messages,
       temperature,
       max_tokens: CUSTOM_VL_MAX_TOKENS,
+      response_format: { type: 'json_object' },
     };
     if (authMode === 'bearer') {
       body['model'] = CUSTOM_VL_MODEL;
@@ -311,21 +423,21 @@ async function requestCustomVl(
 
     const payload = await response.json();
     console.log('[Custom VL] Raw response payload:', JSON.stringify(payload));
-    const content = payload?.choices?.[0]?.message?.content;
-
-    if (typeof content === 'string') {
-      return stripThinkingContent(content);
+    return extractContentFromPayload(payload);
+  } catch (error) {
+    if (modalFallbackReady) {
+      console.warn('[Custom VL] Base endpoint failed, trying modal fallback:', error);
+      try {
+        const modalText = await requestModalFallback(messages, temperature);
+        if (modalText) {
+          return modalText;
+        }
+        console.warn('[Custom VL] Modal fallback returned empty content after base failure.');
+      } catch (modalError) {
+        console.warn('[Custom VL] Modal fallback also failed after base failure:', modalError);
+      }
     }
-
-    if (Array.isArray(content)) {
-      const merged = content
-        .map((item: any) => item?.text || '')
-        .filter(Boolean)
-        .join('\n');
-      return merged ? stripThinkingContent(merged) : null;
-    }
-
-    return null;
+    throw error;
   } finally {
     clearTimeout(timeout);
   }

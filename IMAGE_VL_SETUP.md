@@ -92,6 +92,26 @@ In bearer mode only, request body includes model.
 CUSTOM_VL_MAX_TOKENS=1024
 CUSTOM_VL_TIMEOUT_MS=60000
 
+## Optional Queue-Aware Routing (Primary endpoint + Modal fallback)
+
+If your primary endpoint shares GPU with local I2V workers, you can route recognition traffic:
+
+- Local queue idle: use primary Custom VL endpoint
+- Local queue busy: prefer Modal fallback endpoint
+- If primary request fails: automatically retry with Modal fallback (when configured)
+
+Environment variables:
+
+CUSTOM_VL_ROUTE_MODAL_WHEN_LOCAL_BUSY=true
+CUSTOM_VL_LOCAL_BUSY_THRESHOLD=0
+CUSTOM_VL_MODAL_FALLBACK_URL=https://your-modal-endpoint/v1/chat/completions
+CUSTOM_VL_MODAL_FALLBACK_TOKEN_ID=your_modal_token_id
+CUSTOM_VL_MODAL_FALLBACK_TOKEN_SECRET=your_modal_token_secret
+
+Busy check rule:
+
+- Route to Modal when `(in_queue + processing) > CUSTOM_VL_LOCAL_BUSY_THRESHOLD`
+
 ## Quick Validation
 
 1. Set CUSTOM_VL_AUTH_MODE and matching credentials.
