@@ -14,6 +14,7 @@ Demo account:
 - Password: `demo123`
 
 See [QUICK_SETUP.md](./QUICK_SETUP.md) for environment variables and optional PostgreSQL setup.
+See [IMAGE_VL_SETUP.md](./IMAGE_VL_SETUP.md) for Custom VL auth modes and production configuration.
 
 ## Project Structure
 

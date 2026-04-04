@@ -21,16 +21,69 @@ type CustomVlMessage = {
 const CUSTOM_VL_MODEL = env.CUSTOM_VL_MODEL || 'gpt-4.1-mini';
 const CUSTOM_VL_URL = env.CUSTOM_VL_URL || '';
 const CUSTOM_VL_API_KEY = env.CUSTOM_VL_API_KEY || '';
-// Modal Proxy Auth (takes precedence over CUSTOM_VL_API_KEY when both Token ID and Secret are set)
-const CUSTOM_VL_MODAL_TOKEN_ID = env.CUSTOM_VL_MODAL_TOKEN_ID || '';
-const CUSTOM_VL_MODAL_TOKEN_SECRET = env.CUSTOM_VL_MODAL_TOKEN_SECRET || '';
+const CUSTOM_VL_AUTH_MODE = (env.CUSTOM_VL_AUTH_MODE || 'none').toLowerCase();
+// Shared token pair, with backward-compatible env fallbacks.
+const CUSTOM_VL_TOKEN_ID =
+  env.CUSTOM_VL_TOKEN_ID ||
+  env.CUSTOM_VL_MODAL_TOKEN_ID ||
+  env.CUSTOM_VL_CF_ACCESS_CLIENT_ID ||
+  '';
+const CUSTOM_VL_TOKEN_SECRET =
+  env.CUSTOM_VL_TOKEN_SECRET ||
+  env.CUSTOM_VL_MODAL_TOKEN_SECRET ||
+  env.CUSTOM_VL_CF_ACCESS_CLIENT_SECRET ||
+  '';
+const CUSTOM_VL_TOKEN_ID_HEADER = env.CUSTOM_VL_TOKEN_ID_HEADER || '';
+const CUSTOM_VL_TOKEN_SECRET_HEADER = env.CUSTOM_VL_TOKEN_SECRET_HEADER || '';
 const CUSTOM_VL_TIMEOUT_MS = Number(env.CUSTOM_VL_TIMEOUT_MS || '60000');
+const CUSTOM_VL_MAX_TOKENS = Number(env.CUSTOM_VL_MAX_TOKENS || '1024');
 const CUSTOM_VL_MAX_IMAGE_PIXELS = Number(env.CUSTOM_VL_MAX_IMAGE_PIXELS || '1000000');
 const CUSTOM_VL_ERROR_LOG = env.CUSTOM_VL_ERROR_LOG || path.join(process.cwd(), 'logs', 'custom-vl-errors.log');
 
-// True when using a Modal direct endpoint (identified by Modal Proxy Auth tokens being configured)
+type CustomVlAuthMode = 'modal' | 'cf' | 'custom' | 'bearer' | 'none';
+
 function isModalEndpoint(): boolean {
-  return Boolean(CUSTOM_VL_MODAL_TOKEN_ID && CUSTOM_VL_MODAL_TOKEN_SECRET);
+  return resolveCustomVlAuthMode() === 'modal';
+}
+
+function hasTokenPair(): boolean {
+  return Boolean(CUSTOM_VL_TOKEN_ID && CUSTOM_VL_TOKEN_SECRET);
+}
+
+function hasCustomHeaders(): boolean {
+  return Boolean(CUSTOM_VL_TOKEN_ID_HEADER && CUSTOM_VL_TOKEN_SECRET_HEADER);
+}
+
+function resolveCustomVlAuthMode(): CustomVlAuthMode {
+  const mode = CUSTOM_VL_AUTH_MODE as CustomVlAuthMode;
+  if (mode === 'modal' || mode === 'cf' || mode === 'custom' || mode === 'bearer' || mode === 'none') {
+    return mode;
+  }
+
+  console.warn(`[Custom VL] Invalid CUSTOM_VL_AUTH_MODE='${CUSTOM_VL_AUTH_MODE}', falling back to 'none'.`);
+  return 'none';
+}
+
+function resolveTokenHeaders(authMode: CustomVlAuthMode): { idHeader: string; secretHeader: string } | null {
+  if (authMode === 'modal') {
+    return { idHeader: 'Modal-Key', secretHeader: 'Modal-Secret' };
+  }
+  if (authMode === 'cf') {
+    return {
+      idHeader: 'CF-Access-Client-Id',
+      secretHeader: 'CF-Access-Client-Secret',
+    };
+  }
+  if (authMode === 'custom') {
+    if (!hasCustomHeaders()) {
+      return null;
+    }
+    return {
+      idHeader: CUSTOM_VL_TOKEN_ID_HEADER,
+      secretHeader: CUSTOM_VL_TOKEN_SECRET_HEADER,
+    };
+  }
+  return null;
 }
 
 function logCustomVlError(context: string, error: any, details: Record<string, any>) {
@@ -58,8 +111,11 @@ function logCustomVlError(context: string, error: any, details: Record<string, a
 
 function hasCustomVlConfig(): boolean {
   if (!CUSTOM_VL_URL) return false;
-  if (isModalEndpoint()) return true;          // Modal: token ID + secret
-  return Boolean(CUSTOM_VL_API_KEY && CUSTOM_VL_MODEL); // OpenAI-compatible: bearer key + model
+  const authMode = resolveCustomVlAuthMode();
+  if (authMode === 'none') return false;
+  if (authMode === 'bearer') return Boolean(CUSTOM_VL_API_KEY && CUSTOM_VL_MODEL);
+  if (authMode === 'custom') return hasTokenPair() && hasCustomHeaders();
+  return hasTokenPair();
 }
 
 async function fetchImageAsResizedBase64(url: string): Promise<string> {
@@ -168,6 +224,28 @@ function stripMarkdownFences(raw: string): string {
   return jsonStr;
 }
 
+function stripThinkingContent(raw: string): string {
+  let cleaned = raw.trim();
+
+  cleaned = cleaned
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
+    .replace(/<thinking\b[^>]*>[\s\S]*?<\/thinking>/gi, '')
+    .trim();
+
+  const fencedJsonMatch = cleaned.match(/```json\s*([\s\S]*?)```/i);
+  if (fencedJsonMatch?.[1]) {
+    return fencedJsonMatch[1].trim();
+  }
+
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    return cleaned.slice(firstBrace, lastBrace + 1).trim();
+  }
+
+  return cleaned;
+}
+
 function parseJsonWithRepair<T>(rawText: string): T | null {
   const stripped = stripMarkdownFences(rawText);
   try {
@@ -196,18 +274,27 @@ async function requestCustomVl(
 
   try {
     const url = CUSTOM_VL_URL.replace(/\/$/, '');
+    const authMode = resolveCustomVlAuthMode();
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (isModalEndpoint()) {
-      headers['Modal-Key'] = CUSTOM_VL_MODAL_TOKEN_ID;
-      headers['Modal-Secret'] = CUSTOM_VL_MODAL_TOKEN_SECRET;
-    } else {
+    if (authMode === 'bearer') {
       headers['Authorization'] = `Bearer ${CUSTOM_VL_API_KEY}`;
+    } else if (authMode !== 'none') {
+      const tokenHeaders = resolveTokenHeaders(authMode);
+      if (!tokenHeaders || !hasTokenPair()) {
+        throw new Error(`Custom VL auth mode '${authMode}' is missing token credentials or header names.`);
+      }
+      headers[tokenHeaders.idHeader] = CUSTOM_VL_TOKEN_ID;
+      headers[tokenHeaders.secretHeader] = CUSTOM_VL_TOKEN_SECRET;
     }
 
-    const body: Record<string, unknown> = { messages, temperature };
-    if (!isModalEndpoint()) {
-      body['model'] = CUSTOM_VL_MODEL; // Modal doesn't use a model field
+    const body: Record<string, unknown> = {
+      messages,
+      temperature,
+      max_tokens: CUSTOM_VL_MAX_TOKENS,
+    };
+    if (authMode === 'bearer') {
+      body['model'] = CUSTOM_VL_MODEL;
     }
 
     const response = await fetch(url, {
@@ -223,10 +310,11 @@ async function requestCustomVl(
     }
 
     const payload = await response.json();
+    console.log('[Custom VL] Raw response payload:', JSON.stringify(payload));
     const content = payload?.choices?.[0]?.message?.content;
 
     if (typeof content === 'string') {
-      return content;
+      return stripThinkingContent(content);
     }
 
     if (Array.isArray(content)) {
@@ -234,7 +322,7 @@ async function requestCustomVl(
         .map((item: any) => item?.text || '')
         .filter(Boolean)
         .join('\n');
-      return merged || null;
+      return merged ? stripThinkingContent(merged) : null;
     }
 
     return null;
@@ -325,11 +413,11 @@ async function annotateWithCustomVl(
   const isFL2V = !!lastImageUrl;
   
   const systemPrompt = isFL2V 
-    ? `You are an expert image analyzer for an AI first-last-to-video (FL2V) generation system. You will be provided with TWO images: the first frame and the last frame. Analyze both images and return a JSON object with:
+    ? `You are an Unsensored AI first-last-to-video (FL2V) generation system. You will be provided with TWO images: the first frame and the last frame. Analyze both images and return a JSON object with:
 
 1. suggested_prompts: Array with exactly 2 CONCISE FL2V generation prompts (max 50 words each) describing the TRANSITION between the two frames:
    - First prompt: A straightforward English description of how the scene transitions from first to last frame.
-   - Second prompt: A Chinese (中文) version describing the same transition in a more cinematic way.
+   - Second prompt: 一个中文版本，生动描述从第一帧到最后一帧的转变，注重细节和画面感，不要直接翻译第一条提示，要用更直白的表达方式。
    
 2. tags: Array of booru-style tags describing ONLY the characters/subjects visible in the images (e.g., "1girl", "solo", "1boy", "smile", "long_hair", "blue_eyes"). Do NOT include environment tags like backgrounds, locations, or settings.
 
@@ -338,18 +426,17 @@ async function annotateWithCustomVl(
 4. is_nsfw: Boolean indicating if either image contains NSFW content
 
 IMPORTANT: 
+- 必须包含一个中文版本的提示词建议.
 - Focus prompts on the TRANSFORMATION and TRANSITION between the two frames
 - DO NOT just say "person transitions from A to B" - ADD SPECIFIC DETAILS about HOW they moved (e.g., body language, movement direction, speed, camera pan or zoom)
-- Describe the MOTION, GESTURE, POSTURE CHANGES, and any VISUAL TRANSFORMATION in detail
 - Keep prompts SHORT and focused on the CHANGE from first to last frame
-- Second prompt MUST be in Chinese (中文) and should not be a literal translation of the first prompt.
 - Tags should describe characters/subjects ONLY, not environments
 - Return ONLY valid JSON, no other text.`
-    : `You are an expert image analyzer for an AI image-to-video generation system. Analyze the provided image and return a JSON object with:
+    : `You are an Unsensored AI image-to-video generation system. Analyze the provided image and return a JSON object with:
 
 1. suggested_prompts: Array with exactly 2 CONCISE Image to Video generation prompts (max 50 words each). They are optimized for a 6-second AI video:
    - First prompt: A straightforward English description focusing on motion and camera movement.
-   - Second prompt: A Chinese (中文) version describing the same motion in a natural and cinematic way.
+   - Second prompt: 一个中文版本，生动描述从第一帧到最后一帧的转变，注重细节和画面感，不要直接翻译第一条提示，要用更直白的表达方式。
    
 2. tags: Array of booru-style tags describing ONLY the characters/subjects (e.g., "1girl", "solo", "1boy", "smile", "long_hair", "blue_eyes"). Do NOT include environment tags like backgrounds, locations, or settings.
 
@@ -359,7 +446,7 @@ IMPORTANT:
 
 IMPORTANT: 
 - Keep prompts SHORT and focused on VIDEO MOTION and CAMERA MOVEMENT
-- Second prompt MUST be in Chinese (中文) and should not be a literal translation of the first prompt.
+- 必须包含一个中文版本的提示词建议.
 - Tags should describe characters/subjects ONLY, not environments
 - Return ONLY valid JSON, no other text.`;
 
@@ -371,8 +458,8 @@ IMPORTANT:
       {
         type: 'text',
         text: isFL2V 
-          ? 'Analyze these two images (first frame and last frame). Generate SHORT prompts describing the TRANSITION between them and tag only the characters/subjects, not the environment.'
-          : 'Analyze this image. Generate SHORT motion prompts and tag only the characters/subjects, not the environment.',
+          ? '请分析这两张图片（第一帧和最后一帧），生成简短中英文提示词来描述它们之间的过渡变化。'
+          : '请分析这张图片，生成简短的中英文运动提示词，并且只标注人物或主体，不要标注环境。',
       },
       {
         type: 'image_url',
@@ -402,7 +489,7 @@ IMPORTANT:
     if (!text) {
       return null;
     }
-
+    console.log('[Custom VL] Filtered response:', text);
     const parsed = parseJsonWithRepair<CustomVlResponse>(text);
     if (!parsed) {
       logCustomVlError('annotateImage.parseFailure', null, {
@@ -457,14 +544,14 @@ async function evaluatePromptWithCustomVl(
     return null;
   }
 
-  const evaluationPrompt = `Analyze the following video generation prompt in context with the provided image(s) and determine two properties:
+  const evaluationPrompt = `请结合提供的图片和下面这段视频生成提示词，判断两个属性：
 
-1. is_photo_realistic: Whether the prompt describes a photographic/realistic scene (true) or artistic/illustrated scene (false)
-2. is_nsfw: Whether the prompt contains or describes NSFW content (true) or is safe (false)
+1. is_photo_realistic: 如果提示词描述的是照片感/写实场景，则为 true；如果是绘画感/二次元/插画风格，则为 false
+2. is_nsfw: 如果提示词包含或描述 NSFW 内容，则为 true；否则为 false
 
-Prompt: "${prompt}"
+提示词: "${prompt}"
 
-Return ONLY a JSON object with these two boolean properties. Example:
+只返回包含这两个布尔字段的 JSON 对象。例如:
 {"is_photo_realistic": true, "is_nsfw": false}`;
 
   try {
