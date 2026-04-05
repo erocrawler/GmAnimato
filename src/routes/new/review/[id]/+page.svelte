@@ -252,9 +252,25 @@
         method: 'POST',
       });
 
-      const payload = await res.json();
-
       if (!res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        const rawError = await res.text().catch(() => '');
+        const isHtmlResponse =
+          contentType.includes('text/html') ||
+          /^\s*(<\!DOCTYPE|<html)/i.test(rawError);
+
+        if (isHtmlResponse) {
+          message = get(_)('review.analysisFailed', { values: { error: 'connection timed out' } });
+          return;
+        }
+
+        let payload: any = { error: rawError || `HTTP ${res.status}` };
+        try {
+          payload = rawError ? JSON.parse(rawError) : payload;
+        } catch {
+          // Keep text fallback for non-JSON responses.
+        }
+
         if (payload.errorCode === 'analysis_unavailable') {
           message = get(_)('review.analysisUnavailable');
         } else {
@@ -266,6 +282,8 @@
         }
         return;
       }
+
+      const payload = await res.json();
 
       if (payload.success) {
         if (payload.entry) {
@@ -309,7 +327,13 @@
           pollInterval = setInterval(pollStatus, 10000);
         }
       } else {
-        const error = await res.json();
+        const rawError = await res.text().catch(() => '');
+        let error: any = { error: rawError || `HTTP ${res.status}` };
+        try {
+          error = rawError ? JSON.parse(rawError) : error;
+        } catch {
+          // Keep text fallback for non-JSON timeout/proxy responses.
+        }
         const t = get(_);
         alert(t('review.failedToRetry', { values: { error: error.error || 'Unknown error' } }));
       }
@@ -552,7 +576,14 @@
       });
       
       if (!res.ok) {
-        const j = await res.json();
+        const rawError = await res.text().catch(() => '');
+        let j: any = { error: rawError || `HTTP ${res.status}` };
+        try {
+          j = rawError ? JSON.parse(rawError) : j;
+        } catch {
+          // Keep text fallback for non-JSON timeout/proxy responses.
+        }
+
         if (res.status === 429) {
           // User hit their personal limit
           showBusyModal = true;
