@@ -222,8 +222,27 @@
         const result = await response.json();
         if (result.found && result.sponsor) {
           const sponsor = result.sponsor;
+          // Claim was expired (background task expired it) — auto-renew via PUT
+          if (result.messageCode === 'SPONSOR_RENEWED') {
+            if (!result.roleToApply) {
+              showNotification($_('profile.sponsor.errors.updateFailed'), 'error');
+            } else {
+              const putResponse = await fetch('/api/profile/claim-sponsor', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: activeClaim.sponsor_username, roleToApply: result.roleToApply }),
+              });
+              if (putResponse.ok) {
+                showNotification($_(`profile.sponsor.errors.${getMessageKey('CLAIM_SUCCESS')}`), 'success');
+                try { await invalidateAll(); } catch {}
+              } else {
+                const putResult = await putResponse.json();
+                const messageKey = putResult.messageCode ? getMessageKey(putResult.messageCode) : 'updateFailed';
+                showNotification($_(`profile.sponsor.errors.${messageKey}`), 'error');
+              }
+            }
           // Check if tier changed
-          if (sponsor.schemeName !== activeClaim.sponsor_tier) {
+          } else if (sponsor.schemeName !== activeClaim.sponsor_tier) {
             // Tier changed, need to update
             sponsorUsername = activeClaim.sponsor_username;
             foundSponsor = sponsor;

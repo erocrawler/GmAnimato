@@ -249,7 +249,14 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
       }
       
       // If expired and belongs to current user, renew it
-      if (existingClaim.expired_at && existingClaim.user_id === locals.user.id) {
+      // If expired and claimed by a different user, delete the stale claim so we can create a new one
+      if (existingClaim.expired_at && existingClaim.user_id !== locals.user.id) {
+        await deleteSponsorClaim(existingClaim.id);
+        // Fall through to new claim creation below
+      }
+
+      // If expired and belongs to current user, renew it
+      else if (existingClaim.expired_at && existingClaim.user_id === locals.user.id) {
         // Restore the role if not present
         const currentRoles = locals.user.roles || [];
         if (!currentRoles.includes(roleToApply)) {

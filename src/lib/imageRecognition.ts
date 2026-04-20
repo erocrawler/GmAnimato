@@ -43,7 +43,7 @@ const CUSTOM_VL_MODAL_FALLBACK_TOKEN_SECRET = env.CUSTOM_VL_MODAL_FALLBACK_TOKEN
 const CUSTOM_VL_TIMEOUT_MS = Number(env.CUSTOM_VL_TIMEOUT_MS || '60000');
 const CUSTOM_VL_MAX_TOKENS = Number(env.CUSTOM_VL_MAX_TOKENS || '1024');
 const CUSTOM_VL_MAX_IMAGE_PIXELS = Number(env.CUSTOM_VL_MAX_IMAGE_PIXELS || '1000000');
-const CUSTOM_VL_ENABLE_THINKING = env.CUSTOM_VL_ENABLE_THINKING !== 'true';
+const CUSTOM_VL_ENABLE_THINKING = env.CUSTOM_VL_ENABLE_THINKING === 'true';
 const CUSTOM_VL_ERROR_LOG = env.CUSTOM_VL_ERROR_LOG || path.join(process.cwd(), 'logs', 'custom-vl-errors.log');
 
 type CustomVlAuthMode = 'modal' | 'cf' | 'custom' | 'bearer' | 'none';
