@@ -87,8 +87,34 @@
   let sponsorsTotalPages = $state(1);
   let sponsorsTotal = $state(0);
   let loadingSponsors = $state(false);
+  let hideExpired = $state(true);
   const SPONSORS_PAGE_SIZE = 50;
-  let sponsorsPaged = $derived(sponsors.slice((sponsorsPage - 1) * SPONSORS_PAGE_SIZE, sponsorsPage * SPONSORS_PAGE_SIZE));
+  let sponsorsFiltered = $derived(hideExpired ? sponsors.filter((s: any) => !s.db?.expiresAt || new Date(s.db.expiresAt) > new Date()) : sponsors);
+  let sponsorsFilteredTotal = $derived(sponsorsFiltered.length);
+  let sponsorsActiveTotal = $derived(sponsors.filter((s: any) => !s.db?.expiresAt || new Date(s.db.expiresAt) > new Date()).length);
+  let sponsorsFilteredTotalPages = $derived(Math.max(1, Math.ceil(sponsorsFilteredTotal / SPONSORS_PAGE_SIZE)));
+  $effect(() => { hideExpired; sponsorsPage = 1; });
+  let sponsorsPaged = $derived(sponsorsFiltered.slice((sponsorsPage - 1) * SPONSORS_PAGE_SIZE, sponsorsPage * SPONSORS_PAGE_SIZE));
+  let sponsorsSummary = $state({
+    total: 0,
+    withDiscrepancy: 0,
+    missingInCrawler: 0,
+    tierMismatch: 0,
+    roleMismatch: 0,
+    roleMappingMissing: 0,
+    dbExpiredButInCrawler: 0,
+  });
+  let crawlerAvailable = $state(true);
+  let crawlerError = $state<string | undefined>(undefined);
+  let usersWithRoleButNoClaim = $state<{userId: string, username: string, roles: string[]}[]>([]);
+
+  const discrepancyLabelMap: Record<string, string> = {
+    missing_in_crawler: 'Missing in crawler',
+    tier_mismatch: 'Tier mismatch',
+    role_mismatch: 'Role mismatch',
+    role_mapping_missing: 'No role mapping for tier',
+    db_expired_but_in_crawler: 'DB expired but still in crawler',
+  };
   
   let roleList = $derived(settings.roles ?? []);
   let getAvailableRoleNames = $derived(roleList.map((r: any) => r.name));
@@ -524,13 +550,14 @@
       if (response.ok) {
         const data = await response.json();
         const list = data.sponsors || [];
-        const total = list.length;
-        const totalPages = Math.max(1, Math.ceil(total / SPONSORS_PAGE_SIZE));
-        const safePage = Math.min(Math.max(1, page), totalPages);
+        const safePage = Math.min(Math.max(1, page), Math.max(1, Math.ceil(list.length / SPONSORS_PAGE_SIZE)));
 
         sponsors = list;
-        sponsorsTotal = total;
-        sponsorsTotalPages = totalPages;
+        sponsorsSummary = data.summary || sponsorsSummary;
+        crawlerAvailable = data.crawlerAvailable ?? true;
+        crawlerError = data.crawlerError;
+        usersWithRoleButNoClaim = data.usersWithRoleButNoClaim || [];
+        sponsorsTotal = list.length;
         sponsorsPage = safePage;
       } else {
         showNotification('Failed to load sponsors', 'error');
@@ -551,8 +578,21 @@
     showSponsorsModal = false;
     sponsors = [];
     sponsorsPage = 1;
+    sponsorsSummary = {
+      total: 0,
+      withDiscrepancy: 0,
+      missingInCrawler: 0,
+      tierMismatch: 0,
+      roleMismatch: 0,
+      roleMappingMissing: 0,
+      dbExpiredButInCrawler: 0,
+    };
+    crawlerAvailable = true;
+    crawlerError = undefined;
+    usersWithRoleButNoClaim = [];
+    hideExpired = true;
   }
-  
+
   async function updateWorkflow(workflowId: string, compatibleLoraIds: string[]) {
     savingWorkflow = true;
     try {
@@ -1323,69 +1363,124 @@
 <!-- Sponsors Viewer Modal -->
 {#if showSponsorsModal}
   <div class="modal modal-open">
-    <div class="modal-box max-w-5xl">
-      <h3 class="font-bold text-lg mb-4">All Sponsors ({sponsorsTotal} total)</h3>
+    <div class="modal-box max-w-7xl">
+      <h3 class="font-bold text-lg mb-2">Sponsors Cross-Reference ({sponsors.length} total)</h3>
+      <p class="text-sm opacity-70 mb-4">Compares crawler sponsors with DB sponsor claims and highlights mismatches.</p>
       
+      {#if !crawlerAvailable}
+        <div class="alert alert-warning mb-4">
+          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+          </svg>
+          <div>
+            <span class="text-sm">Crawler unavailable - showing DB data only without cross-reference checks.</span>
+            {#if crawlerError}
+              <br /><span class="text-xs opacity-75">{crawlerError}</span>
+            {/if}
+          </div>
+        </div>
+      {/if}
       {#if loadingSponsors}
         <div class="flex justify-center py-8">
           <span class="loading loading-spinner loading-lg"></span>
         </div>
       {:else if sponsors.length > 0}
+        <div class="flex flex-wrap items-center gap-2 mb-4">
+          <span class="badge badge-outline">Discrepancies: {sponsorsSummary.withDiscrepancy}</span>
+          {#if sponsorsSummary.missingInCrawler > 0}
+            <span class="badge badge-warning">Missing in crawler: {sponsorsSummary.missingInCrawler}</span>
+          {/if}
+          {#if sponsorsSummary.tierMismatch > 0}
+            <span class="badge badge-error">Tier mismatch: {sponsorsSummary.tierMismatch}</span>
+          {/if}
+          {#if sponsorsSummary.roleMismatch > 0}
+            <span class="badge badge-error">Role mismatch: {sponsorsSummary.roleMismatch}</span>
+          {/if}
+          {#if sponsorsSummary.roleMappingMissing > 0}
+            <span class="badge badge-warning">Missing role mapping: {sponsorsSummary.roleMappingMissing}</span>
+          {/if}
+          {#if sponsorsSummary.dbExpiredButInCrawler > 0}
+            <span class="badge badge-error">DB expired in crawler: {sponsorsSummary.dbExpiredButInCrawler}</span>
+          {/if}
+          <label class="ml-auto flex items-center gap-2 cursor-pointer select-none text-sm">
+            <input type="checkbox" class="checkbox checkbox-sm" bind:checked={hideExpired} />
+            Hide expired
+          </label>
+        </div>
+
         <div class="overflow-x-auto">
           <table class="table table-zebra">
             <thead>
               <tr>
                 <th>Username</th>
-                <th>Tier</th>
-                <th>Expires At</th>
-                <th>Status</th>
-                <th>Created</th>
+                <th>Crawler Tier</th>
+                <th>Expected Role</th>
+                <th>DB Tier</th>
+                <th>DB Role</th>
+                <th>DB Expires</th>
+                <th>Discrepancies</th>
               </tr>
             </thead>
             <tbody>
               {#each sponsorsPaged as sponsor}
-                <tr>
+                <tr class:bg-warning={sponsor.hasDiscrepancy}>
                   <td class="font-semibold">{sponsor.username}</td>
                   <td>
-                    <span class="badge badge-primary">{sponsor.tier}</span>
+                    {#if sponsor.crawler}
+                      <span class="badge badge-primary">{sponsor.crawler.tier || '-'}</span>
+                    {:else}
+                      <span class="badge badge-ghost">-</span>
+                    {/if}
                   </td>
+                  <td class="text-sm">{sponsor.expectedRole || '-'}</td>
+                  <td>
+                    {#if sponsor.db}
+                      <span class="badge badge-secondary">{sponsor.db.tier || '-'}</span>
+                    {:else}
+                      <span class="badge badge-ghost">-</span>
+                    {/if}
+                  </td>
+                  <td class="text-sm">{sponsor.db?.appliedRole || '-'}</td>
                   <td class="text-sm">
-                    {#if sponsor.expiresAt}
-                      {new Date(sponsor.expiresAt).toLocaleDateString()}
+                    {#if sponsor.db?.expiresAt}
+                      {new Date(sponsor.db.expiresAt).toLocaleDateString()}
                     {:else}
                       -
                     {/if}
                   </td>
                   <td>
-                    {#if sponsor.expiresAt && new Date(sponsor.expiresAt) < new Date()}
-                      <span class="badge badge-error badge-sm">Expired</span>
+                    {#if sponsor.discrepancies?.length > 0}
+                      <div class="flex flex-wrap gap-1">
+                        {#each sponsor.discrepancies as discrepancy}
+                          <span class="badge badge-error badge-sm">{discrepancyLabelMap[discrepancy] || discrepancy}</span>
+                        {/each}
+                      </div>
                     {:else}
-                      <span class="badge badge-success badge-sm">Active</span>
+                      <span class="badge badge-success badge-sm">In sync</span>
                     {/if}
                   </td>
-                  <td class="text-sm">{new Date(sponsor.createdAt).toLocaleDateString()}</td>
                 </tr>
               {/each}
             </tbody>
           </table>
         </div>
         
-        {#if sponsorsTotalPages > 1}
+        {#if sponsorsFilteredTotalPages > 1}
           <div class="flex justify-center mt-4">
             <div class="join">
               <button 
                 class="join-item btn btn-sm" 
                 disabled={sponsorsPage === 1}
-                onclick={() => loadSponsors(sponsorsPage - 1)}
+                onclick={() => { sponsorsPage = sponsorsPage - 1; }}
               >
                 «
               </button>
-              {#each Array.from({ length: sponsorsTotalPages }, (_, i) => i + 1) as pageNum}
-                {#if pageNum === 1 || pageNum === sponsorsTotalPages || Math.abs(pageNum - sponsorsPage) <= 2}
+              {#each Array.from({ length: sponsorsFilteredTotalPages }, (_, i) => i + 1) as pageNum}
+                {#if pageNum === 1 || pageNum === sponsorsFilteredTotalPages || Math.abs(pageNum - sponsorsPage) <= 2}
                   <button 
                     class="join-item btn btn-sm" 
                     class:btn-active={pageNum === sponsorsPage}
-                    onclick={() => loadSponsors(pageNum)}
+                    onclick={() => { sponsorsPage = pageNum; }}
                   >
                     {pageNum}
                   </button>
@@ -1395,8 +1490,8 @@
               {/each}
               <button 
                 class="join-item btn btn-sm" 
-                disabled={sponsorsPage === sponsorsTotalPages}
-                onclick={() => loadSponsors(sponsorsPage + 1)}
+                disabled={sponsorsPage === sponsorsFilteredTotalPages}
+                onclick={() => { sponsorsPage = sponsorsPage + 1; }}
               >
                 »
               </button>
@@ -1405,7 +1500,7 @@
         {/if}
         
         <div class="text-sm text-base-content/70 mt-4 text-center">
-          Total: {sponsorsTotal} sponsor{sponsorsTotal !== 1 ? 's' : ''}
+          Active: {sponsorsActiveTotal}, total: {sponsors.length}
         </div>
       {:else}
         <div class="alert alert-info">
@@ -1413,6 +1508,22 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
           </svg>
           <span>No sponsors found</span>
+        </div>
+      {/if}
+
+      {#if usersWithRoleButNoClaim.length > 0}
+        <div class="alert alert-warning mt-4">
+          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <div>
+            <span class="text-sm font-semibold">{usersWithRoleButNoClaim.length} user{usersWithRoleButNoClaim.length !== 1 ? 's have' : ' has'} a sponsor role but no active claim record:</span>
+            <div class="flex flex-wrap gap-1 mt-1">
+              {#each usersWithRoleButNoClaim as u}
+                <span class="badge badge-outline badge-sm">{u.username} ({u.roles.join(', ')})</span>
+              {/each}
+            </div>
+          </div>
         </div>
       {/if}
       
@@ -1555,110 +1666,6 @@
       </div>
     </div>
     <button class="modal-backdrop" type="button" onclick={closeRoleModal} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && closeRoleModal()} aria-label="Close modal"></button>
-  </div>
-{/if}
-
-<!-- Sponsors Viewer Modal -->
-{#if showSponsorsModal}
-  <div class="modal modal-open">
-    <div class="modal-box max-w-5xl">
-      <h3 class="font-bold text-lg mb-4">All Sponsors ({sponsorsTotal} total)</h3>
-      
-      {#if loadingSponsors}
-        <div class="flex justify-center py-8">
-          <span class="loading loading-spinner loading-lg"></span>
-        </div>
-      {:else if sponsors.length > 0}
-        <div class="overflow-x-auto">
-          <table class="table table-zebra">
-            <thead>
-              <tr>
-                <th>Username</th>
-                <th>Tier</th>
-                <th>Expires At</th>
-                <th>Status</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each sponsors as sponsor}
-                <tr>
-                  <td class="font-semibold">{sponsor.username}</td>
-                  <td>
-                    <span class="badge badge-primary">{sponsor.tier}</span>
-                  </td>
-                  <td class="text-sm">
-                    {#if sponsor.expiresAt}
-                      {new Date(sponsor.expiresAt).toLocaleDateString()}
-                    {:else}
-                      -
-                    {/if}
-                  </td>
-                  <td>
-                    {#if sponsor.expiresAt && new Date(sponsor.expiresAt) < new Date()}
-                      <span class="badge badge-error badge-sm">Expired</span>
-                    {:else}
-                      <span class="badge badge-success badge-sm">Active</span>
-                    {/if}
-                  </td>
-                  <td class="text-sm">{new Date(sponsor.createdAt).toLocaleDateString()}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-        
-        {#if sponsorsTotalPages > 1}
-          <div class="flex justify-center mt-4">
-            <div class="join">
-              <button 
-                class="join-item btn btn-sm" 
-                disabled={sponsorsPage === 1}
-                onclick={() => loadSponsors(sponsorsPage - 1)}
-              >
-                «
-              </button>
-              {#each Array.from({ length: sponsorsTotalPages }, (_, i) => i + 1) as pageNum}
-                {#if pageNum === 1 || pageNum === sponsorsTotalPages || Math.abs(pageNum - sponsorsPage) <= 2}
-                  <button 
-                    class="join-item btn btn-sm" 
-                    class:btn-active={pageNum === sponsorsPage}
-                    onclick={() => loadSponsors(pageNum)}
-                  >
-                    {pageNum}
-                  </button>
-                {:else if pageNum === sponsorsPage - 3 || pageNum === sponsorsPage + 3}
-                  <button class="join-item btn btn-sm btn-disabled">...</button>
-                {/if}
-              {/each}
-              <button 
-                class="join-item btn btn-sm" 
-                disabled={sponsorsPage === sponsorsTotalPages}
-                onclick={() => loadSponsors(sponsorsPage + 1)}
-              >
-                »
-              </button>
-            </div>
-          </div>
-        {/if}
-        
-        <div class="text-sm text-base-content/70 mt-4 text-center">
-          Total: {sponsorsTotal} sponsor{sponsorsTotal !== 1 ? 's' : ''}
-        </div>
-      {:else}
-        <div class="alert alert-info">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-          </svg>
-          <span>No sponsors found</span>
-        </div>
-      {/if}
-      
-      <div class="modal-action">
-        <button class="btn" onclick={closeSponsorsModal}>Close</button>
-      </div>
-    </div>
-    <button class="modal-backdrop" type="button" onclick={closeSponsorsModal} aria-label="Close modal"></button>
   </div>
 {/if}
 
