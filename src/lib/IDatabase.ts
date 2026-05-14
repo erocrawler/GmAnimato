@@ -40,6 +40,8 @@ export type VideoEntry = {
   additional_options?: {
     motion_scale?: number; // Motion scale (0.5 to 2.0)
     freelong_blend_strength?: number; // FreeLong blend strength (0 to 1)
+    prompt_relay_mode?: boolean;
+    prompt_relay_segments?: { prompt: string; frames: number }[];
     // Add future options here without DB migration
   };
   lora_weights?: Record<string, number>; // LoRA weights for customization
@@ -146,6 +148,7 @@ export type GetPublishedVideosOptions = {
   status?: VideoEntry['status'];
   isNsfw?: boolean;
   sortBy?: 'date' | 'likes'; // Sort by creation date or like count
+  afterValue?: string; // Cursor-based pagination: skip up to and including this video ID
 };
 
 export type GetAllVideosOptions = {
@@ -211,4 +214,8 @@ export interface IDatabase {
   getWorkflowById(id: string): Promise<Workflow | null>;
   getWorkflows(): Promise<Workflow[]>;
   getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v'): Promise<Workflow | null>;
+  createWorkflow(data: Omit<Workflow, 'createdAt' | 'updatedAt'>): Promise<Workflow>;
+  updateWorkflow(id: string, patch: Partial<Omit<Workflow, 'id' | 'createdAt'>>): Promise<Workflow | null>;
+  deleteWorkflow(id: string): Promise<boolean>;
+  setDefaultWorkflow(id: string): Promise<Workflow | null>;
 }

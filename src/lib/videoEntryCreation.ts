@@ -6,6 +6,8 @@ export interface CreateVideoEntryParams {
   mode: 'i2v' | 'fl2v';
   originalImageUrl: string;
   lastImageUrl?: string;
+  prompt?: string;
+  additionalOptions?: Record<string, any>;
 }
 
 export interface CreateVideoEntryResult {
@@ -21,14 +23,14 @@ export interface CreateVideoEntryResult {
 export async function createVideoEntryForReview(
   params: CreateVideoEntryParams
 ): Promise<CreateVideoEntryResult> {
-  const { userId, mode, originalImageUrl, lastImageUrl } = params;
+  const { userId, mode, originalImageUrl, lastImageUrl, prompt, additionalOptions } = params;
 
   try {
     // Validate field lengths
     const validationData = {
       original_image_url: originalImageUrl,
       last_image_url: lastImageUrl,
-      prompt: '',
+      prompt: prompt || '',
       tags: [],
       suggested_prompts: [],
     };
@@ -51,13 +53,14 @@ export async function createVideoEntryForReview(
       workflow_id: defaultWorkflow?.id,
       original_image_url: originalImageUrl,
       last_image_url: lastImageUrl,
-      prompt: '',
+      prompt: prompt || '',
       tags: [],
       suggested_prompts: [],
       is_photo_realistic: undefined,
       is_nsfw: undefined,
       status: 'uploaded',
       is_published: false,
+      additional_options: additionalOptions || undefined,
       validation_metadata: {
         manual_recognition_done: false,
         revalidation_status: 'idle'

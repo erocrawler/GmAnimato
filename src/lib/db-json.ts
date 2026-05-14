@@ -492,10 +492,14 @@ export class JsonFileDatabase implements IDatabase {
       const defaultSettings: AdminSettings = {
         id: 'default',
         registrationEnabled: true,
-        freeUserQuotaPerDay: 5,
-        paidUserQuotaPerDay: 50,
+        quotaPerDay: { free: 5, paid: 50 },
         maxConcurrentJobs: 5,
         maxQueueThreshold: 5000,
+        localQueueThreshold: 10,
+        localQueueMigrationThreshold: 5,
+        freeUserWaitThresholdMinutes: 30,
+        freeUserQueueLimit: 2,
+        paidUserQueueLimit: 5,
         loraPresets: DEFAULT_LORA_PRESETS,
         updatedAt: new Date().toISOString(),
       };
@@ -639,6 +643,26 @@ export class JsonFileDatabase implements IDatabase {
 
   async getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v'): Promise<import('./IDatabase').Workflow | null> {
     console.warn('[JSON DB] getDefaultWorkflow not supported - use PostgreSQL');
+    return null;
+  }
+
+  async createWorkflow(data: Omit<import('./IDatabase').Workflow, 'createdAt' | 'updatedAt'>): Promise<import('./IDatabase').Workflow> {
+    console.warn('[JSON DB] createWorkflow not supported - use PostgreSQL');
+    throw new Error('Workflow creation not supported in JSON database');
+  }
+
+  async updateWorkflow(id: string, patch: Partial<Omit<import('./IDatabase').Workflow, 'id' | 'createdAt'>>): Promise<import('./IDatabase').Workflow | null> {
+    console.warn('[JSON DB] updateWorkflow not supported - use PostgreSQL');
+    return null;
+  }
+
+  async deleteWorkflow(id: string): Promise<boolean> {
+    console.warn('[JSON DB] deleteWorkflow not supported - use PostgreSQL');
+    return false;
+  }
+
+  async setDefaultWorkflow(id: string): Promise<import('./IDatabase').Workflow | null> {
+    console.warn('[JSON DB] setDefaultWorkflow not supported - use PostgreSQL');
     return null;
   }
 }

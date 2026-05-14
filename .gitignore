@@ -28,6 +28,7 @@ vite.config.ts.timestamp-*
 
 # Test script
 test-*
+/workflow-test-output
 
 # Prisma
 node_modules/.prisma

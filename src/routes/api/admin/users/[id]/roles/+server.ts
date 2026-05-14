@@ -10,7 +10,7 @@ export const PUT: RequestHandler = async ({ params, request, locals }) => {
     });
   }
 
-  const userId = params.id;
+  const userId = params.id!;
   const body = await request.json();
   
   if (!body.roles || !Array.isArray(body.roles)) {

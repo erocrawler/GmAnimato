@@ -190,6 +190,7 @@
     "showVideo": "Show Video",
     "prompt": "Prompt",
     "noPrompt": "No prompt provided",
+    "relaySegments": "Relay segments:",
     "tags": "Tags",
     "actions": "Actions",
     "like": "Like",
@@ -313,7 +314,9 @@
       "short": "4 seconds",
       "shortDesc": "81 frames",
       "long": "6 seconds",
-      "longDesc": "121 frames"
+      "longDesc": "121 frames",
+      "extended": "10 seconds",
+      "extendedDesc": "177 frames (relay mode only)"
     },
     "resolution": {
       "title": "Video Resolution",
@@ -349,6 +352,31 @@
     "loraEnabled": "Enabled",
     "loraRequired": "required",
     "reset": "Reset",
+    "promptMode": {
+      "standard": "Standard",
+      "relay": "Prompt Relay"
+    },
+    "relay": {
+      "globalPrompt": "Global Prompt",
+      "globalPromptHelp": "Describes the overall subject and style shared across all segments.",
+      "segments": "Segments",
+      "addSegment": "Add Segment",
+      "removeSegment": "Remove",
+      "splitSegment": "Split",
+      "frames": "frames",
+      "framesUsed": "Used: {used}/{total} frames",
+      "frameMismatch": "Segments must total exactly {total} frames",
+      "minFrames": "Minimum 9 frames (0.5s) per segment",
+      "customFrames": "custom",
+      "totalFrames": "Total frames",
+      "generateWithAI": "Generate with AI",
+      "generating": "Generating...",
+      "aiSuccess": "AI generated segments",
+      "aiError": "AI generation failed",
+      "aiOverwriteConfirm": "This will replace your existing segment prompts. Continue?",
+      "segmentFramesInvalid": "One or more segments have an invalid frame count (must be 9–121)",
+      "segmentPromptRequired": "All segments must have a prompt"
+    },
     "generateVideo": "Generate Video",
     "submitting": "Submitting...",
     "queued": "Queued...",

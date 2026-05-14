@@ -16,31 +16,15 @@ export const POST: RequestHandler = async ({ locals, params }) => {
   const { id } = params;
 
   try {
-    // Unset all workflows as default
-    await db.prisma.workflow.updateMany({
-      data: { isDefault: false },
-    });
+    const updated = await db.setDefaultWorkflow(id);
 
-    // Set this workflow as default
-    const updated = await db.prisma.workflow.update({
-      where: { id },
-      data: {
-        isDefault: true,
-        updatedAt: new Date(),
-      },
-    });
+    if (!updated) {
+      throw error(404, 'Workflow not found');
+    }
 
-    return json({
-      id: updated.id,
-      name: updated.name,
-      description: updated.description,
-      templatePath: updated.templatePath,
-      compatibleLoraIds: updated.compatibleLoraIds as string[],
-      isDefault: updated.isDefault,
-      createdAt: updated.createdAt.toISOString(),
-      updatedAt: updated.updatedAt.toISOString(),
-    });
-  } catch (err) {
+    return json(updated);
+  } catch (err: any) {
+    if (err.status) throw err;
     console.error('Failed to set default workflow:', err);
     throw error(500, 'Failed to set default workflow');
   }

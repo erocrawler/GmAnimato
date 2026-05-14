@@ -11,6 +11,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const mode = body?.mode || 'i2v';
     const originalImageUrl = body?.originalImageUrl;
     const lastImageUrl = body?.lastImageUrl;
+    const prompt = typeof body?.prompt === 'string' ? body.prompt : undefined;
+    const additionalOptions = body?.additionalOptions && typeof body.additionalOptions === 'object' ? body.additionalOptions : undefined;
 
     if (!originalImageUrl) {
       return new Response(JSON.stringify({ error: 'missing originalImageUrl' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
@@ -25,7 +27,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       userId: locals.user.id,
       mode,
       originalImageUrl,
-      lastImageUrl
+      lastImageUrl,
+      prompt,
+      additionalOptions
     });
 
     if (!result.success) {

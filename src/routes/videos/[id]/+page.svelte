@@ -51,11 +51,15 @@
         ? {
             mode: 'fl2v',
             originalImageUrl: video.original_image_url,
-            lastImageUrl: video.last_image_url
+            lastImageUrl: video.last_image_url,
+            prompt: video.prompt || '',
+            additionalOptions: video.additional_options || undefined
           }
         : {
             mode: 'i2v',
-            originalImageUrl: video.original_image_url
+            originalImageUrl: video.original_image_url,
+            prompt: video.prompt || '',
+            additionalOptions: video.additional_options || undefined
           };
 
       const res = await fetch('/api/video/reuse', {
@@ -229,7 +233,18 @@
       <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
           <h2 class="card-title">{$_('videoDetail.prompt')}</h2>
-          <p class="text-sm">{video.prompt || $_('videoDetail.noPrompt')}</p>
+            <p class="text-sm">{video.prompt || $_('videoDetail.noPrompt')}</p>
+          {#if video.additional_options?.prompt_relay_mode && Array.isArray(video.additional_options?.prompt_relay_segments) && video.additional_options.prompt_relay_segments.length > 0}
+            <p class="text-xs opacity-50 mb-2">{$_('videoDetail.relaySegments')}</p>
+            <ol class="space-y-1 list-none">
+              {#each video.additional_options.prompt_relay_segments as seg, i}
+                <li class="text-sm flex gap-2">
+                  <span class="opacity-40 font-mono shrink-0">{i + 1}.</span>
+                  <span>{seg.prompt || $_('videoDetail.noPrompt')}</span>
+                </li>
+              {/each}
+            </ol>
+          {/if}
         </div>
       </div>
 

@@ -26,52 +26,24 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
   }
 
   try {
-    // Build update data object
-    const updateData: any = {
-      updatedAt: new Date(),
-    };
-    
-    if (compatibleLoraIds !== undefined) updateData.compatibleLoraIds = compatibleLoraIds;
-    if (name !== undefined) updateData.name = name;
-    if (description !== undefined) updateData.description = description;
-    if (templatePath !== undefined) updateData.templatePath = templatePath;
-    if (workflowType !== undefined) updateData.workflowType = workflowType;
-    if (isDefault !== undefined) {
-      // If setting this as default, unset all others of the same type first
-      if (isDefault) {
-        // Get current workflow to check its type
-        const current = await db.prisma.workflow.findUnique({ 
-          where: { id },
-          select: { workflowType: true }
-        });
-        if (current) {
-          await db.prisma.workflow.updateMany({
-            where: { workflowType: current.workflowType },
-            data: { isDefault: false },
-          });
-        }
-      }
-      updateData.isDefault = isDefault;
+    // Build patch object
+    const patch: Parameters<typeof db.updateWorkflow>[1] = {};
+    if (compatibleLoraIds !== undefined) patch.compatibleLoraIds = compatibleLoraIds;
+    if (name !== undefined) patch.name = name;
+    if (description !== undefined) patch.description = description;
+    if (templatePath !== undefined) patch.templatePath = templatePath;
+    if (workflowType !== undefined) patch.workflowType = workflowType;
+    if (isDefault !== undefined) patch.isDefault = isDefault;
+
+    const updated = await db.updateWorkflow(id, patch);
+
+    if (!updated) {
+      throw error(404, 'Workflow not found');
     }
 
-    // Update workflow using direct Prisma access
-    const updated = await db.prisma.workflow.update({
-      where: { id },
-      data: updateData,
-    });
-
-    return json({
-      id: updated.id,
-      name: updated.name,
-      description: updated.description,
-      templatePath: updated.templatePath,
-      workflowType: updated.workflowType,
-      compatibleLoraIds: updated.compatibleLoraIds as string[],
-      isDefault: updated.isDefault,
-      createdAt: updated.createdAt.toISOString(),
-      updatedAt: updated.updatedAt.toISOString(),
-    });
-  } catch (err) {
+    return json(updated);
+  } catch (err: any) {
+    if (err.status) throw err;
     console.error('Failed to update workflow:', err);
     throw error(500, 'Failed to update workflow');
   }
@@ -92,9 +64,7 @@ export const DELETE: RequestHandler = async ({ locals, params }) => {
 
   try {
     // Check if this is the default workflow
-    const workflow = await db.prisma.workflow.findUnique({
-      where: { id },
-    });
+    const workflow = await db.getWorkflowById(id);
 
     if (!workflow) {
       throw error(404, 'Workflow not found');
@@ -105,9 +75,7 @@ export const DELETE: RequestHandler = async ({ locals, params }) => {
     }
 
     // Delete workflow
-    await db.prisma.workflow.delete({
-      where: { id },
-    });
+    await db.deleteWorkflow(id);
 
     return json({ success: true });
   } catch (err: any) {

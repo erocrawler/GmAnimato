@@ -28,38 +28,17 @@ export const POST: RequestHandler = async ({ locals, request }) => {
   }
 
   try {
-    // If setting as default, unset all others of the same type first
-    if (isDefault) {
-      await db.prisma.workflow.updateMany({
-        where: { workflowType: workflowType || 'i2v' },
-        data: { isDefault: false },
-      });
-    }
-
-    // Create workflow
-    const created = await db.prisma.workflow.create({
-      data: {
-        id,
-        name,
-        description: description || null,
-        templatePath,
-        workflowType: workflowType || 'i2v',
-        isDefault: isDefault || false,
-        compatibleLoraIds: compatibleLoraIds,
-      },
+    const created = await db.createWorkflow({
+      id,
+      name,
+      description,
+      templatePath,
+      workflowType: workflowType || 'i2v',
+      isDefault: isDefault || false,
+      compatibleLoraIds,
     });
 
-    return json({
-      id: created.id,
-      name: created.name,
-      description: created.description,
-      templatePath: created.templatePath,
-      workflowType: created.workflowType,
-      compatibleLoraIds: created.compatibleLoraIds as string[],
-      isDefault: created.isDefault,
-      createdAt: created.createdAt.toISOString(),
-      updatedAt: created.updatedAt.toISOString(),
-    });
+    return json(created);
   } catch (err: any) {
     console.error('Failed to create workflow:', err);
     if (err.code === 'P2002') {

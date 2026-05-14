@@ -4,7 +4,7 @@ import probe from 'probe-image-size';
 import type { LoraPreset } from './loraPresets';
 import type { Workflow } from './IDatabase';
 import { normalizeLoraPresets } from './loraPresets';
-import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes, addMotionScaleNode, addFreeLongNode, DEFAULT_NEGATIVE_PROMPT } from './workflowUtils';
+import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes, addMotionScaleNode, addFreeLongNode, addPromptRelayNodes, DEFAULT_NEGATIVE_PROMPT, type PromptRelaySegment } from './workflowUtils';
 
 interface FL2VWorkflowParams {
   first_image_name: string;
@@ -15,13 +15,15 @@ interface FL2VWorkflowParams {
   seed: number;
   callback_url?: string;
   iterationSteps?: 4 | 6 | 8;
-  videoDuration?: 4 | 6;
+  videoDuration?: 4 | 6 | 10;
   videoResolution?: '480p' | '720p';
   loraWeights?: Record<string, number>;
   loraPresets?: LoraPreset[];
   motionScale?: number; // 0.5 to 2.0, optional
   freeLongBlendStrength?: number; // 0 to 1, optional (0 = off, 1 = full)
   workflow?: Workflow;
+  promptRelayMode?: boolean;
+  promptRelaySegments?: PromptRelaySegment[];
 }
 
 export async function buildFL2VWorkflow(params: FL2VWorkflowParams): Promise<object> {
@@ -87,7 +89,9 @@ export async function buildFL2VWorkflow(params: FL2VWorkflowParams): Promise<obj
 
   // Configure video duration (default 4 seconds = 81 frames)
   const duration = params.videoDuration ?? 4;
-  const frames = duration === 6 ? 121 : 81;
+  const frames = (params.promptRelayMode && params.promptRelaySegments && params.promptRelaySegments.length > 0)
+    ? params.promptRelaySegments.reduce((s, seg) => s + seg.frames, 0)
+    : (duration === 10 ? 177 : duration === 6 ? 121 : 81);
   const encodeInputs = getNodeInputs(workflow, encodeNode);
   if (encodeInputs) {
     encodeInputs.length = frames;
@@ -291,6 +295,20 @@ export async function buildFL2VWorkflow(params: FL2VWorkflowParams): Promise<obj
         throw new Error('Unable to connect FL2V low LoRA chain to downstream model consumer');
       }
     }
+  }
+
+  // Inject PromptRelayEncodeTimeline nodes if relay mode is active
+  if (params.promptRelayMode && params.promptRelaySegments && params.promptRelaySegments.length > 0) {
+    addPromptRelayNodes(workflow, {
+      globalPrompt: params.input_prompt,
+      segments: params.promptRelaySegments,
+      totalFrames: frames,
+      fps: 18,
+      width: gen480pWidth,
+      height: gen480pHeight,
+      encoderNodeId: encodeNode as string,
+      samplerInputs,
+    });
   }
 
   return workflow;

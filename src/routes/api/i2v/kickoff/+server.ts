@@ -138,7 +138,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     // Extract video duration (4 or 6 seconds)
     const videoDurationRaw = body?.videoDuration;
     const parsedDuration = Number(videoDurationRaw);
-    const allowedDurations = [4, 6] as const;
+    const allowedDurations = [4, 6, 10] as const;
     type VideoDuration = (typeof allowedDurations)[number];
     let videoDuration: VideoDuration | undefined;
 
@@ -154,6 +154,38 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
     if (videoResolution && allowedResolutions.includes(videoResolution)) {
       resolution = videoResolution as VideoResolution;
+    }
+
+    // Extract prompt relay mode params
+    const promptRelayMode: boolean = body?.promptRelayMode === true;
+    let promptRelaySegments: { prompt: string; frames: number }[] | undefined;
+    if (promptRelayMode && Array.isArray(body?.promptRelaySegments)) {
+      const rawSegs = body.promptRelaySegments as any[];
+      // Validate and sanitize segments
+      if (rawSegs.length < 1 || rawSegs.length > 10) {
+        return new Response(JSON.stringify({ error: 'Prompt relay segments must be between 1 and 10' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      }
+      for (const seg of rawSegs) {
+        if (typeof seg.frames !== 'number' || !Number.isInteger(seg.frames) || seg.frames < 9) {
+          return new Response(JSON.stringify({ error: 'Each relay segment must have at least 9 frames (0.5s)' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+        }
+        if (seg.frames > 121) {
+          return new Response(JSON.stringify({ error: 'Each relay segment must not exceed 121 frames' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+        }
+        if (typeof seg.prompt !== 'string' || seg.prompt.trim().length === 0) {
+          return new Response(JSON.stringify({ error: 'Each relay segment must have a non-empty prompt' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+        }
+        if (seg.prompt.length > 500) {
+          return new Response(JSON.stringify({ error: 'Each relay segment prompt must be at most 500 characters' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+        }
+      }
+      promptRelaySegments = rawSegs.map(s => ({ prompt: String(s.prompt), frames: Number(s.frames) }));
+    }
+
+    // In relay mode, derive videoDuration from segment sum so it's stored correctly in the DB
+    if (promptRelayMode && promptRelaySegments && promptRelaySegments.length > 0) {
+      const rawSum = promptRelaySegments.reduce((s, seg) => s + seg.frames, 0);
+      videoDuration = (rawSum <= 81 ? 4 : rawSum <= 121 ? 6 : 10) as VideoDuration;
     }
 
     // Extract motion scale (0.5 to 2.0) - optional experimental feature
@@ -244,6 +276,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       mergedAdditionalOptions.freelong_blend_strength = freeLongBlendStrength;
     }
 
+    // Store relay mode state
+    mergedAdditionalOptions.prompt_relay_mode = promptRelayMode;
+    if (promptRelayMode && promptRelaySegments) {
+      mergedAdditionalOptions.prompt_relay_segments = promptRelaySegments;
+    } else {
+      delete mergedAdditionalOptions.prompt_relay_segments;
+    }
+
     if (shouldRevalidate) {
       mergedValidationMetadata.revalidation_status = 'pending';
       mergedValidationMetadata.revalidation_requested_at = new Date().toISOString();
@@ -323,6 +363,46 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }), { 
           status: 403, 
           headers: { 'Content-Type': 'application/json' } 
+        });
+      }
+    }
+
+    // Enforce role requirement for 10s duration in standard (non-relay) mode
+    if (videoDuration === 10 && !promptRelayMode) {
+      const hasAdvancedFeatures = roles.some(roleName =>
+        settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
+      );
+      if (!hasAdvancedFeatures) {
+        return new Response(JSON.stringify({
+          error: '10-second duration is available to users with advanced features only.'
+        }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // Validate relay segment frame total: must be 4n+1, at least 81, within tier limit
+    if (promptRelayMode && promptRelaySegments) {
+      const totalSegmentFrames = promptRelaySegments.reduce((sum, s) => sum + s.frames, 0);
+      if (totalSegmentFrames < 81 || (totalSegmentFrames - 1) % 4 !== 0) {
+        return new Response(JSON.stringify({
+          error: `Total relay frames (${totalSegmentFrames}) must be a value of 4n+1 and at least 81 (e.g. 81, 85, 89 … 121 … 177)`
+        }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      const hasAdvancedFeatures = roles.some((roleName: string) =>
+        settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
+      );
+      const maxAllowedFrames = hasAdvancedFeatures ? 177 : 121;
+      if (totalSegmentFrames > maxAllowedFrames) {
+        return new Response(JSON.stringify({
+          error: `Total relay frames (${totalSegmentFrames}) exceeds the maximum of ${maxAllowedFrames} for your account tier.`
+        }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' }
         });
       }
     }
@@ -474,6 +554,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
               loraWeights: video.lora_weights as any,
               loraPresets: settings.loraPresets,
               workflow: (await getWorkflowById(video.workflow_id!) || await getDefaultWorkflow('fl2v'))!,
+              promptRelayMode: (video.additional_options as any)?.prompt_relay_mode === true,
+              promptRelaySegments: (video.additional_options as any)?.prompt_relay_segments as any,
             });
           } else {
             return await buildWorkflow({
@@ -490,6 +572,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
               loraWeights: video.lora_weights as any,
               loraPresets: settings.loraPresets,
               workflow: (await getWorkflowById(video.workflow_id!) || await getDefaultWorkflow('i2v'))!,
+              promptRelayMode: (video.additional_options as any)?.prompt_relay_mode === true,
+              promptRelaySegments: (video.additional_options as any)?.prompt_relay_segments as any,
             });
           }
         }

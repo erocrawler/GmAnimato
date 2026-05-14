@@ -271,3 +271,122 @@ export function addFreeLongNode(
   }
   return null;
 }
+
+export interface PromptRelaySegment {
+  prompt: string;
+  frames: number;
+}
+
+export interface AddPromptRelayNodesParams {
+  globalPrompt: string;
+  segments: PromptRelaySegment[];
+  totalFrames: number;
+  fps?: number;
+  width: number;
+  height: number;
+  encoderNodeId: string;
+  samplerInputs: any;
+}
+
+/**
+ * Inject PromptRelayEncodeTimeline nodes into workflow for per-segment prompt control.
+ * Adds:
+ *   - EmptyHunyuanLatentVideo (990:relay_latent)
+ *   - PromptRelayEncodeTimeline for high noise chain (991:relay_high)
+ *   - PromptRelayEncodeTimeline for low noise chain (992:relay_low)
+ * Rewires sampler model_high_noise, model_low_noise, and encoder positive accordingly.
+ */
+export function addPromptRelayNodes(
+  workflow: any,
+  params: AddPromptRelayNodesParams
+): void {
+  const { globalPrompt, segments, totalFrames, fps = 18, width, height, encoderNodeId, samplerInputs } = params;
+
+  if (!samplerInputs) return;
+
+  const clipNodeId = findNode(workflow, 'CLIPLoader');
+  if (!clipNodeId) {
+    console.error('[PromptRelay] CLIPLoader node not found in workflow');
+    return;
+  }
+
+  // Capture current end-of-chain model references before we rewire
+  const prevHighSource: [string, number] = samplerInputs.model_high_noise as [string, number];
+  const prevLowSource: [string, number] = samplerInputs.model_low_noise as [string, number];
+
+  if (!prevHighSource || !prevLowSource) {
+    console.error('[PromptRelay] model_high_noise or model_low_noise not found in sampler inputs');
+    return;
+  }
+
+  const localPrompts = segments.map(s => s.prompt).join(' | ');
+  const segmentLengths = segments.map(s => s.frames).join(', ');
+
+  // Ensure node_weights exists
+  if (!workflow.input.node_weights) {
+    workflow.input.node_weights = {};
+  }
+
+  // 1. EmptyHunyuanLatentVideo — provides a compatible latent for the relay encoder
+  const relayLatentId = '990:relay_latent';
+  workflow.input.workflow[relayLatentId] = {
+    inputs: {
+      width,
+      height,
+      length: totalFrames,
+      batch_size: 1,
+    },
+    class_type: 'EmptyHunyuanLatentVideo',
+    _meta: { title: 'Relay Latent' },
+  };
+  workflow.input.node_weights[relayLatentId] = 1.0;
+
+  const sharedRelayInputs = {
+    timeline_data: "",
+    global_prompt: globalPrompt,
+    max_frames: totalFrames,
+    local_prompts: localPrompts,
+    segment_lengths: segmentLengths,
+    epsilon: 0.001,
+    fps,
+    time_units: 'frames',
+    clip: [clipNodeId, 0],
+    latent: [relayLatentId, 0],
+  };
+
+  // 2. PromptRelayEncodeTimeline — high noise chain
+  const relayHighId = '991:relay_high';
+  workflow.input.workflow[relayHighId] = {
+    inputs: {
+      ...sharedRelayInputs,
+      model: prevHighSource,
+    },
+    class_type: 'PromptRelayEncodeTimeline',
+    _meta: { title: 'Prompt Relay (High Noise)' },
+  };
+  workflow.input.node_weights[relayHighId] = 2.0;
+
+  // 3. PromptRelayEncodeTimeline — low noise chain
+  const relayLowId = '992:relay_low';
+  workflow.input.workflow[relayLowId] = {
+    inputs: {
+      ...sharedRelayInputs,
+      model: prevLowSource,
+    },
+    class_type: 'PromptRelayEncodeTimeline',
+    _meta: { title: 'Prompt Relay (Low Noise)' },
+  };
+  workflow.input.node_weights[relayLowId] = 2.0;
+
+  // 4. Rewire sampler
+  samplerInputs.model_high_noise = [relayHighId, 0];
+  samplerInputs.model_low_noise = [relayLowId, 0];
+
+  // 5. Rewire encoder positive — high relay output [1] is the conditioning
+  const encoderInputs = getNodeInputs(workflow, encoderNodeId);
+  if (encoderInputs) {
+    encoderInputs.positive = [relayHighId, 1];
+  } else {
+    console.error('[PromptRelay] Encoder node inputs not found for id:', encoderNodeId);
+  }
+}

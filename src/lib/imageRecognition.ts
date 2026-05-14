@@ -738,3 +738,161 @@ async function evaluatePromptWithCustomVl(
     return null;
   }
 }
+
+export interface PromptRelaySegmentResult {
+  prompt: string;
+  frames: number;
+}
+
+export interface PromptRelayResult {
+  globalPrompt: string;
+  segments: PromptRelaySegmentResult[];
+}
+
+async function generatePromptRelayWithCustomVl(
+  imageUrl: string,
+  lastImageUrl?: string,
+  totalFrames: number = 81,
+  fps: number = 18,
+  userId?: string,
+  videoId?: string,
+  locale?: string
+): Promise<PromptRelayResult | null> {
+  if (!hasCustomVlConfig()) {
+    return null;
+  }
+
+  const durationSecs = (totalFrames / fps).toFixed(1);
+  const isFL2V = !!lastImageUrl;
+  const langInstruction = locale && locale.startsWith('zh')
+    ? 'Write all prompts in Chinese (Simplified).'
+    : 'Write all prompts in English.';
+
+  const systemPrompt = isFL2V
+    ? `You are an AI video prompt segmentation assistant. You will receive TWO images: the first frame and the last frame of a ${durationSecs}-second (${totalFrames} frames at ${fps} fps) video.
+
+Your task is to generate a PROMPT RELAY plan that divides the video into meaningful segments, each with its own motion description.
+
+Return a JSON object with:
+1. global_prompt: A short description (max 30 words) of the overall video subject and style.
+2. segments: Array of 2-5 segment objects, each with:
+   - prompt: Description (max 40 words) of motion/action during this segment
+   - frames: Integer number of frames for this segment (minimum 18)
+
+Rules:
+- The segments[].frames values MUST sum exactly to ${totalFrames}
+- Each segment must have at least 18 frames
+- Describe HOW the scene changes within each segment (movement direction, speed, camera action)
+- Segments should flow naturally from first frame to last frame
+- ${langInstruction}
+- Return ONLY valid JSON, no other text.`
+    : `You are an AI video prompt segmentation assistant. You will receive an image that is the starting frame of a ${durationSecs}-second (${totalFrames} frames at ${fps} fps) video.
+
+Your task is to generate a PROMPT RELAY plan that divides the video into meaningful segments, each with its own motion description.
+
+Return a JSON object with:
+1. global_prompt: A short description (max 30 words) of the subject and overall motion style.
+2. segments: Array of 2-5 segment objects, each with:
+   - prompt: Description (max 40 words) of motion/action during this segment
+   - frames: Integer number of frames for this segment (minimum 18)
+
+Rules:
+- The segments[].frames values MUST sum exactly to ${totalFrames}
+- Each segment must have at least 18 frames
+- Describe motion progression naturally (e.g., slow start, peak action, gentle ease-out)
+- ${langInstruction}
+- Return ONLY valid JSON, no other text.`;
+
+  try {
+    const processedImageUrl = await toInferenceImageUrl(imageUrl);
+    const processedLastImageUrl = lastImageUrl ? await toInferenceImageUrl(lastImageUrl) : undefined;
+
+    const messageContent: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
+      {
+        type: 'text',
+        text: isFL2V
+          ? `Please analyze these two frames and generate a ${totalFrames}-frame prompt relay plan.`
+          : `Please analyze this image and generate a ${totalFrames}-frame prompt relay plan.`,
+      },
+      {
+        type: 'image_url',
+        image_url: { url: processedImageUrl },
+      },
+    ];
+
+    if (isFL2V && processedLastImageUrl) {
+      messageContent.push({
+        type: 'image_url',
+        image_url: { url: processedLastImageUrl },
+      });
+    }
+
+    const text = await requestCustomVl([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: messageContent },
+    ], 0.7);
+
+    if (!text) return null;
+
+    const parsed = parseJsonWithRepair<{ global_prompt: string; segments: { prompt: string; frames: number }[] }>(text);
+    if (!parsed || typeof parsed.global_prompt !== 'string' || !Array.isArray(parsed.segments)) {
+      console.error('[Custom VL] Invalid prompt relay response structure:', parsed);
+      return null;
+    }
+
+    // Validate and clean segments
+    const segments = parsed.segments
+      .filter(s => typeof s.prompt === 'string' && Number.isInteger(Number(s.frames)) && Number(s.frames) >= 18)
+      .map(s => ({ prompt: String(s.prompt).trim(), frames: Number(s.frames) }));
+
+    if (segments.length === 0) return null;
+
+    // Fix frame sum — redistribute any rounding error onto the last segment
+    const rawSum = segments.reduce((sum, s) => sum + s.frames, 0);
+    if (rawSum !== totalFrames) {
+      segments[segments.length - 1].frames += totalFrames - rawSum;
+      if (segments[segments.length - 1].frames < 9) {
+        // Re-distribute evenly if adjustment causes underflow
+        const evenFrames = Math.floor(totalFrames / segments.length);
+        segments.forEach((s, i) => {
+          s.frames = i === segments.length - 1
+            ? totalFrames - evenFrames * (segments.length - 1)
+            : evenFrames;
+        });
+      }
+    }
+
+    return {
+      globalPrompt: parsed.global_prompt.trim(),
+      segments,
+    };
+  } catch (error) {
+    console.error('[Custom VL] Prompt relay generation failed:', error);
+    logCustomVlError('generatePromptRelay.requestFailure', error, {
+      user_id: userId,
+      video_id: videoId,
+      imageUrl,
+      lastImageUrl,
+      totalFrames,
+      model: CUSTOM_VL_MODEL,
+    });
+    return null;
+  }
+}
+
+export async function generatePromptRelaySegments(
+  imageUrl: string,
+  lastImageUrl?: string,
+  totalFrames: number = 81,
+  fps: number = 18,
+  userId?: string,
+  videoId?: string,
+  locale?: string
+): Promise<PromptRelayResult | null> {
+  try {
+    return await generatePromptRelayWithCustomVl(imageUrl, lastImageUrl, totalFrames, fps, userId, videoId, locale);
+  } catch (error) {
+    console.error('[Custom VL] generatePromptRelaySegments error:', error);
+    return null;
+  }
+}

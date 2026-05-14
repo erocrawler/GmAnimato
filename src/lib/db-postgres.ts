@@ -1100,6 +1100,77 @@ export class PostgresDatabase implements IDatabase {
     return workflow ? this.mapToWorkflow(workflow) : null;
   }
 
+  async createWorkflow(data: Omit<Workflow, 'createdAt' | 'updatedAt'>): Promise<Workflow> {
+    const { id, name, description, templatePath, workflowType, isDefault, compatibleLoraIds } = data;
+    if (isDefault) {
+      await this.prisma.workflow.updateMany({
+        where: { workflowType: workflowType || 'i2v' },
+        data: { isDefault: false },
+      });
+    }
+    const created = await this.prisma.workflow.create({
+      data: {
+        id,
+        name,
+        description: description || null,
+        templatePath,
+        workflowType: workflowType || 'i2v',
+        isDefault: isDefault || false,
+        compatibleLoraIds,
+      },
+    });
+    return this.mapToWorkflow(created);
+  }
+
+  async updateWorkflow(id: string, patch: Partial<Omit<Workflow, 'id' | 'createdAt'>>): Promise<Workflow | null> {
+    const updateData: any = { updatedAt: new Date() };
+    if (patch.compatibleLoraIds !== undefined) updateData.compatibleLoraIds = patch.compatibleLoraIds;
+    if (patch.name !== undefined) updateData.name = patch.name;
+    if (patch.description !== undefined) updateData.description = patch.description;
+    if (patch.templatePath !== undefined) updateData.templatePath = patch.templatePath;
+    if (patch.workflowType !== undefined) updateData.workflowType = patch.workflowType;
+    if (patch.isDefault !== undefined) {
+      if (patch.isDefault) {
+        const current = await this.prisma.workflow.findUnique({ where: { id }, select: { workflowType: true } });
+        if (current) {
+          await this.prisma.workflow.updateMany({
+            where: { workflowType: current.workflowType },
+            data: { isDefault: false },
+          });
+        }
+      }
+      updateData.isDefault = patch.isDefault;
+    }
+    try {
+      const updated = await this.prisma.workflow.update({ where: { id }, data: updateData });
+      return this.mapToWorkflow(updated);
+    } catch {
+      return null;
+    }
+  }
+
+  async deleteWorkflow(id: string): Promise<boolean> {
+    try {
+      await this.prisma.workflow.delete({ where: { id } });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async setDefaultWorkflow(id: string): Promise<Workflow | null> {
+    await this.prisma.workflow.updateMany({ data: { isDefault: false } });
+    try {
+      const updated = await this.prisma.workflow.update({
+        where: { id },
+        data: { isDefault: true, updatedAt: new Date() },
+      });
+      return this.mapToWorkflow(updated);
+    } catch {
+      return null;
+    }
+  }
+
   private mapToWorkflow(workflow: any): Workflow {
     return {
       id: workflow.id,
