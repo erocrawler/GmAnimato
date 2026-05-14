@@ -119,6 +119,8 @@ export const GET: RequestHandler = async ({ request }) => {
         loraWeights: typeof job.lora_weights === 'object' && job.lora_weights !== null ? job.lora_weights as Record<string, number> : undefined,
         loraPresets: settings.loraPresets,
         workflow: workflow,
+        promptRelayMode: job.additional_options?.prompt_relay_mode === true,
+        promptRelaySegments: Array.isArray(job.additional_options?.prompt_relay_segments) ? job.additional_options.prompt_relay_segments : undefined,
       });
 
       if (shouldSendBase64 && payload?.input?.images) {
@@ -149,6 +151,8 @@ export const GET: RequestHandler = async ({ request }) => {
         loraWeights: typeof job.lora_weights === 'object' && job.lora_weights !== null ? job.lora_weights as Record<string, number> : undefined,
         loraPresets: settings.loraPresets,
         workflow: workflow,
+        promptRelayMode: job.additional_options?.prompt_relay_mode === true,
+        promptRelaySegments: Array.isArray(job.additional_options?.prompt_relay_segments) ? job.additional_options.prompt_relay_segments : undefined,
       });
 
       if (shouldSendBase64 && payload?.input?.images) {
