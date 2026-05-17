@@ -4,7 +4,7 @@ import probe from 'probe-image-size';
 import type { LoraPreset } from './loraPresets';
 import type { Workflow } from './IDatabase';
 import { normalizeLoraPresets } from './loraPresets';
-import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes, addMotionScaleNode, addFreeLongNode, addPromptRelayNodes, DEFAULT_NEGATIVE_PROMPT, type PromptRelaySegment } from './workflowUtils';
+import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes, addMotionScaleNode, addFreeLongNode, addPromptRelayNodes, addSageAttentionNodes, DEFAULT_NEGATIVE_PROMPT, type PromptRelaySegment } from './workflowUtils';
 
 interface WorkflowParams {
   image_name: string;
@@ -19,6 +19,7 @@ interface WorkflowParams {
   loraPresets?: LoraPreset[];
   motionScale?: number; // 0.5 to 2.0, optional
   freeLongBlendStrength?: number; // 0 to 1, optional (0 = off, 1 = full)
+  useSageAttention?: boolean; // inject PathchSageAttentionKJ nodes after LoRA chains
   workflow?: Workflow;
   promptRelayMode?: boolean;
   promptRelaySegments?: PromptRelaySegment[];
@@ -277,6 +278,11 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
         throw new Error('Unable to connect low LoRA chain to downstream model consumer');
       }
     }
+  }
+
+  // Inject PathchSageAttentionKJ nodes after LoRA chains and before PromptRelay
+  if (params.useSageAttention) {
+    addSageAttentionNodes(workflow, samplerInputs);
   }
 
   // Inject PromptRelayEncodeTimeline nodes if relay mode is active

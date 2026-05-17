@@ -390,3 +390,51 @@ export function addPromptRelayNodes(
     console.error('[PromptRelay] Encoder node inputs not found for id:', encoderNodeId);
   }
 }
+
+/**
+ * Inject PathchSageAttentionKJ nodes for both high and low noise model chains.
+ * Must be called after LoRA chains are fully built and before PromptRelay injection.
+ * Wraps the current model_high_noise and model_low_noise inputs of the sampler.
+ * @param workflow The workflow object
+ * @param samplerInputs The sampler node's inputs object (mutated in place)
+ */
+export function addSageAttentionNodes(
+  workflow: any,
+  samplerInputs: any
+): void {
+  if (!samplerInputs) return;
+
+  if (!workflow.input.node_weights) {
+    workflow.input.node_weights = {};
+  }
+
+  if (Array.isArray(samplerInputs.model_high_noise)) {
+    const sageHighId = '993:sage_high';
+    workflow.input.workflow[sageHighId] = {
+      inputs: {
+        sageattn_type: 'auto',
+        force_apply: false,
+        model: samplerInputs.model_high_noise,
+      },
+      class_type: 'PathchSageAttentionKJ',
+      _meta: { title: 'Sage Attention (High Noise)' },
+    };
+    workflow.input.node_weights[sageHighId] = 1.0;
+    samplerInputs.model_high_noise = [sageHighId, 0];
+  }
+
+  if (Array.isArray(samplerInputs.model_low_noise)) {
+    const sageLowId = '994:sage_low';
+    workflow.input.workflow[sageLowId] = {
+      inputs: {
+        sageattn_type: 'auto',
+        force_apply: false,
+        model: samplerInputs.model_low_noise,
+      },
+      class_type: 'PathchSageAttentionKJ',
+      _meta: { title: 'Sage Attention (Low Noise)' },
+    };
+    workflow.input.node_weights[sageLowId] = 1.0;
+    samplerInputs.model_low_noise = [sageLowId, 0];
+  }
+}
