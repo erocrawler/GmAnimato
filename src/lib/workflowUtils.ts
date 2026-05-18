@@ -412,7 +412,7 @@ export function addSageAttentionNodes(
     const sageHighId = '993:sage_high';
     workflow.input.workflow[sageHighId] = {
       inputs: {
-        sageattn_type: 'auto',
+        sage_attention: 'auto',
         force_apply: false,
         model: samplerInputs.model_high_noise,
       },
@@ -427,7 +427,7 @@ export function addSageAttentionNodes(
     const sageLowId = '994:sage_low';
     workflow.input.workflow[sageLowId] = {
       inputs: {
-        sageattn_type: 'auto',
+        sage_attention: 'auto',
         force_apply: false,
         model: samplerInputs.model_low_noise,
       },
