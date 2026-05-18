@@ -19,6 +19,7 @@ type SponsorDiscrepancy =
 
 type MergedSponsorRecord = {
   username: string;
+  dbUsername?: string;
   expectedRole?: string;
   crawler: {
     nickname?: string;
@@ -183,6 +184,8 @@ export const GET: RequestHandler = async ({ locals }) => {
       getAllUsers(),
     ]);
 
+    const userById = new Map(allUsers.map(u => [u.id, u.username]));
+
     const crawlerSponsors = crawlerResult.sponsors;
     const crawlerAvailable = crawlerResult.available;
 
@@ -216,6 +219,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 
       return {
         username,
+        dbUsername: dbClaim ? (userById.get(dbClaim.user_id) ?? undefined) : undefined,
         expectedRole,
         crawler: crawler
           ? {

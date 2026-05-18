@@ -1412,9 +1412,9 @@
           <table class="table table-zebra">
             <thead>
               <tr>
-                <th>Username</th>
+                <th>Sponsor Username</th>
+                <th>Site Username</th>
                 <th>Crawler Tier</th>
-                <th>Expected Role</th>
                 <th>DB Tier</th>
                 <th>DB Role</th>
                 <th>DB Expires</th>
@@ -1425,6 +1425,7 @@
               {#each sponsorsPaged as sponsor}
                 <tr class:bg-warning={sponsor.hasDiscrepancy}>
                   <td class="font-semibold">{sponsor.username}</td>
+                  <td class="text-sm">{sponsor.dbUsername ?? '-'}</td>
                   <td>
                     {#if sponsor.crawler}
                       <span class="badge badge-primary">{sponsor.crawler.tier || '-'}</span>
@@ -1432,7 +1433,6 @@
                       <span class="badge badge-ghost">-</span>
                     {/if}
                   </td>
-                  <td class="text-sm">{sponsor.expectedRole || '-'}</td>
                   <td>
                     {#if sponsor.db}
                       <span class="badge badge-secondary">{sponsor.db.tier || '-'}</span>
@@ -1454,6 +1454,9 @@
                         {#each sponsor.discrepancies as discrepancy}
                           <span class="badge badge-error badge-sm">{discrepancyLabelMap[discrepancy] || discrepancy}</span>
                         {/each}
+                        {#if sponsor.expectedRole}
+                          <span class="text-xs text-base-content/60">expected: {sponsor.expectedRole}</span>
+                        {/if}
                       </div>
                     {:else}
                       <span class="badge badge-success badge-sm">In sync</span>
