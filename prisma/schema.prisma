@@ -12,6 +12,7 @@ model User {
   email         String?        @unique @db.VarChar(255)
   passwordHash  String         @map("password_hash") @db.VarChar(255)
   roles         String         @default("[]") @db.VarChar(200)
+  galleryState  Json?          @map("gallery_state")
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
   sessions      Session[]
@@ -140,6 +141,7 @@ model Workflow {
   workflowType         String   @default("i2v") @map("workflow_type") @db.VarChar(10)
   compatibleLoraIds    Json     @default("[]") @map("compatible_lora_ids")
   isDefault            Boolean  @default(false) @map("is_default")
+  isDeleted            Boolean  @default(false) @map("is_deleted")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
   videos               Video[]

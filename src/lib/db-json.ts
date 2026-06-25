@@ -55,7 +55,7 @@ export class JsonFileDatabase implements IDatabase {
   }
 
   async getAllVideos(options?: import('./IDatabase').GetAllVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
-    const { page = 1, pageSize = 30, userId, username, status, includeDeleted = false } = options || {};
+    const { page = 1, pageSize = 30, userId, username, status, workflowType, modelTypeIds, includeDeleted = false } = options || {};
     const rows = await this.readAll();
     
     // Get all users to add username to videos
@@ -80,6 +80,20 @@ export class JsonFileDatabase implements IDatabase {
       
       // Filter by status
       if (status && r.status !== status) return false;
+      
+      // Filter by model type (specific workflow IDs). The JSON DB stores workflow_id on the
+      // video row but has no workflows table, so we match by id directly. 'unassigned'
+      // matches videos with no workflow_id.
+      if (modelTypeIds && modelTypeIds.length > 0) {
+        const hasUnassigned = modelTypeIds.includes('unassigned');
+        const ids = modelTypeIds.filter((id) => id !== 'unassigned');
+        const matchesId = r.workflow_id && ids.includes(r.workflow_id);
+        const matchesUnassigned = hasUnassigned && !r.workflow_id;
+        if (!matchesId && !matchesUnassigned) return false;
+      } else if (workflowType) {
+        // JSON DB has no workflow type info; cannot filter by broad category.
+        // No-op: workflowType filtering is only meaningful with the Postgres backend.
+      }
       
       return true;
     });
@@ -482,6 +496,14 @@ export class JsonFileDatabase implements IDatabase {
     return true;
   }
 
+  async getGalleryState(_userId: string): Promise<import('./IDatabase').GalleryState | null> {
+    return null;
+  }
+
+  async setGalleryState(_userId: string, _state: import('./IDatabase').GalleryState): Promise<void> {
+    // JSON DB doesn't support gallery state
+  }
+
   // ==================== Admin Settings Methods ====================
 
   private async ensureSettingsDB() {
@@ -639,6 +661,31 @@ export class JsonFileDatabase implements IDatabase {
   async getWorkflows(): Promise<import('./IDatabase').Workflow[]> {
     console.warn('[JSON DB] getWorkflows not supported - use PostgreSQL');
     return [];
+  }
+
+  async getVideoModelTypes(): Promise<import('./IDatabase').VideoModelType[]> {
+    // JSON DB has no workflows table; derive distinct workflow_ids from videos.
+    const rows = await this.readAll();
+    const idSet = new Set<string>();
+    let hasUnassigned = false;
+    for (const r of rows) {
+      if (r.workflow_id) {
+        idSet.add(r.workflow_id);
+      } else {
+        hasUnassigned = true;
+      }
+    }
+    const result: import('./IDatabase').VideoModelType[] = [...idSet].map((id) => ({
+      id,
+      name: id,
+      workflowType: undefined,
+      available: false,
+    }));
+    if (hasUnassigned) {
+      result.push({ id: 'unassigned', name: 'Unassigned (no model)', workflowType: undefined, available: false });
+    }
+    result.sort((a, b) => a.name.localeCompare(b.name));
+    return result;
   }
 
   async getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v'): Promise<import('./IDatabase').Workflow | null> {

@@ -62,6 +62,13 @@ export type User = {
 
 export type UserPublic = Omit<User, 'password_hash'>;
 
+export type GalleryState = {
+  lastVideoId?: string;       // Last video the user was viewing in the short feed
+  newestSeenId?: string;      // Newest video ID the user has seen (for "new videos" count)
+  lastVisitAt?: string;       // ISO timestamp of last visit
+  history?: string[];         // Recently viewed video IDs (max ~20), for the history dropdown
+};
+
 export type Session = {
   id: string;
   user_id: string;
@@ -87,6 +94,7 @@ export type Workflow = {
   workflowType: 'i2v' | 'fl2v'; // Type of workflow: i2v (single image) or fl2v (two images)
   compatibleLoraIds: string[]; // Array of LoRA IDs compatible with this workflow
   isDefault: boolean;
+  isDeleted: boolean; // Soft-delete: workflow is retired but kept for historical video reference
   createdAt: string;
   updatedAt: string;
 };
@@ -148,7 +156,8 @@ export type GetPublishedVideosOptions = {
   status?: VideoEntry['status'];
   isNsfw?: boolean;
   sortBy?: 'date' | 'likes'; // Sort by creation date or like count
-  afterValue?: string; // Cursor-based pagination: skip up to and including this video ID
+  afterValue?: string; // Cursor-based pagination: skip up to and including this video ID (exclusive)
+  startAtId?: string; // Start from this video ID (inclusive) — for "resume position"
 };
 
 export type GetAllVideosOptions = {
@@ -158,7 +167,16 @@ export type GetAllVideosOptions = {
   username?: string; // Filter by username (partial match)
   status?: VideoEntry['status']; // Filter by status
   workflowType?: 'i2v' | 'fl2v'; // Filter by workflow type (i2v = single image, fl2v = two images)
+  modelTypeIds?: string[]; // Filter by specific model/workflow IDs (multi-select). Implies workflowType.
   includeDeleted?: boolean; // Include deleted videos
+};
+
+export type VideoModelType = {
+  id: string; // Workflow ID (or 'unassigned' for videos without a workflow)
+  name: string; // Display name (workflow name or fallback)
+  workflowType?: 'i2v' | 'fl2v'; // The broad category, if known
+  available: boolean; // true = workflow exists and is not soft-deleted
+  isDeleted: boolean; // true = soft-deleted (name/type known but no longer usable)
 };
 
 export interface IDatabase {
@@ -180,6 +198,7 @@ export interface IDatabase {
   getLocalJobStats(): Promise<{ inQueue: number; processing: number; completed: number; failed: number }>;
   getOldestMigrationCandidate(settings: AdminSettings): Promise<VideoEntry | null>; // Find oldest eligible job for RunPod migration
   claimJobForMigration(settings: AdminSettings): Promise<VideoEntry | null>; // Atomically claim and mark job for migration
+  getVideoModelTypes(): Promise<VideoModelType[]>; // Distinct model/workflow types present in the video table (includes legacy/unavailable)
   
   // User methods
   createUser(username: string, password_hash: string, email?: string, roles?: string[]): Promise<User>;
@@ -188,6 +207,8 @@ export interface IDatabase {
   getUserByEmail(email: string): Promise<User | undefined>;
   updateUser(id: string, patch: Partial<Omit<User, 'id' | 'created_at'>>): Promise<User | null>;
   deleteUser(id: string): Promise<boolean>;
+  getGalleryState(userId: string): Promise<GalleryState | null>;
+  setGalleryState(userId: string, state: GalleryState): Promise<void>;
   
   // Session/Refresh token methods (used for token refresh)
   createSession(userId: string, token: string, expiresAt: Date): Promise<Session>;

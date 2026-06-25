@@ -136,7 +136,18 @@
     "aiGenerated": "AI Generated",
     "like": "Like",
     "unlike": "Unlike",
-    "untitled": "Untitled Video"
+    "untitled": "Untitled Video",
+    "short": {
+      "toggle": "Short",
+      "noMore": "No more videos",
+      "fullscreen": "Fullscreen",
+      "exitFullscreen": "Exit Fullscreen",
+      "history": "Recently Watched",
+      "noHistory": "No history yet",
+      "newVideos": "{count} new videos",
+      "manyNew": "New videos available",
+      "startHere": "Watch from here"
+    }
   },
   "videos": {
     "title": "My Videos",
@@ -496,9 +507,15 @@
     "videos": {
       "title": "Video Management",
       "filters": "Filters",
-      "workflowType": "Workflow Type",
-      "workflowI2V": "I2V (Single Image)",
-      "workflowFL2V": "FL2V (Two Images)",
+      "modelType": "Model Type",
+      "noModelTypes": "No models found",
+      "legacy": "Legacy",
+      "legacyModel": "This model is no longer configured",
+      "deleted": "Deleted",
+      "deletedModel": "This model has been deleted (historical reference only)",
+      "groupI2V": "I2V (Single Image)",
+      "groupFL2V": "FL2V (Two Images)",
+      "groupOther": "Other / Unassigned",
       "total": "Total: {count} videos",
       "noVideos": "No videos found",
       "deleteConfirm": "Delete video from {username}? This action cannot be undone.",

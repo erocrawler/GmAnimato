@@ -11,3 +11,20 @@
 body {
 	min-height: 100vh;
 }
+
+/* Hide scrollbar for short video feed */
+.scrollbar-hide {
+	-ms-overflow-style: none;
+	scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+	display: none;
+}
+
+/* Fullscreen mode for short video feed */
+.fullscreen-mode {
+	height: 100vh !important;
+}
+.fullscreen-mode > [data-index] {
+	height: 100vh !important;
+}

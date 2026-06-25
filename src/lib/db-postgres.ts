@@ -51,7 +51,7 @@ export class PostgresDatabase implements IDatabase {
   }
 
   async getAllVideos(options?: import('./IDatabase').GetAllVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
-    const { page = 1, pageSize = 30, userId, username, status, workflowType, includeDeleted = false } = options || {};
+    const { page = 1, pageSize = 30, userId, username, status, workflowType, modelTypeIds, includeDeleted = false } = options || {};
     const skip = (page - 1) * pageSize;
     
     const where: any = {};
@@ -81,8 +81,25 @@ export class PostgresDatabase implements IDatabase {
       where.status = status;
     }
     
-    // Filter by workflow type
-    if (workflowType) {
+    // Filter by model type (specific workflow IDs). This implies the workflow type,
+    // so when modelTypeIds is provided we don't also apply the broad workflowType filter.
+    if (modelTypeIds && modelTypeIds.length > 0) {
+      // 'unassigned' is a sentinel value used by getVideoModelTypes for videos with no workflow
+      const hasUnassigned = modelTypeIds.includes('unassigned');
+      const ids = modelTypeIds.filter((id) => id !== 'unassigned');
+      const workflowIdClause = ids.length > 0 ? { workflowId: { in: ids } } : {};
+      if (hasUnassigned && ids.length > 0) {
+        where.OR = [
+          workflowIdClause,
+          { workflowId: null }
+        ];
+      } else if (hasUnassigned) {
+        where.workflowId = null;
+      } else {
+        Object.assign(where, workflowIdClause);
+      }
+    } else if (workflowType) {
+      // Filter by workflow type (broad category)
       where.workflow = {
         workflowType: workflowType
       };
@@ -107,15 +124,67 @@ export class PostgresDatabase implements IDatabase {
     ]);
 
     return {
-      videos: videos.map((v) => ({
+      videos: videos.map((v) => (({
         ...this.mapToVideoEntry(v),
         username: v.user.username
-      })),
+      }))),
       total,
       page,
       pageSize,
       totalPages: Math.ceil(total / pageSize)
     };
+  }
+
+  async getVideoModelTypes(): Promise<import('./IDatabase').VideoModelType[]> {
+    // Gather distinct workflowIds actually referenced by videos
+    const videoWorkflowIds = await this.prisma.video.findMany({
+      where: { workflowId: { not: null } },
+      select: { workflowId: true },
+      distinct: ['workflowId'],
+    });
+    const ids = videoWorkflowIds.map((v) => v.workflowId!).filter(Boolean) as string[];
+
+    // Count videos that have no workflow assigned (null workflowId)
+    const unassignedCount = await this.prisma.video.count({ where: { workflowId: null } });
+
+    // Fetch ALL matching workflows including soft-deleted ones so names/types are preserved
+    const workflows = ids.length > 0
+      ? await this.prisma.workflow.findMany({ where: { id: { in: ids } } })
+      : [];
+    const workflowMap = new Map(workflows.map((w) => [w.id, w]));
+
+    const result: import('./IDatabase').VideoModelType[] = ids.map((id) => {
+      const wf = workflowMap.get(id);
+      // wf exists: it was soft-deleted (isDeleted=true) or is active
+      // wf missing: it was hard-deleted before the soft-delete migration
+      return {
+        id,
+        name: wf?.name ?? id,
+        workflowType: (wf?.workflowType ?? undefined) as 'i2v' | 'fl2v' | undefined,
+        available: Boolean(wf) && !wf!.isDeleted,
+        isDeleted: wf ? Boolean(wf.isDeleted) : false,
+      };
+    });
+
+    if (unassignedCount > 0) {
+      result.push({
+        id: 'unassigned',
+        name: 'Unassigned (no model)',
+        workflowType: undefined,
+        available: false,
+        isDeleted: false,
+      });
+    }
+
+    // Sort: active first (by name), then deleted (by name), then unknown/unassigned last
+    result.sort((a, b) => {
+      const aRank = a.available ? 0 : a.isDeleted ? 1 : 2;
+      const bRank = b.available ? 0 : b.isDeleted ? 1 : 2;
+      if (aRank !== bRank) return aRank - bRank;
+      return a.name.localeCompare(b.name);
+    });
+
+    return result;
   }
 
   async getVideosByUser(user_id: string, page: number = 1, pageSize: number = 12, options?: import('./IDatabase').GetVideosByUserOptions): Promise<import('./IDatabase').PaginatedVideos> {
@@ -185,10 +254,53 @@ export class PostgresDatabase implements IDatabase {
   }
 
   async getPublishedVideos(options?: import('./IDatabase').GetPublishedVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
-    const { page = 1, pageSize = 12, likedBy, currentUserId, excludeId, status, isNsfw, sortBy = 'date' } = options || {};
+    const { page = 1, pageSize = 12, likedBy, currentUserId, excludeId, status, isNsfw, sortBy = 'date', afterValue, startAtId } = options || {};
     const skip = (page - 1) * pageSize;
     
     const where: any = { isPublished: true, status: { not: 'deleted' } };
+    const useCursor = Boolean(afterValue || startAtId);
+
+    // Cursor-based pagination: skip up to (exclusive) or include (startAtId) the cursor video
+    const cursorId = afterValue || startAtId;
+    if (cursorId) {
+      const cursorVideo = await this.prisma.video.findUnique({
+        where: { id: cursorId },
+        select: { processingStartedAt: true, createdAt: true, _count: { select: { likes: true } } },
+      });
+      if (cursorVideo) {
+        if (sortBy === 'likes') {
+          const cursorLikes = cursorVideo._count.likes;
+          // startAtId includes the cursor; afterValue excludes it
+          const op = startAtId ? 'lte' : 'lt';
+          where.AND = [
+            startAtId
+              ? { OR: [
+                  { likes: { _count: { lt: cursorLikes } } },
+                  { likes: { _count: cursorLikes }, processingStartedAt: { lte: cursorVideo.processingStartedAt } },
+                ] }
+              : { OR: [
+                  { likes: { _count: { lt: cursorLikes } } },
+                  { likes: { _count: cursorLikes }, processingStartedAt: { lt: cursorVideo.processingStartedAt } },
+                ] },
+          ];
+        } else {
+          where.AND = [
+            startAtId
+              ? { OR: [
+                  { processingStartedAt: { lt: cursorVideo.processingStartedAt } },
+                  { processingStartedAt: cursorVideo.processingStartedAt, createdAt: { lte: cursorVideo.createdAt } },
+                ] }
+              : { OR: [
+                  { processingStartedAt: { lt: cursorVideo.processingStartedAt } },
+                  { processingStartedAt: cursorVideo.processingStartedAt, createdAt: { lt: cursorVideo.createdAt } },
+                ] },
+          ];
+        }
+        if (afterValue && !where.id) {
+          where.id = { not: afterValue };
+        }
+      }
+    }
     
     // Filter by liked videos if likedBy is provided (for "My Liked" filter)
     if (likedBy) {
@@ -200,8 +312,10 @@ export class PostgresDatabase implements IDatabase {
     }
     
     // Exclude specific video if excludeId is provided
-    if (excludeId) {
+    if (excludeId && !where.id) {
       where.id = { not: excludeId };
+    } else if (excludeId) {
+      where.id = { ...where.id, not: excludeId };
     }
     
     // Filter by status if provided
@@ -233,7 +347,7 @@ export class PostgresDatabase implements IDatabase {
           }
         },
         orderBy,
-        skip,
+        skip: useCursor ? 0 : skip,
         take: pageSize,
       }),
       this.prisma.video.count({ where })
@@ -700,6 +814,25 @@ export class PostgresDatabase implements IDatabase {
     }
   }
 
+  async getGalleryState(userId: string): Promise<import('./IDatabase').GalleryState | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { galleryState: true },
+    });
+    if (!user?.galleryState) return null;
+    const state = typeof user.galleryState === 'string'
+      ? JSON.parse(user.galleryState)
+      : user.galleryState;
+    return state as import('./IDatabase').GalleryState;
+  }
+
+  async setGalleryState(userId: string, state: import('./IDatabase').GalleryState): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { galleryState: state as any },
+    });
+  }
+
   // ==================== Session Methods ====================
 
   async createSession(userId: string, token: string, expiresAt: Date): Promise<import('./IDatabase').Session> {
@@ -1086,7 +1219,8 @@ export class PostgresDatabase implements IDatabase {
   }
 
   async getWorkflows(): Promise<Workflow[]> {
-    const workflows = await this.prisma.workflow.findMany();
+    // Only return active (non-deleted) workflows for normal use
+    const workflows = await this.prisma.workflow.findMany({ where: { isDeleted: false } });
     return workflows.map(w => this.mapToWorkflow(w));
   }
 
@@ -1151,7 +1285,12 @@ export class PostgresDatabase implements IDatabase {
 
   async deleteWorkflow(id: string): Promise<boolean> {
     try {
-      await this.prisma.workflow.delete({ where: { id } });
+      // Soft-delete: mark as deleted so videos referencing this workflow
+      // retain their workflowId and we can still display the model name/type.
+      await this.prisma.workflow.update({
+        where: { id },
+        data: { isDeleted: true, isDefault: false },
+      });
       return true;
     } catch {
       return false;
@@ -1184,6 +1323,7 @@ export class PostgresDatabase implements IDatabase {
           ? JSON.parse(workflow.compatibleLoraIds)
           : []),
       isDefault: workflow.isDefault,
+      isDeleted: workflow.isDeleted,
       createdAt: workflow.createdAt.toISOString(),
       updatedAt: workflow.updatedAt.toISOString(),
     };

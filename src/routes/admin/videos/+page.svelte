@@ -10,7 +10,7 @@
   let { data } = $props<{ data: PageData }>();
   let statusFilter = $state('');
   let userFilter = $state('');
-  let workflowTypeFilter = $state('');
+  let modelTypeFilter = $state<string[]>([]);
   let message = $state('');
   const isLoading = $derived(Boolean($navigating));
 
@@ -18,7 +18,7 @@
   $effect(() => {
     statusFilter = data.statusFilter || '';
     userFilter = data.userFilter || '';
-    workflowTypeFilter = data.workflowTypeFilter || '';
+    modelTypeFilter = Array.isArray(data.modelTypeFilter) ? [...data.modelTypeFilter] : [];
   });
 
   async function setPage(newPage: number) {
@@ -42,10 +42,9 @@
     } else {
       url.searchParams.delete('user');
     }
-    if (workflowTypeFilter) {
-      url.searchParams.set('workflowType', workflowTypeFilter);
-    } else {
-      url.searchParams.delete('workflowType');
+    url.searchParams.delete('modelType');
+    for (const mt of modelTypeFilter) {
+      url.searchParams.append('modelType', mt);
     }
     await goto(url.toString());
   }
@@ -54,9 +53,31 @@
     if (isLoading) return;
     statusFilter = '';
     userFilter = '';
-    workflowTypeFilter = '';
+    modelTypeFilter = [];
     await goto('/admin/videos');
   }
+
+  function toggleModelType(id: string) {
+    if (modelTypeFilter.includes(id)) {
+      modelTypeFilter = modelTypeFilter.filter((m) => m !== id);
+    } else {
+      modelTypeFilter = [...modelTypeFilter, id];
+    }
+  }
+
+  function getModelName(id: string): string {
+    const mt = (data.modelTypes || []).find((m: any) => m.id === id);
+    return mt?.name || id;
+  }
+
+  // Group model types by workflowType: i2v, fl2v, then other/unassigned
+  const groupedModelTypes = $derived.by(() => {
+    const types = data.modelTypes || [];
+    const i2v = types.filter((m: any) => m.workflowType === 'i2v');
+    const fl2v = types.filter((m: any) => m.workflowType === 'fl2v');
+    const other = types.filter((m: any) => m.workflowType !== 'i2v' && m.workflowType !== 'fl2v');
+    return { i2v, fl2v, other };
+  });
 
   async function unpublishVideo(videoId: string) {
     const video = data.videos.find((v: any) => v.id === videoId);
@@ -148,14 +169,92 @@
         </div>
 
         <div class="form-control">
-          <label class="label" for="workflow-type-filter">
-            <span class="label-text">{$_('admin.videos.workflowType')}</span>
+          <label class="label" for="model-type-filter">
+            <span class="label-text">{$_('admin.videos.modelType')}</span>
           </label>
-          <select id="workflow-type-filter" bind:value={workflowTypeFilter} class="select select-bordered">
-            <option value="">{$_('common.all')}</option>
-            <option value="i2v">{$_('admin.videos.workflowI2V')}</option>
-            <option value="fl2v">{$_('admin.videos.workflowFL2V')}</option>
-          </select>
+          <div class="dropdown w-full" id="model-type-filter">
+            <div tabindex="0" role="button" class="select select-bordered w-full flex items-center justify-between min-h-10 h-auto py-1 cursor-pointer">
+              {#if modelTypeFilter.length === 0}
+                <span class="opacity-60">{$_('common.all')}</span>
+              {:else}
+                <span class="flex flex-wrap gap-1 py-1">
+                  {#each modelTypeFilter as mt}
+                    <span class="badge badge-primary badge-sm gap-1">
+                      {getModelName(mt)}
+                      <button type="button" onclick={(e) => { e.preventDefault(); e.stopPropagation(); toggleModelType(mt); }} class="cursor-pointer" aria-label={$_('common.clear')}>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </span>
+                  {/each}
+                </span>
+              {/if}
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-60 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+            <div tabindex="0" class="dropdown-content z-50 menu p-2 shadow-xl bg-base-100 rounded-box w-full min-w-64 max-h-72 overflow-y-auto">
+                {#if (data.modelTypes || []).length === 0}
+                  <span class="text-sm opacity-60 px-2 py-1">{$_('admin.videos.noModelTypes')}</span>
+                {:else}
+                  <label class="label cursor-pointer justify-start gap-3 py-1">
+                    <input type="checkbox" class="checkbox checkbox-sm" checked={modelTypeFilter.length === 0} onchange={() => { if (modelTypeFilter.length > 0) modelTypeFilter = []; }} />
+                    <span class="label-text">{$_('common.all')}</span>
+                  </label>
+                  <div class="divider my-0 h-1"></div>
+                  {#if groupedModelTypes.i2v.length > 0}
+                    <div class="text-xs font-semibold opacity-60 px-2 pt-1 pb-0.5">{$_('admin.videos.groupI2V')}</div>
+                    {#each groupedModelTypes.i2v as mt}
+                      <label class="label cursor-pointer justify-start gap-3 py-1">
+                        <input type="checkbox" class="checkbox checkbox-sm" checked={modelTypeFilter.includes(mt.id)} onchange={() => toggleModelType(mt.id)} />
+                        <span class="label-text flex items-center gap-1">
+                          {mt.name}
+                          {#if mt.isDeleted}
+                            <span class="badge badge-error badge-xs" title={$_('admin.videos.deletedModel')}>{$_('admin.videos.deleted')}</span>
+                          {:else if !mt.available}
+                            <span class="badge badge-warning badge-xs" title={$_('admin.videos.legacyModel')}>{$_('admin.videos.legacy')}</span>
+                          {/if}
+                        </span>
+                      </label>
+                    {/each}
+                  {/if}
+                  {#if groupedModelTypes.fl2v.length > 0}
+                    <div class="text-xs font-semibold opacity-60 px-2 pt-2 pb-0.5">{$_('admin.videos.groupFL2V')}</div>
+                    {#each groupedModelTypes.fl2v as mt}
+                      <label class="label cursor-pointer justify-start gap-3 py-1">
+                        <input type="checkbox" class="checkbox checkbox-sm" checked={modelTypeFilter.includes(mt.id)} onchange={() => toggleModelType(mt.id)} />
+                        <span class="label-text flex items-center gap-1">
+                          {mt.name}
+                          {#if mt.isDeleted}
+                            <span class="badge badge-error badge-xs" title={$_('admin.videos.deletedModel')}>{$_('admin.videos.deleted')}</span>
+                          {:else if !mt.available}
+                            <span class="badge badge-warning badge-xs" title={$_('admin.videos.legacyModel')}>{$_('admin.videos.legacy')}</span>
+                          {/if}
+                        </span>
+                      </label>
+                    {/each}
+                  {/if}
+                  {#if groupedModelTypes.other.length > 0}
+                    <div class="text-xs font-semibold opacity-60 px-2 pt-2 pb-0.5">{$_('admin.videos.groupOther')}</div>
+                    {#each groupedModelTypes.other as mt}
+                      <label class="label cursor-pointer justify-start gap-3 py-1">
+                        <input type="checkbox" class="checkbox checkbox-sm" checked={modelTypeFilter.includes(mt.id)} onchange={() => toggleModelType(mt.id)} />
+                        <span class="label-text flex items-center gap-1">
+                          {mt.name}
+                          {#if mt.isDeleted}
+                            <span class="badge badge-error badge-xs" title={$_('admin.videos.deletedModel')}>{$_('admin.videos.deleted')}</span>
+                          {:else if !mt.available}
+                            <span class="badge badge-warning badge-xs" title={$_('admin.videos.legacyModel')}>{$_('admin.videos.legacy')}</span>
+                          {/if}
+                        </span>
+                      </label>
+                    {/each}
+                  {/if}
+                {/if}
+            </div>
+          </div>
         </div>
 
         <div class="form-control">

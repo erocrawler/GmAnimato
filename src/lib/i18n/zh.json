@@ -136,7 +136,18 @@
     "aiGenerated": "AI生成",
     "like": "喜欢",
     "unlike": "取消喜欢",
-    "untitled": "无标题视频"
+    "untitled": "无标题视频",
+    "short": {
+      "toggle": "短视频",
+      "noMore": "没有更多视频了",
+      "fullscreen": "全屏",
+      "exitFullscreen": "退出全屏",
+      "history": "最近观看",
+      "noHistory": "暂无观看记录",
+      "newVideos": "{count} 个新视频",
+      "manyNew": "有新视频",
+      "startHere": "从这里开始看"
+    }
   },
   "videos": {
     "title": "我的视频",
@@ -495,9 +506,15 @@
     "videos": {
       "title": "视频管理",
       "filters": "筛选",
-      "workflowType": "工作流类型",
-      "workflowI2V": "I2V (单图像)",
-      "workflowFL2V": "FL2V (两张图像)",
+      "modelType": "模型类型",
+      "noModelTypes": "未找到模型",
+      "legacy": "旧版",
+      "legacyModel": "此模型已不再配置",
+      "deleted": "已删除",
+      "deletedModel": "此模型已删除（仅供历史视频参考）",
+      "groupI2V": "I2V (单图像)",
+      "groupFL2V": "FL2V (两张图像)",
+      "groupOther": "其他 / 未分配",
       "total": "总计：{count} 个视频",
       "noVideos": "未找到视频",
       "deleteConfirm": "删除来自 {username} 的视频?此操作无法撤销。",

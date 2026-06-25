@@ -5,7 +5,7 @@ import { PostgresDatabase } from './db-postgres';
 import { env } from '$env/dynamic/private';
 
 // Re-export types for backward compatibility
-export type { VideoEntry, IDatabase, User, UserPublic, AdminSettings, Session, Workflow, PaginatedVideos, GetPublishedVideosOptions, GetVideosByUserOptions, GetAllVideosOptions } from './IDatabase';
+export type { VideoEntry, IDatabase, User, UserPublic, AdminSettings, Session, Workflow, PaginatedVideos, GetPublishedVideosOptions, GetVideosByUserOptions, GetAllVideosOptions, VideoModelType, GalleryState } from './IDatabase';
 
 // Database instance (singleton)
 let dbInstance: IDatabase | null = null;
@@ -51,6 +51,10 @@ export async function createVideoEntry(entry: Omit<VideoEntry, 'id' | 'created_a
 
 export async function getAllVideos(options?: import('./IDatabase').GetAllVideosOptions) {
   return db.getAllVideos(options);
+}
+
+export async function getVideoModelTypes() {
+  return db.getVideoModelTypes();
 }
 
 export async function getVideosByUser(user_id: string, page?: number, pageSize?: number, options?: GetVideosByUserOptions) {
@@ -137,6 +141,14 @@ export async function updateUser(id: string, patch: Partial<Omit<User, 'id' | 'c
 
 export async function deleteUser(id: string) {
   return db.deleteUser(id);
+}
+
+export async function getGalleryState(userId: string) {
+  return db.getGalleryState(userId);
+}
+
+export async function setGalleryState(userId: string, state: import('./IDatabase').GalleryState) {
+  return db.setGalleryState(userId, state);
 }
 
 // ==================== Admin Settings Functions ====================

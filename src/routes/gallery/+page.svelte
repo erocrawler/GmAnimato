@@ -5,10 +5,15 @@
   import VideoList from '$lib/components/VideoList.svelte';
   import Pagination from '$lib/components/Pagination.svelte';
   import LayoutToggle from '$lib/components/LayoutToggle.svelte';
+  import ShortVideoFeed from '$lib/components/ShortVideoFeed.svelte';
   
-  let { data } = $props<{ data: { videos: any[]; user?: any; page: number; totalPages: number; total: number; filter: string; sortBy: 'date' | 'likes' } }>();
+  let { data } = $props<{ data: { videos: any[]; user?: any; page: number; totalPages: number; total: number; filter: string; sortBy: 'date' | 'likes'; mode: string | null; galleryState?: any } }>();
+  // svelte-ignore state_referenced_locally
   let videos = $state(data.videos);
   let loading = $state(false);
+
+  // Mode persistence: URL param takes priority, fall back to localStorage
+  let shortMode = $derived(data.mode === 'short' || (!data.mode && typeof localStorage !== 'undefined' && localStorage.getItem('gallery-mode') === 'short'));
 
   const queryParams = $derived.by(() => {
     const params = new URLSearchParams();
@@ -29,6 +34,19 @@
     const url = new URL(window.location.href);
     url.searchParams.set('filter', mode);
     url.searchParams.set('page', '1');
+    await goto(url.toString());
+  }
+
+  async function toggleShortMode() {
+    const url = new URL(window.location.href);
+    if (shortMode) {
+      url.searchParams.set('mode', 'grid');
+      localStorage.setItem('gallery-mode', 'grid');
+    } else {
+      url.searchParams.set('mode', 'short');
+      url.searchParams.delete('page');
+      localStorage.setItem('gallery-mode', 'short');
+    }
     await goto(url.toString());
   }
 
@@ -79,8 +97,22 @@
         <p class="text-lg opacity-70">{$_('gallery.subtitle')}</p>
       </div>
       <div class="flex gap-4 items-center">
+        <!-- Short video mode toggle -->
+        <button
+          class="btn btn-sm {shortMode ? 'btn-primary' : 'btn-ghost'} gap-2"
+          onclick={toggleShortMode}
+          aria-label={$_('gallery.short.toggle')}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4M3 16h4M17 8h4M17 16h4M3 12h18" />
+          </svg>
+          {$_('gallery.short.toggle')}
+        </button>
+
         <!-- Layout toggle -->
-        <LayoutToggle />
+        {#if !shortMode}
+          <LayoutToggle />
+        {/if}
         
         <!-- Sort selector -->
         <div class="form-control">
@@ -119,24 +151,43 @@
     </div>
   </div>
 
-  <VideoList
-    videos={videos}
-    type="gallery"
+  {#if shortMode}
+    {#if loading}
+      <div class="h-[calc(100vh-4rem)] bg-black rounded-lg flex items-center justify-center">
+        <span class="loading loading-spinner loading-lg text-white"></span>
+      </div>
+    {:else if videos.length === 0}
+      <div class="hero min-h-[50vh] bg-base-200 rounded-lg">
+        <div class="hero-content text-center">
+          <div class="max-w-md">
+            <div class="text-6xl mb-4">{data.filter === 'liked' ? '💔' : '🖼️'}</div>
+            <p class="text-lg mb-6">{data.filter === 'liked' ? $_('gallery.empty.noLikedMessage') : $_('gallery.empty.noVideosMessage')}</p>
+          </div>
+        </div>
+      </div>
+    {:else}
+      <ShortVideoFeed initialVideos={videos} sortBy={data.sortBy} filter={data.filter as 'all' | 'liked'} galleryState={data.galleryState} />
+    {/if}
+  {:else}
+    <VideoList
+      videos={videos}
+      type="gallery"
 
-    loading={loading}
-    pageSize={data.pageSize}
-    queryParams={queryParams}
-    emptyMessage={data.filter === 'liked' ? $_('gallery.empty.noLikedMessage') : $_('gallery.empty.noVideosMessage')}
-    emptyIcon={data.filter === 'liked' ? '💔' : '🖼️'}
-    emptyAction={data.filter === 'liked' 
-      ? null
-      : { label: $_('gallery.empty.createAndPublish'), href: '/new' }}
-    onToggleLike={toggleLike}
-  />
+      loading={loading}
+      pageSize={data.pageSize}
+      queryParams={queryParams}
+      emptyMessage={data.filter === 'liked' ? $_('gallery.empty.noLikedMessage') : $_('gallery.empty.noVideosMessage')}
+      emptyIcon={data.filter === 'liked' ? '💔' : '🖼️'}
+      emptyAction={data.filter === 'liked' 
+        ? null
+        : { label: $_('gallery.empty.createAndPublish'), href: '/new' }}
+      onToggleLike={toggleLike}
+    />
 
-  <Pagination
-    currentPage={data.page}
-    totalPages={data.totalPages}
-    onPageChange={setPage}
-  />
+    <Pagination
+      currentPage={data.page}
+      totalPages={data.totalPages}
+      onPageChange={setPage}
+    />
+  {/if}
 </div>
