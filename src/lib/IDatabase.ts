@@ -149,6 +149,7 @@ export type GetVideosByUserOptions = {
   sortDirection?: 'asc' | 'desc'; // Sort ascending or descending
   status?: VideoEntry['status']; // Filter by video status
   isPublished?: boolean; // Filter by published status
+  modelTypeIds?: string[]; // Filter by specific model/workflow IDs (multi-select)
 };
 
 export type GetPublishedVideosOptions = {

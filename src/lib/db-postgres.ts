@@ -208,6 +208,17 @@ export class PostgresDatabase implements IDatabase {
       where.isPublished = options.isPublished;
     }
 
+    // Apply modelType filter (multi-select workflow_id)
+    if (options?.modelTypeIds && options.modelTypeIds.length > 0) {
+      const hasUnassigned = options.modelTypeIds.includes('unassigned');
+      const ids = options.modelTypeIds.filter((id) => id !== 'unassigned');
+      const clauses: any[] = [];
+      if (ids.length > 0) clauses.push({ workflowId: { in: ids } });
+      if (hasUnassigned) clauses.push({ workflowId: null as any });
+      if (clauses.length === 1) Object.assign(where, clauses[0]);
+      else if (clauses.length > 1) where.OR = clauses;
+    }
+
     // Determine sort order using the generated completionTime column
     const orderBy = sortBy === 'completion'
       ? { completionTime: sortDirection }

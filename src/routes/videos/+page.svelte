@@ -5,35 +5,40 @@
   import VideoList from '$lib/components/VideoList.svelte';
   import Pagination from '$lib/components/Pagination.svelte';
   import LayoutToggle from '$lib/components/LayoutToggle.svelte';
+  import ModelTypeFilter from '$lib/components/ModelTypeFilter.svelte';
 
-  let { data } = $props<{ 
-    data: { 
-      videos: any[]; 
-      page: number; 
-      totalPages: number; 
-      total: number; 
+  let { data } = $props<{
+    data: {
+      videos: any[];
+      page: number;
+      totalPages: number;
+      total: number;
       pageSize: number;
       sortBy: string;
       sortDirection: string;
       status?: string;
       isPublished?: string;
-    } 
+      modelTypes: any[];
+      modelTypeFilter: string[];
+    }
   }>();
   let videos = $state<any[]>([]);
   let loading = $state(false);
   let layout = $state<'grid' | 'compact'>('grid');
   let pollInterval: ReturnType<typeof setInterval> | null = null;
-  
+
   // Filter and sort state
   let sortBy = $state<'upload' | 'completion'>(data.sortBy as 'upload' | 'completion');
   let sortDirection = $state<'asc' | 'desc'>(data.sortDirection as 'asc' | 'desc');
   let filterStatus = $state<string>(data.statusFilter || 'all');
+  let modelTypeFilter = $state<string[]>(data.modelTypeFilter || []);
   
   $effect(() => {
     videos = data.videos;
     sortBy = data.sortBy as 'upload' | 'completion';
     sortDirection = data.sortDirection as 'asc' | 'desc';
     filterStatus = data.statusFilter || 'all';
+    modelTypeFilter = data.modelTypeFilter || [];
   });
   
   async function pollActiveVideos() {
@@ -112,30 +117,32 @@
     await goto(url.toString());
   }
 
+  function toggleModelType(id: string) {
+    if (modelTypeFilter.includes(id)) modelTypeFilter = modelTypeFilter.filter((m) => m !== id);
+    else modelTypeFilter = [...modelTypeFilter, id];
+  }
+
   async function applyFilters() {
     const url = new URL(window.location.href);
-    url.searchParams.set('page', '1'); // Reset to page 1 when filters change
+    url.searchParams.set('page', '1');
     url.searchParams.set('sortBy', sortBy);
     url.searchParams.set('sortDirection', sortDirection);
-    
-    if (filterStatus !== 'all') {
-      url.searchParams.set('statusFilter', filterStatus);
-    } else {
-      url.searchParams.delete('statusFilter');
-    }
-    
+
+    if (filterStatus !== 'all') url.searchParams.set('statusFilter', filterStatus);
+    else url.searchParams.delete('statusFilter');
+
+    url.searchParams.delete('modelType');
+    for (const mt of modelTypeFilter) url.searchParams.append('modelType', mt);
+
     const targetUrl = url.toString();
-    if (targetUrl === window.location.href) {
-      return;
-    }
+    if (targetUrl === window.location.href) return;
 
     loading = true;
     videos = [];
     await goto(targetUrl);
   }
 
-  // Check if filters are active (not in default state)
-  const hasActiveFilters = $derived(filterStatus !== 'all');
+  const hasActiveFilters = $derived(filterStatus !== 'all' || modelTypeFilter.length > 0);
   
   // Conditionally set empty state message and action
   const emptyMessage = $derived(
@@ -172,55 +179,48 @@
 
   <!-- Filter and Sort Controls -->
   <div class="mb-6 p-4 bg-base-200 rounded-lg">
-    <div class="flex flex-col md:flex-row md:items-end gap-4">
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
-        <!-- Sort By + Direction Toggle -->
-        <div class="form-control">
-          <label class="label" for="sort-by-select">
-            <span class="label-text font-semibold">{$_('videos.filters.sortBy')}</span>
-          </label>
-          <div class="join">
-            <select id="sort-by-select" bind:value={sortBy} onchange={applyFilters} class="select select-bordered join-item">
-              <option value="upload">{$_('videos.filters.uploadTime')}</option>
-              <option value="completion">{$_('videos.filters.completionTime')}</option>
-            </select>
-            <button
-              class="btn join-item"
-              title={sortDirection === 'asc' ? $_('videos.filters.asc') : $_('videos.filters.desc')}
-              aria-label={$_('videos.filters.sortDirection')}
-              onclick={() => { sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'; applyFilters(); }}
-            >
-              {#if sortDirection === 'asc'}
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14m0-14l-4 4m4-4l4 4" />
-                </svg>
-              {:else}
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19V5m0 14l-4-4m4 4l4-4" />
-                </svg>
-              {/if}
-            </button>
-          </div>
-        </div>
-
-        <!-- Filter by Status (includes published state) -->
-        <div class="form-control">
-          <label class="label" for="status-filter-select">
-            <span class="label-text font-semibold">{$_('videos.filters.status')}</span>
-          </label>
-          <select id="status-filter-select" bind:value={filterStatus} onchange={applyFilters} class="select select-bordered">
-            <option value="all">{$_('videos.filters.allVideos')}</option>
-            <option value="uploaded">{$_('videos.filters.uploaded')}</option>
-            <option value="in_queue">{$_('videos.filters.inQueue')}</option>
-            <option value="processing">{$_('videos.filters.processing')}</option>
-            <option value="completed">{$_('videos.filters.completed')}</option>
-            <option value="completed-published">{$_('videos.filters.completedPublished')}</option>
-            <option value="completed-unpublished">{$_('videos.filters.completedUnpublished')}</option>
-            <option value="failed">{$_('videos.filters.failed')}</option>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+      <!-- Sort By + Direction Toggle -->
+      <div class="form-control">
+        <label class="label" for="sort-by-select">
+          <span class="label-text font-semibold">{$_('videos.filters.sortBy')}</span>
+        </label>
+        <div class="join w-full">
+          <select id="sort-by-select" bind:value={sortBy} onchange={applyFilters} class="select select-bordered join-item flex-1">
+            <option value="upload">{$_('videos.filters.uploadTime')}</option>
+            <option value="completion">{$_('videos.filters.completionTime')}</option>
           </select>
+          <button class="btn join-item" title={sortDirection === 'asc' ? $_('videos.filters.asc') : $_('videos.filters.desc')} onclick={() => { sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'; applyFilters(); }}>
+            {#if sortDirection === 'asc'}↑{:else}↓{/if}
+          </button>
         </div>
       </div>
+
+      <!-- Filter by Status -->
+      <div class="form-control">
+        <label class="label" for="status-filter-select">
+          <span class="label-text font-semibold">{$_('videos.filters.status')}</span>
+        </label>
+        <select id="status-filter-select" bind:value={filterStatus} onchange={applyFilters} class="select select-bordered w-full">
+          <option value="all">{$_('videos.filters.allVideos')}</option>
+          <option value="uploaded">{$_('videos.filters.uploaded')}</option>
+          <option value="in_queue">{$_('videos.filters.inQueue')}</option>
+          <option value="processing">{$_('videos.filters.processing')}</option>
+          <option value="completed">{$_('videos.filters.completed')}</option>
+          <option value="completed-published">{$_('videos.filters.completedPublished')}</option>
+          <option value="completed-unpublished">{$_('videos.filters.completedUnpublished')}</option>
+          <option value="failed">{$_('videos.filters.failed')}</option>
+        </select>
+      </div>
+
+      <!-- Model Type Filter (shared component) -->
+      <ModelTypeFilter modelTypes={data.modelTypes || []} selected={modelTypeFilter} label={$_('admin.videos.modelType') || 'Model'} placeholderAll={$_('common.all') || 'All'} onToggle={(id) => { toggleModelType(id); applyFilters(); }} />
     </div>
+    {#if hasActiveFilters}
+      <div class="mt-3 flex gap-2">
+        <button class="btn btn-ghost btn-xs" onclick={() => { filterStatus='all'; modelTypeFilter=[]; applyFilters(); }}>Clear filters</button>
+      </div>
+    {/if}
   </div>
 
   <VideoList

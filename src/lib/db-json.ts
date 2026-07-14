@@ -134,6 +134,16 @@ export class JsonFileDatabase implements IDatabase {
     if (options?.isPublished !== undefined) {
       filtered = filtered.filter((r) => r.is_published === options.isPublished);
     }
+
+    // Apply modelType filter (multi-select workflow_id)
+    if (options?.modelTypeIds && options.modelTypeIds.length > 0) {
+      const hasUnassigned = options.modelTypeIds.includes('unassigned');
+      const ids = options.modelTypeIds.filter((id) => id !== 'unassigned');
+      filtered = filtered.filter((r) => {
+        if (r.workflow_id === null) return hasUnassigned;
+        return ids.includes(r.workflow_id as any);
+      });
+    }
     
     // Sort based on sortBy option
     // Completion time = processing_started_at + processing_time_ms
