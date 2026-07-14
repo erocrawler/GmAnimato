@@ -93,6 +93,10 @@ export type Workflow = {
   templatePath: string;
   workflowType: 'i2v' | 'fl2v'; // Type of workflow: i2v (single image) or fl2v (two images)
   compatibleLoraIds: string[]; // Array of LoRA IDs compatible with this workflow
+  // Preset mechanism extensions
+  tags?: string[]; // e.g. ['wan22', 'nsfw'] — used for auto-matching LoRAs
+  autoIncludeNewLoras?: boolean; // if true, new LoRAs with matching tags auto-added
+  presetGroup?: string; // optional UI grouping
   isDefault: boolean;
   isDeleted: boolean; // Soft-delete: workflow is retired but kept for historical video reference
   createdAt: string;

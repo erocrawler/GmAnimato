@@ -935,7 +935,20 @@ export class PostgresDatabase implements IDatabase {
     if (patch.freeUserWaitThresholdMinutes !== undefined) data.freeUserWaitThresholdMinutes = patch.freeUserWaitThresholdMinutes;
     if (patch.freeUserQueueLimit !== undefined) data.freeUserQueueLimit = patch.freeUserQueueLimit;
     if (patch.paidUserQueueLimit !== undefined) data.paidUserQueueLimit = patch.paidUserQueueLimit;
-    if (patch.loraPresets !== undefined) data.loraPresets = normalizeLoraPresets(patch.loraPresets);
+    let newLoraIds: string[] = [];
+    let newLoras: any[] = [];
+    if (patch.loraPresets !== undefined) {
+      const normalized = normalizeLoraPresets(patch.loraPresets);
+      data.loraPresets = normalized;
+      // Detect new LoRA IDs vs existing
+      try {
+        const existing = await this.prisma.adminSettings.findUnique({ where: { id: 'default' }, select: { loraPresets: true } });
+        const existedNormalized = normalizeLoraPresets((existing?.loraPresets as any) ?? []);
+        const oldIds = new Set(existedNormalized.map(l => l.id));
+        newLoras = normalized.filter(l => !oldIds.has(l.id));
+        newLoraIds = newLoras.map(l => l.id);
+      } catch { /* ignore */ }
+    }
     
     // Store sponsor config as JSON for flexibility
     const sponsorConfig: any = {};
@@ -958,6 +971,49 @@ export class PostgresDatabase implements IDatabase {
         loraPresets: normalizeLoraPresets(patch.loraPresets) ?? DEFAULT_LORA_PRESETS,
       },
     });
+
+    // Auto-compat: if new LoRAs were added, auto-assign to eligible workflows
+    // Primary logic: same presetGroup (model family)
+    if (newLoraIds.length) {
+      try {
+        const allWorkflows = await this.prisma.workflow.findMany({ where: { isDeleted: false } });
+        for (const wf of allWorkflows) {
+          const wfTags: string[] = Array.isArray((wf as any).tags) ? (wf as any).tags : [];
+          const wfGroup: string | undefined = typeof (wf as any).presetGroup === 'string' ? (wf as any).presetGroup : undefined;
+          const autoInclude = (wf as any).autoIncludeNewLoras ?? true;
+          if (!autoInclude) continue;
+          const compatibleIds: string[] = Array.isArray(wf.compatibleLoraIds) ? wf.compatibleLoraIds as string[] : [];
+          let toAdd: string[] = [];
+          for (const nl of newLoras) {
+            // LoRA is agnostic to i2v/fl2v - no type filtering
+            if (nl.autoAddToWorkflows) { toAdd.push(nl.id); continue; }
+            // Primary: same presetGroup (free-form configurable group / model family)
+            if (wfGroup && nl.presetGroup) {
+              if (wfGroup.toLowerCase() !== String(nl.presetGroup).toLowerCase()) continue;
+              // Group matches - if both have tags, require tag overlap as secondary filter, else allow
+              if (wfTags.length && Array.isArray(nl.tags) && nl.tags.length) {
+                const hasOverlap = nl.tags.some((t: string) => wfTags.map((x: string)=>String(x).toLowerCase()).includes(String(t).toLowerCase()));
+                if (!hasOverlap) continue;
+              }
+              toAdd.push(nl.id);
+              continue;
+            }
+            // Fallback: tag overlap when group not defined on one side
+            if (wfTags.length && Array.isArray(nl.tags) && nl.tags.length) {
+              const hasOverlap = nl.tags.some((t: string) => wfTags.map((x: string)=>String(x).toLowerCase()).includes(String(t).toLowerCase()));
+              if (hasOverlap) toAdd.push(nl.id);
+            }
+          }
+          toAdd = toAdd.filter(id => !compatibleIds.includes(id));
+          if (toAdd.length) {
+            const updatedIds = [...compatibleIds, ...toAdd];
+            await this.prisma.workflow.update({ where: { id: wf.id }, data: { compatibleLoraIds: updatedIds, updatedAt: new Date() } });
+          }
+        }
+      } catch (err) {
+        console.error('[DB] Failed to auto-assign new LoRAs to workflows:', err);
+      }
+    }
 
     return this.mapToAdminSettings(settings);
   }
@@ -1235,7 +1291,7 @@ export class PostgresDatabase implements IDatabase {
   }
 
   async createWorkflow(data: Omit<Workflow, 'createdAt' | 'updatedAt'>): Promise<Workflow> {
-    const { id, name, description, templatePath, workflowType, isDefault, compatibleLoraIds } = data;
+    const { id, name, description, templatePath, workflowType, isDefault, compatibleLoraIds, tags, autoIncludeNewLoras, presetGroup } = data as any;
     if (isDefault) {
       await this.prisma.workflow.updateMany({
         where: { workflowType: workflowType || 'i2v' },
@@ -1251,7 +1307,12 @@ export class PostgresDatabase implements IDatabase {
         workflowType: workflowType || 'i2v',
         isDefault: isDefault || false,
         compatibleLoraIds,
-      },
+        // new fields — stored as JSON / columns if exist, otherwise ignored by Prisma if not in schema (we store in compatibleLoraIds JSON fallback)
+        // For flexibility, we try to write tags etc. into extra columns if they exist.
+        ...(tags !== undefined ? { tags } : {}),
+        ...(autoIncludeNewLoras !== undefined ? { autoIncludeNewLoras } : {}),
+        ...(presetGroup !== undefined ? { presetGroup } : {}),
+      } as any,
     });
     return this.mapToWorkflow(created);
   }
@@ -1263,6 +1324,9 @@ export class PostgresDatabase implements IDatabase {
     if (patch.description !== undefined) updateData.description = patch.description;
     if (patch.templatePath !== undefined) updateData.templatePath = patch.templatePath;
     if (patch.workflowType !== undefined) updateData.workflowType = patch.workflowType;
+    if ((patch as any).tags !== undefined) updateData.tags = (patch as any).tags;
+    if ((patch as any).autoIncludeNewLoras !== undefined) updateData.autoIncludeNewLoras = (patch as any).autoIncludeNewLoras;
+    if ((patch as any).presetGroup !== undefined) updateData.presetGroup = (patch as any).presetGroup;
     if (patch.isDefault !== undefined) {
       if (patch.isDefault) {
         const current = await this.prisma.workflow.findUnique({ where: { id }, select: { workflowType: true } });
@@ -1311,6 +1375,9 @@ export class PostgresDatabase implements IDatabase {
   }
 
   private mapToWorkflow(workflow: any): Workflow {
+    const rawTags = (workflow as any).tags;
+    const rawAuto = (workflow as any).autoIncludeNewLoras;
+    const rawGroup = (workflow as any).presetGroup;
     return {
       id: workflow.id,
       name: workflow.name,
@@ -1322,6 +1389,9 @@ export class PostgresDatabase implements IDatabase {
         : (typeof workflow.compatibleLoraIds === 'string'
           ? JSON.parse(workflow.compatibleLoraIds)
           : []),
+      tags: Array.isArray(rawTags) ? rawTags : (typeof rawTags === 'string' ? JSON.parse(rawTags) : []),
+      autoIncludeNewLoras: typeof rawAuto === 'boolean' ? rawAuto : true,
+      presetGroup: typeof rawGroup === 'string' ? rawGroup : undefined,
       isDefault: workflow.isDefault,
       isDeleted: workflow.isDeleted,
       createdAt: workflow.createdAt.toISOString(),

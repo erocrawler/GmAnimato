@@ -1,6 +1,5 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { page } from '$app/stores';
   import { _ } from 'svelte-i18n';
   import VideoList from '$lib/components/VideoList.svelte';
   import Pagination from '$lib/components/Pagination.svelte';
@@ -12,8 +11,34 @@
   let videos = $state(data.videos);
   let loading = $state(false);
 
-  // Mode persistence: URL param takes priority, fall back to localStorage
-  let shortMode = $derived(data.mode === 'short' || (!data.mode && typeof localStorage !== 'undefined' && localStorage.getItem('gallery-mode') === 'short'));
+  // Server is authoritative for mode (?mode=short). localStorage is only a hint
+  // for auto-redirect when user lands on /gallery without a mode param.
+  // We must NOT render the feed with wrong data before redirecting, otherwise
+  // the user sees latest videos and the "X new videos" banner at the same time.
+  let shortMode = $derived(data.mode === 'short');
+  let pendingShortRedirect = $state(false);
+
+  $effect(() => {
+    if (typeof localStorage === 'undefined') return;
+    if (data.mode === 'short') {
+      pendingShortRedirect = false;
+      return;
+    }
+    if (localStorage.getItem('gallery-mode') !== 'short') {
+      pendingShortRedirect = false;
+      return;
+    }
+    const url = new URL(window.location.href);
+    // User explicitly chose grid — respect it
+    if (url.searchParams.get('mode') === 'grid') {
+      pendingShortRedirect = false;
+      return;
+    }
+    pendingShortRedirect = true;
+    url.searchParams.set('mode', 'short');
+    url.searchParams.delete('page');
+    goto(url.toString(), { replaceState: true });
+  });
 
   const queryParams = $derived.by(() => {
     const params = new URLSearchParams();
@@ -151,7 +176,11 @@
     </div>
   </div>
 
-  {#if shortMode}
+  {#if pendingShortRedirect}
+    <div class="h-[calc(100vh-4rem)] bg-black rounded-lg flex items-center justify-center">
+      <span class="loading loading-spinner loading-lg text-white"></span>
+    </div>
+  {:else if shortMode}
     {#if loading}
       <div class="h-[calc(100vh-4rem)] bg-black rounded-lg flex items-center justify-center">
         <span class="loading loading-spinner loading-lg text-white"></span>

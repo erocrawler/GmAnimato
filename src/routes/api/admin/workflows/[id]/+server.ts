@@ -26,14 +26,18 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
   }
 
   try {
-    // Build patch object
-    const patch: Parameters<typeof db.updateWorkflow>[1] = {};
+    // Build patch object (extra fields via any cast for new columns)
+    const patch: any = {};
     if (compatibleLoraIds !== undefined) patch.compatibleLoraIds = compatibleLoraIds;
     if (name !== undefined) patch.name = name;
     if (description !== undefined) patch.description = description;
     if (templatePath !== undefined) patch.templatePath = templatePath;
     if (workflowType !== undefined) patch.workflowType = workflowType;
     if (isDefault !== undefined) patch.isDefault = isDefault;
+    const { tags, autoIncludeNewLoras, presetGroup } = body as any;
+    if (tags !== undefined) patch.tags = Array.isArray(tags) ? tags.map((t: string) => String(t).toLowerCase()) : [];
+    if (autoIncludeNewLoras !== undefined) patch.autoIncludeNewLoras = !!autoIncludeNewLoras;
+    if (presetGroup !== undefined) patch.presetGroup = presetGroup || undefined;
 
     const updated = await db.updateWorkflow(id, patch);
 

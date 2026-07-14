@@ -82,8 +82,8 @@
 		</footer>
 	</div>
 	
-	<!-- Drawer sidebar -->
-	<div class="drawer-side">
+	<!-- Drawer sidebar - must be above short video toolbar (z-10) -->
+	<div class="drawer-side z-50">
 		<label for="main-drawer" aria-label="close sidebar" class="drawer-overlay"></label>
 		<div class="w-80 min-h-full bg-base-200 p-4">
 			<NavMenu user={data?.user} {isAdmin} orientation="vertical" {drawerToggle} />

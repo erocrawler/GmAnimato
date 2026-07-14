@@ -517,8 +517,7 @@
     }
   }
 
-  // Track enabled state for each LoRA - initialize with defaults
-  // Will be updated by reactive statement when workflow is selected
+  // Track enabled state - Default ON + required (lightx2v) forced
   let loraEnabled: Record<string, boolean> = entry.lora_weights
     ? Object.fromEntries(
         LORA_PRESETS.map((lora) => [
@@ -531,9 +530,11 @@
           lora.id,
           lora.isConfigurable === false
             ? true
-            : lora.enabled !== undefined
-              ? lora.enabled
-              : true,
+            : ((lora as any).defaultEnabled !== undefined
+              ? (lora as any).defaultEnabled
+              : (lora as any).enabled !== undefined
+                ? (lora as any).enabled
+                : true),
         ]),
       );
   let loraWeights: Record<string, number> =
@@ -553,14 +554,13 @@
     const newLoraWeights: Record<string, number> = {};
 
     filteredLoraPresets.forEach((lora) => {
-      // For required LoRAs, always enable them
+      // Required LoRAs (lightx2v on wan22 base) always enabled — cannot be turned off
       if (lora.isConfigurable === false) {
         newLoraEnabled[lora.id] = true;
       } else {
-        // Use saved value for this workflow, or lora default
+        const defOn = (lora as any).defaultEnabled !== undefined ? (lora as any).defaultEnabled : ((lora as any).enabled ?? true);
         newLoraEnabled[lora.id] =
-          workflowSettings?.loraEnabled?.[lora.id] ??
-          (lora.enabled !== undefined ? lora.enabled : true);
+          workflowSettings?.loraEnabled?.[lora.id] ?? defOn;
       }
 
       // Use saved weight for this workflow, or lora default

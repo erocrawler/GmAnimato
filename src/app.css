@@ -25,6 +25,9 @@ body {
 .fullscreen-mode {
 	height: 100vh !important;
 }
-.fullscreen-mode > [data-index] {
+.fullscreen-mode .fullscreen-scroll {
+	height: 100vh !important;
+}
+.fullscreen-mode [data-index] {
 	height: 100vh !important;
 }

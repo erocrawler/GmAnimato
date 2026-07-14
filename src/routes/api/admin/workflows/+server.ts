@@ -13,7 +13,8 @@ export const POST: RequestHandler = async ({ locals, request }) => {
     throw error(403, 'Forbidden: Admin access required');
   }
 
-  const { id, name, description, templatePath, workflowType, isDefault, compatibleLoraIds } = await request.json();
+  const body = await request.json();
+  const { id, name, description, templatePath, workflowType, isDefault, compatibleLoraIds, tags, autoIncludeNewLoras, presetGroup } = body;
 
   if (!id || !name || !templatePath) {
     throw error(400, 'id, name, and templatePath are required');
@@ -36,7 +37,10 @@ export const POST: RequestHandler = async ({ locals, request }) => {
       workflowType: workflowType || 'i2v',
       isDefault: isDefault || false,
       compatibleLoraIds,
-    });
+      tags: Array.isArray(tags) ? tags.map((t: string) => String(t).toLowerCase()) : [],
+      autoIncludeNewLoras: typeof autoIncludeNewLoras === 'boolean' ? autoIncludeNewLoras : true,
+      presetGroup: typeof presetGroup === 'string' ? presetGroup : undefined,
+    } as any);
 
     return json(created);
   } catch (err: any) {

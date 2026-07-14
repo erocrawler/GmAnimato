@@ -267,87 +267,96 @@
   {/each}
 </svelte:head>
 
-<div
-  bind:this={container}
-  class="h-[calc(100vh-4rem)] overflow-y-auto snap-y snap-mandatory scrollbar-hide relative"
-  class:fullscreen-mode={isFullscreen}
->
-  <!-- Top-left: History dropdown button -->
-  {#if galleryState?.history?.length}
-    <div class="absolute top-3 left-3 z-50">
-      <div class="relative">
-        <button
-          class="w-10 h-10 rounded-full bg-black/40 backdrop-blur flex items-center justify-center transition-transform active:scale-90"
-          onclick={() => showHistory ? (showHistory = false) : loadHistory()}
-          aria-label={$_('gallery.short.history')}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </button>
-        {#if showHistory}
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="fixed inset-0 z-40" onclick={() => showHistory = false} role="presentation"></div>
-          <div class="absolute top-12 left-0 z-50 bg-base-100 rounded-box shadow-xl p-2 w-64 max-h-80 overflow-y-auto">
-            {#if loadingHistory}
-              <div class="flex justify-center py-4"><span class="loading loading-spinner loading-md"></span></div>
-            {:else if historyVideos.length === 0}
-              <p class="text-sm opacity-60 px-2 py-3">{$_('gallery.short.noHistory')}</p>
-            {:else}
-              <p class="text-xs font-semibold opacity-60 px-2 pb-1">{$_('gallery.short.history')}</p>
-              {#each historyVideos as hv (hv.id)}
-                <button
-                  class="flex items-center gap-2 p-2 rounded-lg hover:bg-base-200 w-full text-left"
-                  onclick={() => jumpToVideo(hv.id)}
-                >
-                  {#if hv.original_image_url}
-                    <img src={hv.original_image_url} alt="" class="w-10 h-10 rounded object-cover shrink-0" />
-                  {:else}
-                    <div class="w-10 h-10 rounded bg-base-300 shrink-0"></div>
-                  {/if}
-                  <span class="text-sm line-clamp-2 flex-1">{hv.prompt || $_('gallery.untitled')}</span>
-                </button>
-              {/each}
+<div class="relative h-[calc(100vh-4rem)]" class:fullscreen-mode={isFullscreen}>
+  <!-- Fixed overlay toolbar - stays pinned while scrolling, but below drawer (drawer is z-50) -->
+  <div class="absolute top-0 left-0 right-0 z-[5] pointer-events-none">
+    <div class="relative p-3 flex justify-between items-start">
+      <!-- Top-left: History dropdown button -->
+      {#if galleryState?.history?.length}
+        <div class="pointer-events-auto">
+          <div class="relative">
+            <button
+              class="w-10 h-10 rounded-full bg-black/40 backdrop-blur flex items-center justify-center transition-transform active:scale-90"
+              onclick={() => showHistory ? (showHistory = false) : loadHistory()}
+              aria-label={$_('gallery.short.history')}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+            {#if showHistory}
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="fixed inset-0 z-[5]" onclick={() => showHistory = false} role="presentation"></div>
+              <div class="absolute top-12 left-0 z-[5] bg-base-100 rounded-box shadow-xl p-2 w-64 max-h-80 overflow-y-auto">
+                {#if loadingHistory}
+                  <div class="flex justify-center py-4"><span class="loading loading-spinner loading-md"></span></div>
+                {:else if historyVideos.length === 0}
+                  <p class="text-sm opacity-60 px-2 py-3">{$_('gallery.short.noHistory')}</p>
+                {:else}
+                  <p class="text-xs font-semibold opacity-60 px-2 pb-1">{$_('gallery.short.history')}</p>
+                  {#each historyVideos as hv (hv.id)}
+                    <button
+                      class="flex items-center gap-2 p-2 rounded-lg hover:bg-base-200 w-full text-left"
+                      onclick={() => jumpToVideo(hv.id)}
+                    >
+                      {#if hv.original_image_url}
+                        <img src={hv.original_image_url} alt="" class="w-10 h-10 rounded object-cover shrink-0" />
+                      {:else}
+                        <div class="w-10 h-10 rounded bg-base-300 shrink-0"></div>
+                      {/if}
+                      <span class="text-sm line-clamp-2 flex-1">{hv.prompt || $_('gallery.untitled')}</span>
+                    </button>
+                  {/each}
+                {/if}
+              </div>
             {/if}
           </div>
-        {/if}
+        </div>
+      {:else}
+        <div></div>
+      {/if}
+
+      <!-- Top-center: New videos banner -->
+      {#if newCount && newCount > 0}
+        <div class="pointer-events-auto absolute left-1/2 -translate-x-1/2">
+          <button class="btn btn-sm btn-primary gap-2 shadow-lg" onclick={jumpToTop}>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+            </svg>
+            {newCount === -1
+              ? $_('gallery.short.manyNew')
+              : $_('gallery.short.newVideos', { values: { count: newCount } })}
+          </button>
+        </div>
+      {/if}
+
+      <!-- Top-right: Fullscreen button -->
+      <div class="pointer-events-auto">
+        <button
+          class="w-10 h-10 rounded-full bg-black/40 backdrop-blur flex items-center justify-center transition-transform active:scale-90"
+          onclick={toggleFullscreen}
+          aria-label={isFullscreen ? $_('gallery.short.exitFullscreen') : $_('gallery.short.fullscreen')}
+        >
+          {#if isFullscreen}
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          {:else}
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l4 4m8-4h4m0 0v4m0-4l-4 4M4 16v4m0 0h4m-4 0l4-4m8 4h4m0 0v-4m0 4l-4-4" />
+            </svg>
+          {/if}
+        </button>
       </div>
     </div>
-  {/if}
-
-  <!-- Top-center: New videos banner -->
-  {#if newCount && newCount > 0}
-    <div class="absolute top-3 left-1/2 -translate-x-1/2 z-50">
-      <button class="btn btn-sm btn-primary gap-2 shadow-lg" onclick={jumpToTop}>
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
-        </svg>
-        {newCount === -1
-          ? $_('gallery.short.manyNew')
-          : $_('gallery.short.newVideos', { values: { count: newCount } })}
-      </button>
-    </div>
-  {/if}
-
-  <!-- Top-right: Fullscreen button -->
-  <div class="absolute top-3 right-3 z-50">
-    <button
-      class="w-10 h-10 rounded-full bg-black/40 backdrop-blur flex items-center justify-center transition-transform active:scale-90"
-      onclick={toggleFullscreen}
-      aria-label={isFullscreen ? $_('gallery.short.exitFullscreen') : $_('gallery.short.fullscreen')}
-    >
-      {#if isFullscreen}
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      {:else}
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l4 4m8-4h4m0 0v4m0-4l-4 4M4 16v4m0 0h4m-4 0l4-4m8 4h4m0 0v-4m0 4l-4-4" />
-        </svg>
-      {/if}
-    </button>
   </div>
+
+  <div
+    bind:this={container}
+    class="h-[calc(100vh-4rem)] overflow-y-auto snap-y snap-mandatory scrollbar-hide relative"
+    class:fullscreen-scroll={isFullscreen}
+  >
   {#each videos as v, i (v.id)}
     <div
       data-index={i}
@@ -420,9 +429,10 @@
     </div>
   {/each}
 
-  {#if !hasMore && videos.length > 0}
-    <div class="snap-start snap-always h-32 flex items-center justify-center bg-black">
-      <p class="text-white/50 text-sm">{$_('gallery.short.noMore')}</p>
-    </div>
-  {/if}
+    {#if !hasMore && videos.length > 0}
+      <div class="snap-start snap-always h-32 flex items-center justify-center bg-black">
+        <p class="text-white/50 text-sm">{$_('gallery.short.noMore')}</p>
+      </div>
+    {/if}
+  </div>
 </div>

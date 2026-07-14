@@ -21,7 +21,7 @@
   let loadingQueue = $state(false);
   let savingWorkflow = $state(false);
   
-  // Workflow editor modal state
+  // Workflow editor modal state - enhanced with preset mechanism
   let showWorkflowModal = $state(false);
   let editingWorkflowId: string | null = $state(null);
   let workflowName = $state('');
@@ -30,6 +30,36 @@
   let workflowType: 'i2v' | 'fl2v' = $state('i2v');
   let workflowIsDefault = $state(false);
   let workflowCompatibleLoras = $state<string[]>([]);
+  let workflowTags = $state<string[]>([]); // tags for auto matching
+  let workflowAutoInclude = $state(true);
+  let workflowPresetGroup = $state('');
+  let workflowTagInput = $state('');
+  let workflowLoraFilter = $state('all'); // all | byGroup | byTag
+  let workflowSelectedTagFilter = $state('all');
+  let workflowSelectedGroupFilter = $state('all');
+
+  // LoRA bulk ops
+  let showLoraBulkModal = $state(false);
+  let bulkSelectedLoraIds = $state<string[]>([]);
+  let bulkTargetWorkflowIds = $state<string[]>([]);
+  let bulkAction: 'add' | 'remove' | 'set' = $state('add');
+
+  // Derived helpers for preset UI
+  const allLoraTags = $derived.by(() => {
+    const set = new Set<string>();
+    (settings.loraPresets || []).forEach((p: any) => (p.tags || []).forEach((t: string) => set.add(t)));
+    return Array.from(set).sort();
+  });
+  const allLoraGroups = $derived.by(() => {
+    const set = new Set<string>();
+    (settings.loraPresets || []).forEach((p: any) => { if (p.presetGroup) set.add(p.presetGroup); });
+    return Array.from(set).sort();
+  });
+  const allWorkflowTags = $derived.by(() => {
+    const set = new Set<string>();
+    workflows.forEach((w: any) => (w.tags || []).forEach((t: string) => set.add(t)));
+    return Array.from(set).sort();
+  });
   
   // Toast notification system
   let toastMessage = $state('');
@@ -51,19 +81,56 @@
   function sanitizeLoraPresets(presets: any[]) {
     if (!Array.isArray(presets)) return [];
     return presets
-      .filter((p) => p && p.id && p.nodeId)
-      .map((p) => ({
+      .filter((p: any) => p && p.id)
+      .map((p: any) => ({
         id: p.id,
         label: p.label || p.id,
-        nodeId: p.nodeId,
+        nodeId: p.nodeId || '61:dyn1',
         default: Number(p.default ?? 1),
         min: p.min !== undefined ? Number(p.min) : 0,
         max: p.max !== undefined ? Number(p.max) : 1.5,
         step: p.step !== undefined ? Number(p.step) : 0.05,
-        chain: p.chain === 'low' ? 'low' : 'high', // default to 'high' if missing or invalid
-        isConfigurable: p.isConfigurable !== false, // default to true
-        enabled: p.isConfigurable === false ? true : (p.enabled !== false), // default true for configurable, always true for base
+        chain: p.chain === 'low' ? 'low' : 'high',
+        isConfigurable: typeof (p as any).isConfigurable === 'boolean' ? (p as any).isConfigurable : true,
+        enabled: typeof (p as any).enabled === 'boolean' ? (p as any).enabled : true,
+        defaultEnabled: typeof (p as any).defaultEnabled === 'boolean' ? (p as any).defaultEnabled : (typeof (p as any).enabled === 'boolean' ? (p as any).enabled : true),
+        tags: Array.isArray(p.tags) ? p.tags.map((t: any) => String(t).toLowerCase()) : [],
+        presetGroup: typeof p.presetGroup === 'string' ? p.presetGroup : 'Custom',
+        autoAddToWorkflows: typeof p.autoAddToWorkflows === 'boolean' ? p.autoAddToWorkflows : false,
       }));
+  }
+
+  async function bulkUpdateWorkflows() {
+    if (!bulkTargetWorkflowIds.length || !bulkSelectedLoraIds.length) {
+      showNotification('Select at least one workflow and one LoRA', 'error');
+      return;
+    }
+    savingWorkflow = true;
+    try {
+      const res = await fetch('/api/admin/workflows/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workflowIds: bulkTargetWorkflowIds,
+          loraIds: bulkSelectedLoraIds,
+          action: bulkAction
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.workflows) {
+          const map = new Map(data.workflows.map((w: any) => [w.id, w]));
+          workflows = workflows.map((w: any) => map.get(w.id) ? map.get(w.id) : w);
+        }
+        showNotification(`Bulk ${bulkAction} applied to ${bulkTargetWorkflowIds.length} workflows`, 'success');
+        showLoraBulkModal = false;
+      } else {
+        const e = await res.json();
+        showNotification(e.error || 'Bulk failed', 'error');
+      }
+    } catch (err) {
+      showNotification(String(err), 'error');
+    } finally { savingWorkflow = false; }
   }
   
   // Role editor modal state
@@ -364,6 +431,9 @@
       chain: 'high' as const,
       isConfigurable: true,
       enabled: true,
+      tags: [],
+      presetGroup: 'Custom',
+      autoAddToWorkflows: false,
     };
     settings = {
       ...settings,
@@ -377,17 +447,34 @@
     settings = { ...settings, loraPresets: list };
   }
 
-  function updateLoraPreset(index: number, field: string, value: string | number | boolean) {
+  function updateLoraPreset(index: number, field: string, value: string | number | boolean | string[]) {
     const list = [...(settings.loraPresets || [])];
     if (!list[index]) return;
     const preset = { ...list[index] } as any;
     if (['default', 'min', 'max', 'step'].includes(field)) {
       preset[field] = Number(value);
-    } else if (field === 'enabled') {
+    } else if (['enabled', 'autoAddToWorkflows', 'isConfigurable'].includes(field)) {
       preset[field] = Boolean(value);
     } else {
       preset[field] = value;
     }
+    list[index] = preset;
+    settings = { ...settings, loraPresets: list };
+  }
+
+  function addTagToLoraPreset(index: number, tag: string) {
+    if (!tag.trim()) return;
+    const list = [...(settings.loraPresets || [])];
+    const preset = { ...list[index] } as any;
+    const tags = new Set([...(preset.tags || []), tag.toLowerCase().trim()]);
+    preset.tags = Array.from(tags);
+    list[index] = preset;
+    settings = { ...settings, loraPresets: list };
+  }
+  function removeTagFromLoraPreset(index: number, tag: string) {
+    const list = [...(settings.loraPresets || [])];
+    const preset = { ...list[index] } as any;
+    preset.tags = (preset.tags || []).filter((t: string) => t !== tag);
     list[index] = preset;
     settings = { ...settings, loraPresets: list };
   }
@@ -401,6 +488,9 @@
       workflowType = workflow.workflowType || 'i2v';
       workflowIsDefault = workflow.isDefault;
       workflowCompatibleLoras = workflow.compatibleLoraIds || [];
+      workflowTags = workflow.tags || [];
+      workflowAutoInclude = workflow.autoIncludeNewLoras ?? true;
+      workflowPresetGroup = workflow.presetGroup || '';
     } else {
       editingWorkflowId = null;
       workflowName = '';
@@ -408,8 +498,16 @@
       workflowTemplatePath = 'data/new_workflow.json.tmpl';
       workflowType = 'i2v';
       workflowIsDefault = false;
-      workflowCompatibleLoras = [];
+      workflowTags = [];
+      workflowAutoInclude = true;
+      workflowPresetGroup = '';
+      // New workflow starts empty — no forced base LoRAs (lightx2v only for wan22 base model, not distilled)
+      workflowCompatibleLoras = (settings.loraPresets || []).filter((p: any) => p.autoAddToWorkflows).map((p: any) => p.id);
     }
+    workflowTagInput = '';
+    workflowLoraFilter = 'all';
+    workflowSelectedTagFilter = 'all';
+    workflowSelectedGroupFilter = 'all';
     showWorkflowModal = true;
   }
   
@@ -422,6 +520,65 @@
     workflowType = 'i2v';
     workflowIsDefault = false;
     workflowCompatibleLoras = [];
+    workflowTags = [];
+    workflowAutoInclude = true;
+    workflowPresetGroup = '';
+    workflowTagInput = '';
+  }
+
+  function addWorkflowTag(tag: string) {
+    if (!tag.trim()) return;
+    const t = tag.toLowerCase().trim();
+    if (!workflowTags.includes(t)) workflowTags = [...workflowTags, t];
+    workflowTagInput = '';
+  }
+  function removeWorkflowTag(tag: string) {
+    workflowTags = workflowTags.filter(t => t !== tag);
+  }
+
+  function suggestAndApplyLoras() {
+    // Auto-suggest: PRIMARY by presetGroup (model family e.g. wan22 / dasiwa-v1 — fully configurable name), secondary by tags
+    const allPresets = settings.loraPresets || [];
+    const suggested = allPresets.filter((p: any) => {
+      if (p.autoAddToWorkflows) return true;
+      // Primary: same presetGroup (configurable free-form name)
+      if (workflowPresetGroup && p.presetGroup) {
+        if (p.presetGroup.toLowerCase() !== workflowPresetGroup.toLowerCase()) return false;
+        if (workflowTags.length && Array.isArray(p.tags) && p.tags.length) {
+          return p.tags.some((tg: string) => workflowTags.includes(tg.toLowerCase()));
+        }
+        return true;
+      }
+      if (workflowTags.length && Array.isArray(p.tags)) {
+        return p.tags.some((tg: string) => workflowTags.includes(tg.toLowerCase()));
+      }
+      return false;
+    }).map((p: any) => p.id);
+    workflowCompatibleLoras = [...new Set([...workflowCompatibleLoras, ...suggested])];
+    showNotification(suggested.length ? `Auto-selected ${suggested.length} LoRAs by group "${workflowPresetGroup || 'tags'}"` : 'No matching LoRAs for current group/tags', 'info');
+  }
+
+  function bulkSelectLorasByFilter() {
+    const allPresets = settings.loraPresets || [];
+    let filtered = allPresets as any[];
+    if (workflowSelectedTagFilter !== 'all') {
+      filtered = filtered.filter((p: any) => (p.tags || []).includes(workflowSelectedTagFilter));
+    }
+    if (workflowSelectedGroupFilter !== 'all') {
+      filtered = filtered.filter((p: any) => p.presetGroup === workflowSelectedGroupFilter);
+    }
+    const ids = filtered.map((p: any) => p.id);
+    if (ids.length) {
+      workflowCompatibleLoras = [...new Set([...workflowCompatibleLoras, ...ids])];
+    }
+  }
+
+  function clearAllLorasInModal() {
+    workflowCompatibleLoras = [];
+  }
+
+  function selectAllLorasInModal() {
+    workflowCompatibleLoras = (settings.loraPresets || []).map((p: any) => p.id);
   }
   
   function toggleLoraInModal(loraId: string) {
@@ -440,19 +597,24 @@
     
     savingWorkflow = true;
     try {
+      const payload = {
+        name: workflowName.trim(),
+        description: workflowDescription.trim() || undefined,
+        templatePath: workflowTemplatePath.trim(),
+        workflowType: workflowType,
+        isDefault: workflowIsDefault,
+        compatibleLoraIds: workflowCompatibleLoras,
+        tags: workflowTags,
+        autoIncludeNewLoras: workflowAutoInclude,
+        presetGroup: workflowPresetGroup || undefined,
+      };
+
       if (editingWorkflowId) {
         // Update existing workflow
         const response = await fetch(`/api/admin/workflows/${editingWorkflowId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: workflowName.trim(),
-            description: workflowDescription.trim() || undefined,
-            templatePath: workflowTemplatePath.trim(),
-            workflowType: workflowType,
-            isDefault: workflowIsDefault,
-            compatibleLoraIds: workflowCompatibleLoras,
-          }),
+          body: JSON.stringify(payload),
         });
         
         if (response.ok) {
@@ -471,12 +633,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             id: workflowName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-            name: workflowName.trim(),
-            description: workflowDescription.trim() || undefined,
-            templatePath: workflowTemplatePath.trim(),
-            workflowType: workflowType,
-            isDefault: workflowIsDefault,
-            compatibleLoraIds: workflowCompatibleLoras,
+            ...payload
           }),
         });
         
@@ -879,236 +1036,190 @@
     </div>
   </div>
 
-  <!-- Workflow Management -->
   <div class="card bg-base-200 shadow-xl mb-6">
     <div class="card-body">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="card-title text-2xl">Workflow Management</h2>
-        <button class="btn btn-primary btn-sm" onclick={() => openWorkflowModal()}>+ Add Workflow</button>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="card-title text-2xl">Workflows</h2>
+        <div class="flex gap-2">
+          <button class="btn btn-sm btn-outline" onclick={() => { bulkSelectedLoraIds = []; bulkTargetWorkflowIds = workflows.map((w:any)=>w.id); bulkAction='add'; showLoraBulkModal=true; }}>Bulk Assign</button>
+          <button class="btn btn-primary btn-sm" onclick={() => openWorkflowModal()}>+ Add</button>
+        </div>
       </div>
-      <p class="text-sm opacity-70 mb-4">Configure workflows and their compatible LoRAs. Users will only see compatible LoRAs when they select a workflow.</p>
 
       {#if workflows && workflows.length > 0}
-        <div class="space-y-6">
+        <div class="grid grid-cols-1 gap-4">
           {#each workflows as workflow}
-            <div class="card bg-base-100 shadow">
-              <div class="card-body">
-                <div class="flex items-start justify-between mb-4">
-                  <div>
-                    <h3 class="text-lg font-bold">{workflow.name}</h3>
-                    {#if workflow.description}
-                      <p class="text-sm opacity-70">{workflow.description}</p>
-                    {/if}
-                    <p class="text-xs opacity-60 mt-1">Template: {workflow.templatePath}</p>
-                    <div class="flex gap-2 mt-2">
+            <div class="card bg-base-100 shadow border border-base-300">
+              <div class="card-body p-4">
+                <div class="flex items-start justify-between gap-4">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <h3 class="text-lg font-bold">{workflow.name}</h3>
                       <span class="badge badge-sm" class:badge-info={workflow.workflowType === 'i2v'} class:badge-secondary={workflow.workflowType === 'fl2v'}>
-                        {workflow.workflowType?.toUpperCase() || 'I2V'}
+                        {workflow.workflowType?.toUpperCase()}
                       </span>
-                      {#if workflow.isDefault}
-                        <span class="badge badge-primary badge-sm">Default</span>
-                      {/if}
+                      {#if workflow.isDefault}<span class="badge badge-primary badge-sm">Default</span>{/if}
+                      {#if (workflow as any).autoIncludeNewLoras}<span class="badge badge-ghost badge-sm" title="Auto includes new matching LoRAs">auto+</span>{/if}
+                    </div>
+                    {#if workflow.description}<p class="text-sm opacity-70 mt-1">{workflow.description}</p>{/if}
+                    <p class="text-xs opacity-50 mt-1 font-mono truncate">{workflow.templatePath}</p>
+                    <div class="flex gap-1.5 flex-wrap mt-2">
+                      {#each (workflow as any).tags as t}<span class="badge badge-sm badge-outline">{t}</span>{/each}
+                      {#if !(workflow as any).tags?.length}<span class="text-xs opacity-40">no tags</span>{/if}
                     </div>
                   </div>
-                  <div class="flex gap-2">
+                  <div class="flex flex-col sm:flex-row gap-2 shrink-0">
                     {#if !workflow.isDefault}
-                      <button 
-                        class="btn btn-xs btn-outline"
-                        onclick={() => setDefaultWorkflow(workflow.id)}
-                      >
-                        Set as Default {workflow.workflowType?.toUpperCase() || 'I2V'}
-                      </button>
+                      <button class="btn btn-xs btn-outline" onclick={() => setDefaultWorkflow(workflow.id)}>Set Default {workflow.workflowType?.toUpperCase()}</button>
                     {/if}
-                    <button 
-                      class="btn btn-xs btn-outline"
-                      onclick={() => openWorkflowModal(workflow)}
-                    >
-                      Edit
-                    </button>
-                    <button 
-                      class="btn btn-xs btn-outline btn-error"
-                      onclick={() => deleteWorkflow(workflow.id, workflow.name)}
-                      disabled={workflow.isDefault}
-                    >
-                      Delete
-                    </button>
+                    <button class="btn btn-xs btn-outline" onclick={() => openWorkflowModal(workflow)}>Edit</button>
+                    <button class="btn btn-xs btn-outline btn-error" onclick={() => deleteWorkflow(workflow.id, workflow.name)} disabled={workflow.isDefault}>Delete</button>
                   </div>
                 </div>
-                
-                <div class="mt-2">
-                  <span class="text-sm opacity-70">Compatible LoRAs: </span>
-                  <span class="font-semibold">{workflow.compatibleLoraIds?.length || 0}</span>
+
+                <div class="mt-3">
+                  <div class="flex items-center gap-2 text-sm">
+                    <span class="opacity-70">LoRAs:</span>
+                    <span class="badge badge-sm badge-primary">{workflow.compatibleLoraIds?.length || 0} assigned</span>
+                    <button class="btn btn-xs btn-ghost" onclick={() => openWorkflowModal(workflow)}>manage</button>
+                  </div>
+                  {#if workflow.compatibleLoraIds?.length}
+                    <div class="flex flex-wrap gap-1 mt-2">
+                      {#each workflow.compatibleLoraIds.slice(0, 8) as lid}
+                        {@const p = (settings.loraPresets || []).find((x:any)=>x.id===lid)}
+                        <span class="badge badge-xs" class:badge-ghost={!p} title={lid}>{p?.label || lid.slice(0,18)}</span>
+                      {/each}
+                      {#if workflow.compatibleLoraIds.length > 8}<span class="text-xs opacity-60">+{workflow.compatibleLoraIds.length-8} more</span>{/if}
+                    </div>
+                  {/if}
                 </div>
               </div>
             </div>
           {/each}
         </div>
       {:else}
-        <p class="text-base-content/70">No workflows found. Run database migrations to create workflows.</p>
+        <p class="text-base-content/70">No workflows found.</p>
       {/if}
     </div>
   </div>
 
-  <!-- LoRA Presets -->
+  <!-- LoRA Presets - OPTIMIZED WITH GROUPS, TAGS, AUTO MECHANISM -->
   <div class="card bg-base-200 shadow-xl mb-6">
     <div class="card-body">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="card-title text-2xl">{$_('admin.settings.loraPresets')}</h2>
-        <button class="btn btn-sm btn-outline" onclick={addLoraPreset}>{$_('admin.settings.addPreset')}</button>
+      <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <h2 class="card-title text-2xl">LoRA Presets
+          <span class="badge badge-sm badge-info ml-2">{settings.loraPresets?.length || 0}</span>
+        </h2>
+        <div class="flex gap-2">
+          <button class="btn btn-sm btn-outline" onclick={addLoraPreset}>+ Add LoRA</button>
+        </div>
       </div>
-      <p class="text-sm opacity-70 mb-4">Manage available LoRAs and their default weights used in generation.</p>
+      <p class="text-xs opacity-50 mb-3">Group = model family (wan22 / dasiwa-...). Tags = style, optional.</p>
 
       {#if settings.loraPresets && settings.loraPresets.length > 0}
-        <div class="mb-4 text-sm text-base-content/70">
-          <strong>Note:</strong> Base LoRAs (Light X2V) are always required and cannot be removed. Dynamic LoRAs are chained automatically per group.
-        </div>
-        <div class="overflow-x-auto">
-          <table class="table table-zebra whitespace-normal">
-            <thead>
-              <tr>
-                <th style="min-width: 220px;">ID / Filename</th>
-                <th style="min-width: 200px;">Label</th>
-                <th style="min-width: 120px;">Chain</th>
-                <th style="width: 40px;">Default</th>
-                <th style="width: 40px;">Min</th>
-                <th style="width: 40px;">Max</th>
-                <th style="width: 40px;">Step</th>
-                <th style="width: 80px;">Configurable</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each settings.loraPresets as preset, i}
-                <tr class:opacity-60={!preset.isConfigurable}>
-                  <td style="max-width: 260px; word-break: break-all; white-space: normal;">
-                    {#if preset.isConfigurable}
-                      <input
-                        type="text"
-                        class="input input-bordered w-full"
-                        value={preset.id}
-                        oninput={(e) => updateLoraPreset(i, 'id', e.currentTarget.value)}
-                        placeholder="lora-file.safetensors"
-                        style="word-break: break-all; white-space: normal;"
-                      />
-                    {:else}
-                      <span class="font-mono text-sm break-all" style="word-break: break-all; white-space: normal;">{preset.id}</span>
-                      <span class="badge badge-sm badge-ghost ml-2">base</span>
-                    {/if}
-                  </td>
-                  <td>
-                    {#if preset.isConfigurable}
-                      <input
-                        type="text"
-                        class="input input-bordered w-full"
-                        value={preset.label}
-                        oninput={(e) => updateLoraPreset(i, 'label', e.currentTarget.value)}
-                        placeholder="Display name"
-                      />
-                    {:else}
-                      {preset.label}
-                    {/if}
-                  </td>
-                  <td>
-                    {#if preset.isConfigurable}
-                      <select
-                        class="select select-bordered select-sm w-full max-w-[140px]"
-                        value={preset.chain}
-                        onchange={(e) => updateLoraPreset(i, 'chain', e.currentTarget.value)}
-                      >
-                        <option value="high">High</option>
-                        <option value="low">Low</option>
-                      </select>
-                    {:else}
-                      <span class="text-sm capitalize">{preset.chain}</span>
-                    {/if}
-                  </td>
-                  <td>
-                    {#if preset.isConfigurable}
-                      <input
-                        type="number"
-                        class="input input-bordered w-16"
-                        value={preset.default}
-                        min="0"
-                        step="0.01"
-                        oninput={(e) => updateLoraPreset(i, 'default', Number(e.currentTarget.value))}
-                      />
-                    {:else}
-                      {preset.default}
-                    {/if}
-                  </td>
-                  <td>
-                    {#if preset.isConfigurable}
-                      <input
-                        type="number"
-                        class="input input-bordered w-12"
-                        value={preset.min ?? 0}
-                        step="0.01"
-                        oninput={(e) => updateLoraPreset(i, 'min', Number(e.currentTarget.value))}
-                      />
-                    {:else}
-                      {preset.min ?? 0}
-                    {/if}
-                  </td>
-                  <td>
-                    {#if preset.isConfigurable}
-                      <input
-                        type="number"
-                        class="input input-bordered w-12"
-                        value={preset.max ?? 1.5}
-                        step="0.01"
-                        oninput={(e) => updateLoraPreset(i, 'max', Number(e.currentTarget.value))}
-                      />
-                    {:else}
-                      {preset.max ?? 1.5}
-                    {/if}
-                  </td>
-                  <td>
-                    {#if preset.isConfigurable}
-                      <input
-                        type="number"
-                        class="input input-bordered w-12"
-                        value={preset.step ?? 0.05}
-                        step="0.01"
-                        min="0.001"
-                        oninput={(e) => updateLoraPreset(i, 'step', Number(e.currentTarget.value))}
-                      />
-                    {:else}
-                      {preset.step ?? 0.05}
-                    {/if}
-                  </td>
-                <td class="align-middle text-center">
-                  <label class="flex items-center gap-2 justify-center">
-                    <input type="checkbox" class="toggle toggle-primary toggle-xs" checked={preset.isConfigurable !== false} onchange={(e) => updateLoraPreset(i, 'isConfigurable', e.currentTarget.checked ? true : false)} />
-                  </label>
-                </td>
-                </tr>
-                {#if preset.isConfigurable}
-                  <tr class:opacity-60={!preset.isConfigurable}>
-                    <td colspan="6">
-                      <label class="flex items-center gap-2 mt-1">
-                        <input type="checkbox" class="toggle toggle-primary toggle-xs" checked={preset.enabled !== false} onchange={(e) => updateLoraPreset(i, 'enabled', e.currentTarget.checked ? true : false)} />
-                        <span class="text-xs select-none">Enabled by default</span>
-                      </label>
-                    </td>
-                  <td colspan="2">
-                    <button class="btn btn-xs btn-outline btn-error ml-2" onclick={() => removeLoraPreset(i)}>Remove</button>
-                  </td>
+        <!-- Grouped view -->
+        {#each Array.from(new Set((settings.loraPresets as any[]).map((p:any)=>p.presetGroup || 'Custom'))) as groupName}
+          {@const groupPresets = (settings.loraPresets as any[]).map((p, idx) => ({ p, idx })).filter(({p}: any)=> (p.presetGroup||'Custom')===groupName)}
+          <div class="mb-6">
+            <div class="flex items-center gap-2 mb-2">
+              <h3 class="font-semibold">{groupName}</h3>
+              <span class="badge badge-sm badge-ghost">{groupPresets.length}</span>
+              <button class="btn btn-xs btn-ghost" onclick={() => { bulkSelectedLoraIds = groupPresets.map(({p}:any)=>p.id); bulkTargetWorkflowIds = workflows.map((w:any)=>w.id); bulkAction='add'; showLoraBulkModal=true; }}>Add this group to workflows…</button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="table table-zebra table-sm">
+                <thead>
+                  <tr>
+                    <th>ID / Label</th>
+                    <th>Chain / Group</th>
+                    <th>Tags</th>
+                    <th>Default</th>
+                    <th>Auto-add</th>
+                    <th>Default ON</th>
+                    <th></th>
                   </tr>
-                {/if}
-              {/each}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {#each groupPresets as { p: preset, idx: i } (preset.id + i)}
+                    <tr>
+                      <td style="min-width: 240px;">
+                        <div class="flex items-center gap-1">
+                          <div class="flex-1">
+                            <input type="text" class="input input-bordered input-xs w-full mb-1" value={preset.id} oninput={(e) => updateLoraPreset(i, 'id', e.currentTarget.value)} placeholder="file.safetensors" />
+                            <input type="text" class="input input-bordered input-xs w-full" value={preset.label} oninput={(e) => updateLoraPreset(i, 'label', e.currentTarget.value)} placeholder="Display name" />
+                          </div>
+                          {#if (preset as any).isConfigurable === false}
+                            <span class="badge badge-xs badge-warning rotate-0 shrink-0" title="Required for base model — prevents broken output if disabled (e.g. lightx2v)">req</span>
+                          {/if}
+                        </div>
+                        {#if (preset as any).isConfigurable === false}<div class="text-[9px] opacity-60 mt-1">Required — can't be disabled. <button class="link text-[9px]" onclick={() => updateLoraPreset(i, 'isConfigurable', true)}>Make optional</button></div>{/if}
+                      </td>
+                      <td>
+                        <select class="select select-bordered select-xs" value={preset.chain} onchange={(e) => updateLoraPreset(i, 'chain', e.currentTarget.value)}>
+                          <option value="high">High</option>
+                          <option value="low">Low</option>
+                        </select>
+                        <div class="mt-1">
+                          <input list="preset-groups-list" class="input input-bordered input-xs w-full" value={preset.presetGroup || 'Custom'} oninput={(e) => updateLoraPreset(i, 'presetGroup', e.currentTarget.value)} placeholder="wan22 / dasiwa-old / any name" />
+                          <datalist id="preset-groups-list">
+                            {#each allLoraGroups as g}<option value={g}></option>{/each}
+                            {#each workflows.map((w:any)=>w.presetGroup).filter(Boolean) as g}<option value={g}></option>{/each}
+                          </datalist>
+                        </div>
+                      </td>
+                      <td style="min-width: 160px;">
+                        <div class="flex flex-wrap gap-1 mb-1">
+                          {#each (preset.tags || []) as t}
+                            <span class="badge badge-xs badge-outline gap-1">{t}<button class="ml-1" onclick={() => removeTagFromLoraPreset(i, t)}>✕</button></span>
+                          {/each}
+                        </div>
+                        <div class="join join-horizontal mt-1">
+                          <input type="text" placeholder="tag" class="input input-bordered input-xs join-item w-20" onkeydown={(e) => { if(e.key==='Enter'){ const val=(e.target as HTMLInputElement).value; if(val){ addTagToLoraPreset(i, val); (e.target as HTMLInputElement).value=''; } } }} />
+                        </div>
+                      </td>
+                      <td>
+                        <input type="number" class="input input-bordered input-xs w-16" value={preset.default} min="0" step="0.01" oninput={(e) => updateLoraPreset(i, 'default', Number(e.currentTarget.value))} />
+                        <div class="flex gap-1 mt-1">
+                          <input title="min" type="number" class="input input-bordered input-xs w-12" value={preset.min ?? 0} step="0.01" oninput={(e) => updateLoraPreset(i, 'min', Number(e.currentTarget.value))} />
+                          <input title="max" type="number" class="input input-bordered input-xs w-12" value={preset.max ?? 1.5} step="0.01" oninput={(e) => updateLoraPreset(i, 'max', Number(e.currentTarget.value))} />
+                        </div>
+                      </td>
+                      <td class="text-center">
+                        <input type="checkbox" class="toggle toggle-primary toggle-xs" checked={!!preset.autoAddToWorkflows} onchange={(e) => updateLoraPreset(i, 'autoAddToWorkflows', e.currentTarget.checked)} />
+                      </td>
+                      <td class="text-center">
+                        {#if (preset as any).isConfigurable === false}
+                          <span class="badge badge-xs badge-warning" title="Required — always on">ON</span>
+                        {:else}
+                          <input type="checkbox" class="toggle toggle-primary toggle-xs" checked={((preset as any).defaultEnabled ?? (preset as any).enabled) !== false} onchange={(e) => { updateLoraPreset(i, 'defaultEnabled', e.currentTarget.checked); updateLoraPreset(i, 'enabled', e.currentTarget.checked); }} />
+                        {/if}
+                      </td>
+                      <td>
+                        <div class="flex gap-1">
+                          {#if (preset as any).isConfigurable !== false}
+                            <button class="btn btn-[10px] btn-ghost h-6 min-h-0 px-1 text-[10px] opacity-40 hover:opacity-100" title="Make required (e.g. lightx2v on base model)" onclick={() => updateLoraPreset(i, 'isConfigurable', false)}>req</button>
+                          {/if}
+                          <button class="btn btn-xs btn-error btn-outline" onclick={() => removeLoraPreset(i)}>✕</button>
+                        </div>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {/each}
       {:else}
-        <p class="text-base-content/70">No LoRAs configured yet. Click "Add LoRA" to create one.</p>
+        <p class="text-base-content/70">No LoRAs yet.</p>
       {/if}
-      
-      <div class="card-actions justify-end mt-4">
+
+      <div class="card-actions justify-end mt-4 gap-2">
         <button class="btn btn-primary" onclick={saveSettings} disabled={saving}>
-          {#if saving}
-            <span class="loading loading-spinner loading-sm"></span>
-          {/if}
-          Save LoRA Presets
+          {#if saving}<span class="loading loading-spinner loading-sm"></span>{/if}
+          Save LoRA Presets & Trigger Auto-Compat
         </button>
       </div>
+      <p class="text-xs opacity-60 mt-2">Saving detects newly added LoRAs and auto-assigns them to workflows where <code>autoIncludeNewLoras=true</code> or tags overlap or LoRA has <code>autoAddToWorkflows</code>.</p>
     </div>
   </div>
   
@@ -1675,114 +1786,165 @@
 <!-- Workflow Editor Modal -->
 {#if showWorkflowModal}
   <div class="modal modal-open">
-    <div class="modal-box max-w-4xl">
-      <h3 class="font-bold text-lg mb-4">
-        {editingWorkflowId ? 'Edit Workflow' : 'Add New Workflow'}
-      </h3>
-      
-      <div class="form-control mb-4">
-        <label class="label" for="workflow-name">
-          <span class="label-text">Workflow Name</span>
+    <div class="modal-box max-w-5xl">
+      <h3 class="font-bold text-lg mb-4">{editingWorkflowId ? 'Edit Workflow' : 'Add New Workflow'}</h3>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <label class="form-control">
+          <span class="label-text text-sm">Name</span>
+          <input type="text" bind:value={workflowName} placeholder="WAN 2.2, Dasiwa ..." class="input input-bordered input-sm w-full" />
         </label>
-        <input 
-          id="workflow-name"
-          type="text" 
-          bind:value={workflowName}
-          placeholder="e.g., WAN 2.2, Dasiwa 1.0"
-          class="input input-bordered w-full"
-        />
-      </div>
-      
-      <div class="form-control mb-4">
-        <label class="label" for="workflow-description">
-          <span class="label-text">Description</span>
+        <label class="form-control">
+          <span class="label-text text-sm">Template Path</span>
+          <input type="text" bind:value={workflowTemplatePath} placeholder="data/..." class="input input-bordered input-sm w-full font-mono" />
         </label>
-        <textarea 
-          id="workflow-description"
-          bind:value={workflowDescription}
-          placeholder="Brief description of this workflow"
-          class="textarea textarea-bordered w-full"
-          rows="2"
-        ></textarea>
-      </div>
-      
-      <div class="form-control mb-4">
-        <label class="label" for="workflow-template">
-          <span class="label-text">Template Path</span>
-          <span class="label-text-alt">Relative to project root</span>
-        </label>
-        <input 
-          id="workflow-template"
-          type="text" 
-          bind:value={workflowTemplatePath}
-          placeholder="data/workflow_template.json.tmpl"
-          class="input input-bordered w-full font-mono text-sm"
-        />
       </div>
 
-      <div class="form-control mb-4">
-        <label class="label" for="workflow-type">
-          <span class="label-text">Workflow Type</span>
+      <label class="form-control mt-3">
+        <span class="label-text text-sm">Description</span>
+        <input type="text" bind:value={workflowDescription} placeholder="Brief description (shown in review page)" class="input input-bordered input-sm w-full" />
+      </label>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+        <label class="form-control">
+          <span class="label-text text-sm">Type</span>
+          <select bind:value={workflowType} class="select select-bordered select-sm w-full">
+            <option value="i2v">I2V</option>
+            <option value="fl2v">FL2V</option>
+          </select>
         </label>
-        <select 
-          id="workflow-type"
-          bind:value={workflowType}
-          class="select select-bordered w-full"
-        >
-          <option value="i2v">I2V (Single Image)</option>
-          <option value="fl2v">FL2V (Two Images)</option>
-        </select>
-        <label class="label">
-          <span class="label-text-alt">Choose whether this workflow processes single images or image pairs</span>
+        <label class="form-control">
+          <span class="label-text text-sm">Group</span>
+          <input list="workflow-groups-list" type="text" bind:value={workflowPresetGroup} placeholder="wan22" class="input input-bordered input-sm w-full" />
+          <datalist id="workflow-groups-list">
+            {#each Array.from(new Set([...allLoraGroups, ...workflows.map((w:any)=>w.presetGroup).filter(Boolean)])) as g}<option value={g}></option>{/each}
+          </datalist>
+        </label>
+        <label class="form-control cursor-pointer flex-row items-center gap-2 mt-5">
+          <input type="checkbox" bind:checked={workflowIsDefault} class="checkbox checkbox-sm" />
+          <span class="label-text text-sm">Default {workflowType.toUpperCase()}</span>
         </label>
       </div>
-      
-      <div class="form-control mb-4">
-        <label class="label cursor-pointer justify-start gap-3" for="workflow-default">
-          <input 
-            id="workflow-default"
-            type="checkbox" 
-            bind:checked={workflowIsDefault}
-            class="checkbox checkbox-primary"
-          />
-          <div>
-            <span class="label-text font-semibold">Set as Default Workflow</span>
-            <p class="text-xs opacity-70">New videos will use this workflow if not specified</p>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-sm">Tags</span>
+            <span class="text-xs opacity-40">optional</span>
           </div>
-        </label>
-      </div>
-      
-      <div class="divider">Compatible LoRAs</div>
-      
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-96 overflow-y-auto p-2 border border-base-300 rounded-lg">
-        {#each (settings.loraPresets || []) as lora}
-          <label class="flex items-center gap-2 p-2 rounded hover:bg-base-200 cursor-pointer">
-            <input
-              type="checkbox"
-              class="checkbox checkbox-primary checkbox-sm"
-              checked={workflowCompatibleLoras.includes(lora.id)}
-              onchange={() => toggleLoraInModal(lora.id)}
-            />
-            <div class="flex-1 min-w-0">
-              <span class="text-sm truncate block">{lora.label}</span>
-              <span class="badge badge-xs badge-ghost">{lora.chain}</span>
-            </div>
+          <div class="flex flex-wrap gap-1 mb-2 min-h-5">
+            {#each workflowTags as t}
+              <span class="badge badge-sm badge-primary gap-1">{t} <button onclick={() => removeWorkflowTag(t)}>✕</button></span>
+            {/each}
+          </div>
+          <div class="join w-full">
+            <input type="text" class="input input-bordered input-sm join-item flex-1" placeholder="Add tag" bind:value={workflowTagInput} onkeydown={(e) => { if(e.key==='Enter'){ addWorkflowTag(workflowTagInput); } }} />
+            <button class="btn btn-sm join-item" onclick={() => addWorkflowTag(workflowTagInput)}>Add</button>
+          </div>
+        </div>
+        <div class="flex flex-col gap-2 justify-end">
+          <label class="cursor-pointer flex items-center gap-2">
+            <input type="checkbox" bind:checked={workflowAutoInclude} class="checkbox checkbox-sm" />
+            <span class="text-sm">Auto-include new matching LoRAs</span>
           </label>
+          <button class="btn btn-sm btn-outline w-fit" onclick={suggestAndApplyLoras}>✨ Suggest matching LoRAs</button>
+        </div>
+      </div>
+
+      <div class="divider my-3 text-xs">LoRAs — {workflowCompatibleLoras.length} selected</div>
+
+      <div class="flex flex-wrap gap-2 mb-2 items-center">
+        <select class="select select-bordered select-xs" bind:value={workflowSelectedGroupFilter}>
+          <option value="all">All groups</option>
+          {#each allLoraGroups as g}<option value={g}>{g}</option>{/each}
+        </select>
+        <select class="select select-bordered select-xs" bind:value={workflowSelectedTagFilter}>
+          <option value="all">All tags</option>
+          {#each allLoraTags as t}<option value={t}>{t}</option>{/each}
+        </select>
+        <button class="btn btn-xs" onclick={bulkSelectLorasByFilter}>Add filtered</button>
+        <span class="opacity-20">|</span>
+        <button class="btn btn-xs btn-ghost" onclick={selectAllLorasInModal}>All</button>
+        <button class="btn btn-xs btn-ghost" onclick={clearAllLorasInModal}>None</button>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[320px] overflow-y-auto p-2 border border-base-200 rounded-lg">
+        {#each (settings.loraPresets || []) as lora (lora.id)}
+          {@const hiddenByTag = workflowSelectedTagFilter !== 'all' && !(lora.tags||[]).includes(workflowSelectedTagFilter)}
+          {@const hiddenByGroup = workflowSelectedGroupFilter !== 'all' && lora.presetGroup !== workflowSelectedGroupFilter}
+          {#if !hiddenByTag && !hiddenByGroup}
+            <label class="flex items-center gap-2 p-2 rounded hover:bg-base-200 cursor-pointer border border-transparent" class:!border-primary={workflowCompatibleLoras.includes(lora.id)} class:bg-base-200={workflowCompatibleLoras.includes(lora.id)}>
+              <input type="checkbox" class="checkbox checkbox-primary checkbox-xs" checked={workflowCompatibleLoras.includes(lora.id)} onchange={() => toggleLoraInModal(lora.id)} />
+              <div class="flex-1 min-w-0">
+                <span class="text-sm truncate block" title={lora.id}>{lora.label}</span>
+                <span class="text-[10px] opacity-50">{lora.presetGroup || '—'} · {lora.chain}</span>
+              </div>
+            </label>
+          {/if}
         {/each}
       </div>
-      
-      <div class="text-xs opacity-60 mt-2">
-        Selected: {workflowCompatibleLoras.length} LoRAs
-      </div>
-      
+
       <div class="modal-action">
-        <button class="btn btn-ghost" onclick={closeWorkflowModal} disabled={savingWorkflow}>Cancel</button>
-        <button class="btn btn-primary" onclick={saveWorkflow} disabled={savingWorkflow}>
+        <button class="btn btn-ghost btn-sm" onclick={closeWorkflowModal} disabled={savingWorkflow}>Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick={saveWorkflow} disabled={savingWorkflow}>
           {savingWorkflow ? 'Saving...' : (editingWorkflowId ? 'Update' : 'Create')}
         </button>
       </div>
     </div>
     <button class="modal-backdrop" type="button" onclick={closeWorkflowModal} aria-label="Close modal"></button>
+  </div>
+{/if}
+
+<!-- Bulk LoRA Assignment Modal -->
+{#if showLoraBulkModal}
+  <div class="modal modal-open">
+    <div class="modal-box max-w-3xl">
+      <h3 class="font-bold text-lg mb-4">Bulk Assign LoRAs to Workflows</h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <h4 class="font-semibold text-sm mb-2">Select LoRAs ({bulkSelectedLoraIds.length})</h4>
+          <div class="border border-base-300 rounded-lg max-h-80 overflow-y-auto p-2 space-y-1">
+            {#each (settings.loraPresets || []) as p}
+              <label class="flex items-center gap-2 p-1 hover:bg-base-200 rounded cursor-pointer">
+                <input type="checkbox" class="checkbox checkbox-xs" checked={bulkSelectedLoraIds.includes(p.id)} onchange={(e)=>{ bulkSelectedLoraIds = e.currentTarget.checked ? [...bulkSelectedLoraIds, p.id] : bulkSelectedLoraIds.filter(x=>x!==p.id); }} />
+                <span class="text-xs truncate">{p.label}</span>
+                <span class="badge badge-[10px] badge-ghost ml-auto">{p.presetGroup}</span>
+              </label>
+            {/each}
+          </div>
+          <div class="flex gap-1 mt-2">
+            {#each allLoraGroups.slice(0,4) as g}
+              <button class="btn btn-xs btn-ghost" onclick={() => { bulkSelectedLoraIds = (settings.loraPresets||[]).filter((x:any)=>x.presetGroup===g).map((x:any)=>x.id); }}>Select {g}</button>
+            {/each}
+          </div>
+        </div>
+        <div>
+          <h4 class="font-semibold text-sm mb-2">Target Workflows ({bulkTargetWorkflowIds.length})</h4>
+          <div class="border border-base-300 rounded-lg max-h-80 overflow-y-auto p-2 space-y-1">
+            {#each workflows as w}
+              <label class="flex items-center gap-2 p-1 hover:bg-base-200 rounded cursor-pointer">
+                <input type="checkbox" class="checkbox checkbox-xs" checked={bulkTargetWorkflowIds.includes(w.id)} onchange={(e)=>{ bulkTargetWorkflowIds = e.currentTarget.checked ? [...bulkTargetWorkflowIds, w.id] : bulkTargetWorkflowIds.filter(x=>x!==w.id); }} />
+                <span class="text-xs truncate">{w.name}</span>
+                <span class="badge badge-[10px] badge-ghost">{w.workflowType}</span>
+              </label>
+            {/each}
+          </div>
+          <div class="form-control mt-3">
+            <label class="label"><span class="label-text text-xs">Action</span></label>
+            <select class="select select-bordered select-sm" bind:value={bulkAction}>
+              <option value="add">Add to workflows</option>
+              <option value="remove">Remove from workflows</option>
+              <option value="set">Set exactly (replace)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-action">
+        <button class="btn btn-ghost" onclick={() => showLoraBulkModal=false}>Cancel</button>
+        <button class="btn btn-primary" onclick={bulkUpdateWorkflows} disabled={savingWorkflow}>Apply to {bulkTargetWorkflowIds.length} workflows</button>
+      </div>
+    </div>
+    <button class="modal-backdrop" type="button" onclick={() => showLoraBulkModal=false} aria-label="Close"></button>
   </div>
 {/if}
 
