@@ -20,22 +20,27 @@ export const load: PageServerLoad = async ({ params, locals, url }) => {
   const likesCount = await getLikeCount(video.id);
   const isLiked = locals.user ? await isVideoLikedByUser(video.id, locals.user.id) : false;
 
-  // Determine sort order from query or default
+  // Preserve sort + filter from list page: ?sort=likes&page=2&filter=liked
   const sortBy = (url?.searchParams?.get('sort') as 'date' | 'likes') || 'date';
+  const filter = url?.searchParams?.get('filter') || 'all';
+  const likedBy = locals.user && filter === 'liked' ? locals.user.id : undefined;
 
   // Filter out NSFW content for non-logged-in users
   const isNsfw = locals.user ? undefined : false;
 
-  // Get 4 videos that come after this one in the sort order (for "related" sidebar)
-  const relatedResult = await getPublishedVideos({
-    pageSize: 4,
-    status: 'completed',
-    sortBy,
-    isNsfw,
-    afterValue: params.id,
-    excludeId: params.id,
-  });
-  const relatedVideos = relatedResult.videos;
+  // Related / next-in-feed — now works for both date and likes thanks to likesCountCache + trigger
+  const relatedVideos = (
+    await getPublishedVideos({
+      pageSize: 4,
+      status: 'completed',
+      sortBy,
+      isNsfw,
+      likedBy,
+      currentUserId: locals.user?.id,
+      afterValue: params.id,
+      excludeId: params.id,
+    })
+  ).videos;
 
   // Fetch author basic info
   const author = video.user_id ? await getUserById(video.user_id) : undefined;

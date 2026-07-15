@@ -197,18 +197,12 @@ export class PostgresDatabase implements IDatabase {
     if (!includeDeleted) {
       where.status = { not: 'deleted' };
     }
-
-    // Apply status filter if provided
     if (options?.status) {
       where.status = options.status;
     }
-
-    // Apply isPublished filter if provided
     if (options?.isPublished !== undefined) {
       where.isPublished = options.isPublished;
     }
-
-    // Apply modelType filter (multi-select workflow_id)
     if (options?.modelTypeIds && options.modelTypeIds.length > 0) {
       const hasUnassigned = options.modelTypeIds.includes('unassigned');
       const ids = options.modelTypeIds.filter((id) => id !== 'unassigned');
@@ -219,30 +213,17 @@ export class PostgresDatabase implements IDatabase {
       else if (clauses.length > 1) where.OR = clauses;
     }
 
-    // Determine sort order using the generated completionTime column
-    const orderBy = sortBy === 'completion'
-      ? { completionTime: sortDirection }
-      : { createdAt: sortDirection };
+    const orderBy = sortBy === 'completion' ? { completionTime: sortDirection } : { createdAt: sortDirection };
 
     const [videos, total] = await Promise.all([
-      this.prisma.video.findMany({
-        where,
-        include: {
-          _count: {
-            select: { likes: true }
-          }
-        },
-        orderBy,
-        skip,
-        take: pageSize,
-      }),
+      this.prisma.video.findMany({ where, orderBy, skip, take: pageSize }),
       this.prisma.video.count({ where })
     ]);
 
     return {
       videos: videos.map((video: any) => ({
         ...this.mapToVideoEntry(video),
-        likesCount: video._count?.likes ?? 0
+        likesCount: video.likesCountCache ?? 0
       })),
       total,
       page,
@@ -267,113 +248,102 @@ export class PostgresDatabase implements IDatabase {
   async getPublishedVideos(options?: import('./IDatabase').GetPublishedVideosOptions): Promise<import('./IDatabase').PaginatedVideos> {
     const { page = 1, pageSize = 12, likedBy, currentUserId, excludeId, status, isNsfw, sortBy = 'date', afterValue, startAtId } = options || {};
     const skip = (page - 1) * pageSize;
-    
-    const where: any = { isPublished: true, status: { not: 'deleted' } };
-    const useCursor = Boolean(afterValue || startAtId);
-
-    // Cursor-based pagination: skip up to (exclusive) or include (startAtId) the cursor video
+    const baseWhere: any = { isPublished: true, status: { not: 'deleted' } };
+    let where: any = { ...baseWhere };
     const cursorId = afterValue || startAtId;
+    const useCursor = Boolean(cursorId);
+
     if (cursorId) {
       const cursorVideo = await this.prisma.video.findUnique({
         where: { id: cursorId },
-        select: { processingStartedAt: true, createdAt: true, _count: { select: { likes: true } } },
+        select: { processingStartedAt: true, createdAt: true, likesCountCache: true },
       });
       if (cursorVideo) {
         if (sortBy === 'likes') {
-          const cursorLikes = cursorVideo._count.likes;
-          // startAtId includes the cursor; afterValue excludes it
           const op = startAtId ? 'lte' : 'lt';
           where.AND = [
-            startAtId
-              ? { OR: [
-                  { likes: { _count: { lt: cursorLikes } } },
-                  { likes: { _count: cursorLikes }, processingStartedAt: { lte: cursorVideo.processingStartedAt } },
-                ] }
-              : { OR: [
-                  { likes: { _count: { lt: cursorLikes } } },
-                  { likes: { _count: cursorLikes }, processingStartedAt: { lt: cursorVideo.processingStartedAt } },
-                ] },
+            {
+              OR: [
+                { likesCountCache: { lt: cursorVideo.likesCountCache } },
+                {
+                  likesCountCache: cursorVideo.likesCountCache,
+                  processingStartedAt: { lt: cursorVideo.processingStartedAt },
+                },
+                {
+                  likesCountCache: cursorVideo.likesCountCache,
+                  processingStartedAt: cursorVideo.processingStartedAt,
+                  createdAt: { [op]: cursorVideo.createdAt },
+                },
+              ],
+            },
           ];
         } else {
+          const op = startAtId ? 'lte' : 'lt';
           where.AND = [
-            startAtId
-              ? { OR: [
-                  { processingStartedAt: { lt: cursorVideo.processingStartedAt } },
-                  { processingStartedAt: cursorVideo.processingStartedAt, createdAt: { lte: cursorVideo.createdAt } },
-                ] }
-              : { OR: [
-                  { processingStartedAt: { lt: cursorVideo.processingStartedAt } },
-                  { processingStartedAt: cursorVideo.processingStartedAt, createdAt: { lt: cursorVideo.createdAt } },
-                ] },
+            {
+              OR: [
+                { processingStartedAt: { lt: cursorVideo.processingStartedAt } },
+                {
+                  processingStartedAt: cursorVideo.processingStartedAt,
+                  createdAt: { [op]: cursorVideo.createdAt },
+                },
+              ],
+            },
           ];
         }
-        if (afterValue && !where.id) {
-          where.id = { not: afterValue };
-        }
+      }
+      if (afterValue) {
+        where.id = where.id ? { ...where.id, not: afterValue } : { not: afterValue };
       }
     }
-    
-    // Filter by liked videos if likedBy is provided (for "My Liked" filter)
+
     if (likedBy) {
-      where.likes = {
-        some: {
-          userId: likedBy
-        }
-      };
+      where.likes = { some: { userId: likedBy } };
     }
-    
-    // Exclude specific video if excludeId is provided
-    if (excludeId && !where.id) {
-      where.id = { not: excludeId };
-    } else if (excludeId) {
-      where.id = { ...where.id, not: excludeId };
+    if (excludeId) {
+      where.id = where.id ? { ...where.id, not: excludeId } : { not: excludeId };
     }
-    
-    // Filter by status if provided
     if (status) {
       where.status = status;
     }
-    
-    // Filter by NSFW if provided
     if (isNsfw !== undefined) {
       where.isNsfw = isNsfw;
     }
-    
-    // Determine sort order
-    const orderBy = sortBy === 'likes' 
-      ? [{ likes: { _count: 'desc' as const } }, { processingStartedAt: 'desc' as const }]
-      : [{ processingStartedAt: 'desc' as const }, { createdAt: 'desc' as const }];
-    
+
+    const orderBy =
+      sortBy === 'likes'
+        ? [{ likesCountCache: 'desc' as const }, { processingStartedAt: 'desc' as const }, { createdAt: 'desc' as const }]
+        : [{ processingStartedAt: 'desc' as const }, { createdAt: 'desc' as const }];
+
+    const totalWhere: any = { ...baseWhere };
+    if (likedBy) totalWhere.likes = { some: { userId: likedBy } };
+    if (excludeId) totalWhere.id = { not: excludeId };
+    if (status) totalWhere.status = status;
+    if (isNsfw !== undefined) totalWhere.isNsfw = isNsfw;
+
     const [videos, total] = await Promise.all([
       this.prisma.video.findMany({
         where,
         include: {
-          // Only include likes from the current user to check isLiked status
-          likes: currentUserId ? {
-            where: { userId: currentUserId },
-            select: { userId: true }
-          } : false,
-          _count: {
-            select: { likes: true }
-          }
+          likes: currentUserId ? { where: { userId: currentUserId }, select: { userId: true } } : false,
         },
         orderBy,
         skip: useCursor ? 0 : skip,
         take: pageSize,
       }),
-      this.prisma.video.count({ where })
+      this.prisma.video.count({ where: totalWhere }),
     ]);
 
     return {
-      videos: videos.map((v) => ({
+      videos: videos.map((v: any) => ({
         ...this.mapToVideoEntry(v),
-        likesCount: v._count.likes,
-        isLiked: currentUserId ? v.likes.length > 0 : false
+        likesCount: v.likesCountCache ?? 0,
+        isLiked: currentUserId ? v.likes.length > 0 : false,
       })),
       total,
       page,
       pageSize,
-      totalPages: Math.ceil(total / pageSize)
+      totalPages: Math.ceil(total / pageSize),
     };
   }
 
@@ -447,61 +417,37 @@ export class PostgresDatabase implements IDatabase {
   }
 
   async toggleLike(videoId: string, userId: string): Promise<VideoEntry | null> {
-    // Check if like exists
+    // DB trigger maintains likesCountCache — no app-level increment to avoid double count
     const existingLike = await this.prisma.videoLike.findUnique({
-      where: {
-        videoId_userId: {
-          videoId,
-          userId,
-        },
-      },
+      where: { videoId_userId: { videoId, userId } },
     });
 
     let isLiked: boolean;
-    
     if (existingLike) {
-      // Unlike - delete the like
-      await this.prisma.videoLike.delete({
-        where: {
-          id: existingLike.id,
-        },
-      });
+      await this.prisma.videoLike.delete({ where: { id: existingLike.id } });
       isLiked = false;
     } else {
-      // Like - create the like
-      await this.prisma.videoLike.create({
-        data: {
-          videoId,
-          userId,
-        },
-      });
+      await this.prisma.videoLike.create({ data: { videoId, userId } });
       isLiked = true;
     }
 
-    // Get updated video with like count in a single query
-    const video = await this.prisma.video.findUnique({
-      where: { id: videoId },
-      include: {
-        _count: {
-          select: { likes: true }
-        }
-      }
-    });
-
+    // Trigger has already updated likes_count_cache; fetch fresh video
+    const video = await this.prisma.video.findUnique({ where: { id: videoId } });
     if (!video) return null;
-
-    // Return video entry with like information
     return {
       ...this.mapToVideoEntry(video),
-      likesCount: video._count.likes,
-      isLiked
+      likesCount: video.likesCountCache,
+      isLiked,
     } as any;
   }
 
   async getLikeCount(videoId: string): Promise<number> {
-    return await this.prisma.videoLike.count({
-      where: { videoId },
+    // Use cached counter — trigger keeps it accurate
+    const video = await this.prisma.video.findUnique({
+      where: { id: videoId },
+      select: { likesCountCache: true },
     });
+    return video?.likesCountCache ?? 0;
   }
 
   async isVideoLikedByUser(videoId: string, userId: string): Promise<boolean> {

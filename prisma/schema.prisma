@@ -69,6 +69,7 @@ model Video {
   additionalOptions   Json?       @map("additional_options")
   loraWeights         Json?       @map("lora_weights")
   seed                Int?
+  likesCountCache     Int           @default(0) @map("likes_count_cache")
   likes               VideoLike[]
   user                User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   workflow            Workflow?   @relation(fields: [workflowId], references: [id], onDelete: SetDefault)
@@ -78,6 +79,7 @@ model Video {
   @@index([status])
   @@index([isPublished])
   @@index([isPublished, createdAt])
+  @@index([isPublished, likesCountCache(sort: Desc), processingStartedAt(sort: Desc)])
   @@index([isLocalJob, status, processingStartedAt])
   @@index([userId, completionTime(sort: Desc)])
   @@map("videos")
