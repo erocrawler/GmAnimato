@@ -55,38 +55,29 @@
   }[] = [];
 
   // Check if entry has non-default values (indicating it's a previously saved video)
+  // Only used for global settings (iteration/duration/resolution) — LoRA cache is always loaded
   const hasExistingSettings =
     entry.iteration_steps ||
     entry.video_duration ||
     entry.video_resolution ||
     entry.additional_options?.motion_scale !== undefined ||
-    entry.additional_options?.freelong_blend_strength !== undefined ||
-    entry.lora_weights;
+    entry.additional_options?.freelong_blend_strength !== undefined;
 
-  // Load from localStorage if no existing settings
+  // Load global settings from localStorage if no existing settings
   let savedSettings: any = null;
-  let savedWorkflowLoraSettings: Record<
-    string,
-    {
-      loraEnabled: Record<string, boolean>;
-      loraWeights: Record<string, number>;
-    }
-  > = {};
   if (!hasExistingSettings && typeof window !== "undefined") {
     try {
       const saved = localStorage.getItem("video_generation_settings");
       if (saved) {
         savedSettings = JSON.parse(saved);
       }
-      // Load per-workflow lora settings
-      const savedLora = localStorage.getItem("workflow_lora_settings");
-      if (savedLora) {
-        savedWorkflowLoraSettings = JSON.parse(savedLora);
-      }
     } catch (err) {
       console.error("Failed to load settings from localStorage:", err);
     }
   }
+
+  // LoRA init gate — prevents save reactive from firing before restore completes
+  let loraInitDone = false;
 
   type VideoDuration = 4 | 6 | 10;
   type VideoResolution = "480p" | "720p";
@@ -542,13 +533,21 @@
     Object.fromEntries(LORA_PRESETS.map((lora) => [lora.id, lora.default]));
 
   // When workflow changes, load the saved lora settings for that workflow
+  // Always read fresh from localStorage — never use a stale snapshot
   $: if (
     selectedWorkflowId &&
     filteredLoraPresets &&
-    Array.isArray(filteredLoraPresets)
+    Array.isArray(filteredLoraPresets) &&
+    filteredLoraPresets.length > 0
   ) {
-    // Check if we have saved settings for this workflow
-    const workflowSettings = savedWorkflowLoraSettings[selectedWorkflowId];
+    // Read fresh from localStorage every time
+    let freshAll: Record<string, any> = {};
+    try {
+      const raw = localStorage.getItem("workflow_lora_settings");
+      if (raw) freshAll = JSON.parse(raw);
+    } catch {}
+
+    const workflowSettings = freshAll[selectedWorkflowId];
 
     const newLoraEnabled: Record<string, boolean> = {};
     const newLoraWeights: Record<string, number> = {};
@@ -570,6 +569,7 @@
 
     loraEnabled = newLoraEnabled;
     loraWeights = newLoraWeights;
+    loraInitDone = true; // Restore complete — allow saving
   }
 
   $: isEditable =
@@ -870,7 +870,8 @@
   }
 
   // Save per-workflow lora settings to localStorage
-  $: if (typeof window !== "undefined" && selectedWorkflowId) {
+  // Gated by loraInitDone to prevent overwriting saved data with defaults before restore completes
+  $: if (typeof window !== "undefined" && selectedWorkflowId && loraInitDone) {
     try {
       // Load existing workflow lora settings
       const saved = localStorage.getItem("workflow_lora_settings");
