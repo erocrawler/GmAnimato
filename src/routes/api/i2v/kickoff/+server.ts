@@ -3,9 +3,10 @@ import { updateVideo, getVideoById, getActiveJobCountByUser, getAdminSettings, c
 import { env } from '$env/dynamic/private';
 import { buildWorkflow } from '$lib/i2vWorkflow';
 import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
+import { buildMiniMaxWorkflow } from '$lib/minimaxWorkflow';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { submitJob } from '$lib/local-queue';
-import { filterLoraWeights } from '$lib/workflows';
+import { filterLoraWeights, isMiniMaxWorkflow } from '$lib/workflows';
 import { toOriginalUrl } from '$lib/serverImageUrl';
 import { evaluatePromptProperties } from '$lib/imageRecognition';
 
@@ -135,10 +136,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       iterationSteps = parsedSteps as IterationSteps;
     }
 
-    // Extract video duration (4 or 6 seconds)
+    // Extract video duration (4, 6, 8, or 10 seconds)
     const videoDurationRaw = body?.videoDuration;
     const parsedDuration = Number(videoDurationRaw);
-    const allowedDurations = [4, 6, 10] as const;
+    const allowedDurations = [4, 6, 8, 10] as const;
     type VideoDuration = (typeof allowedDurations)[number];
     let videoDuration: VideoDuration | undefined;
 
@@ -243,6 +244,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }), { 
         status: 400, 
         headers: { 'Content-Type': 'application/json' } 
+      });
+    }
+
+    // 8s duration is a MiniMax H3-only option
+    if (videoDuration === 8 && !isMiniMaxWorkflow(workflow)) {
+      return new Response(JSON.stringify({
+        error: '8-second duration is only available with the MiniMax H3 model.'
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
       });
     }
 
@@ -367,14 +378,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
-    // Enforce role requirement for 10s duration in standard (non-relay) mode
-    if (videoDuration === 10 && !promptRelayMode) {
+    // Enforce role requirement for durations over 6s (8s/10s are advanced features;
+    // relay mode is covered by the relay frame-count validation below)
+    if (videoDuration !== undefined && videoDuration > 6 && !promptRelayMode) {
       const hasAdvancedFeatures = roles.some(roleName =>
         settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
       );
       if (!hasAdvancedFeatures) {
         return new Response(JSON.stringify({
-          error: '10-second duration is available to users with advanced features only.'
+          error: 'Durations over 6 seconds are available to users with advanced features only.'
         }), {
           status: 403,
           headers: { 'Content-Type': 'application/json' }
@@ -537,6 +549,34 @@ export const POST: RequestHandler = async ({ request, locals }) => {
           // Check if this is FL2V workflow (has last_image_url)
           const isFL2VJob = !!video.last_image_url;
           
+          // Resolve the workflow record once (explicit selection or type default)
+          const workflowRecord = (await getWorkflowById(video.workflow_id!))
+            || await getDefaultWorkflow(isFL2VJob ? 'fl2v' : 'i2v');
+
+          if (!workflowRecord) {
+            throw new Error(`No workflow configured for ${isFL2VJob ? 'fl2v' : 'i2v'} jobs`);
+          }
+
+          // MiniMax H3 uses a different node stack — dedicated builder
+          if (isMiniMaxWorkflow(workflowRecord)) {
+            return await buildMiniMaxWorkflow({
+              first_image_name: `${video.id}_first.png`,
+              first_image_url: toOriginalUrl(video.original_image_url),
+              ...(isFL2VJob
+                ? {
+                    last_image_name: `${video.id}_last.png`,
+                    last_image_url: toOriginalUrl(video.last_image_url!),
+                  }
+                : {}),
+              input_prompt: video.prompt ?? 'A beautiful video',
+              seed: video.seed ?? Math.floor(Math.random() * 1000000),
+              callback_url: callbackUrl,
+              videoDuration: video.video_duration as any,
+              videoResolution: video.video_resolution as any,
+              workflow: workflowRecord,
+            });
+          }
+
           if (isFL2VJob) {
             return await buildFL2VWorkflow({
               first_image_name: `${video.id}_first.png`,
@@ -554,7 +594,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
               useSageAttention: env.ENABLE_SAGE_ATTENTION_RUNPOD === 'true',
               loraWeights: video.lora_weights as any,
               loraPresets: settings.loraPresets,
-              workflow: (await getWorkflowById(video.workflow_id!) || await getDefaultWorkflow('fl2v'))!,
+              workflow: workflowRecord,
               promptRelayMode: (video.additional_options as any)?.prompt_relay_mode === true,
               promptRelaySegments: (video.additional_options as any)?.prompt_relay_segments as any,
             });
@@ -573,7 +613,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
               useSageAttention: env.ENABLE_SAGE_ATTENTION_RUNPOD === 'true',
               loraWeights: video.lora_weights as any,
               loraPresets: settings.loraPresets,
-              workflow: (await getWorkflowById(video.workflow_id!) || await getDefaultWorkflow('i2v'))!,
+              workflow: workflowRecord,
               promptRelayMode: (video.additional_options as any)?.prompt_relay_mode === true,
               promptRelaySegments: (video.additional_options as any)?.prompt_relay_segments as any,
             });

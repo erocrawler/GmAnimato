@@ -146,7 +146,9 @@
       "noHistory": "暂无观看记录",
       "newVideos": "{count} 个新视频",
       "manyNew": "有新视频",
-      "startHere": "从这里开始看"
+      "startHere": "从这里开始看",
+      "unmute": "开启声音",
+      "mute": "静音"
     }
   },
   "videos": {
@@ -325,8 +327,10 @@
       "shortDesc": "81帧",
       "long": "6秒",
       "longDesc": "121帧",
+      "medium": "8秒",
       "extended": "10秒",
-      "extendedDesc": "177帧（仅限提示词接力模式）"
+      "extendedDesc": "177帧（仅限提示词接力模式）",
+      "framesCount": "{n}帧"
     },
     "resolution": {
       "title": "视频分辨率",

@@ -25,7 +25,7 @@ export type VideoEntry = {
     current_node_progress?: number;
   };
   iteration_steps?: number; // 4, 6, or 8 steps
-  video_duration?: number; // 4 or 6 seconds
+  video_duration?: number; // 4, 6, 8, or 10 seconds (8 = MiniMax H3 premium only)
   video_resolution?: string; // '480p' or '720p'
   validation_metadata?: {
     manual_recognition_done?: boolean;

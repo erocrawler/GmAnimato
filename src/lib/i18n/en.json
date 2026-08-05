@@ -146,7 +146,9 @@
       "noHistory": "No history yet",
       "newVideos": "{count} new videos",
       "manyNew": "New videos available",
-      "startHere": "Watch from here"
+      "startHere": "Watch from here",
+      "unmute": "Unmute",
+      "mute": "Mute"
     }
   },
   "videos": {
@@ -326,8 +328,10 @@
       "shortDesc": "81 frames",
       "long": "6 seconds",
       "longDesc": "121 frames",
+      "medium": "8 seconds",
       "extended": "10 seconds",
-      "extendedDesc": "177 frames (relay mode only)"
+      "extendedDesc": "177 frames (relay mode only)",
+      "framesCount": "{n} frames"
     },
     "resolution": {
       "title": "Video Resolution",

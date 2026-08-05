@@ -23,6 +23,16 @@ export function filterLorasForWorkflow(
 }
 
 /**
+ * Identify MiniMax H3 workflows by their template path.
+ * MiniMax H3 uses a different node stack (no WAN nodes/LoRAs/negative prompt),
+ * so WAN-only controls (steps, motion scale, free-long, relay, LoRAs) must be
+ * hidden in the review UI and skipped in the builder.
+ */
+export function isMiniMaxWorkflow(workflow: Pick<Workflow, 'templatePath'>): boolean {
+  return (workflow?.templatePath || '').toLowerCase().includes('minimax');
+}
+
+/**
  * Check if a LoRA is compatible with a workflow
  */
 export function isLoraCompatible(loraId: string, workflow: Workflow): boolean {

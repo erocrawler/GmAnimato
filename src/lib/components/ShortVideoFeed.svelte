@@ -31,6 +31,63 @@
   let activeIndex = $state(0);
   let container: HTMLElement | null = $state(null);
   let isFullscreen = $state(false);
+  // Sound preference — videos ALWAYS start muted so browser autoplay is never
+  // blocked. The user unmutes the active video via the sound button (a user
+  // gesture, which the autoplay policy permits). No localStorage persistence:
+  // every visit starts muted, like TikTok.
+  let soundOn = $state(false);
+  // Per-video audio detection: only show the sound toggle for videos that
+  // actually have an audio track (WAN videos are silent). Detected from the
+  // media element itself — no dependency on workflow name.
+  let hasAudioMap = $state<Record<string, boolean>>({});
+
+  /**
+   * Detect whether a video element has an audio track.
+   * Returns true/false when determinable, null when unknown yet.
+   * - Firefox: mozHasAudio (available at loadedmetadata)
+   * - Chromium: audioTracks.length (available at loadedmetadata, same-origin)
+   * - WebKit/Safari: webkitAudioDecodedByteCount (needs some decoding, i.e. after play)
+   */
+  function detectVideoAudio(video: HTMLVideoElement): boolean | null {
+    const v = video as any;
+    if (typeof v.mozHasAudio === 'boolean') return v.mozHasAudio;
+    if (v.audioTracks && typeof v.audioTracks.length === 'number') {
+      return v.audioTracks.length > 0;
+    }
+    if (typeof v.webkitAudioDecodedByteCount === 'number' && v.webkitAudioDecodedByteCount > 0) {
+      return true;
+    }
+    return null;
+  }
+
+  // Re-check a video for audio. Called on multiple media events so the button
+  // appears as soon as the track info is available (some browsers only expose
+  // it after decoding begins). Sticky — once true it stays.
+  function checkVideoAudio(videoId: string, el: HTMLVideoElement) {
+    if (hasAudioMap[videoId]) return;
+    if (detectVideoAudio(el) === true) hasAudioMap[videoId] = true;
+  }
+
+  // Actively poll audio detection for the currently-active video, since some
+  // browsers (Safari/WebKit) only report audio after some decoding has happened.
+  $effect(() => {
+    const current = videos[activeIndex];
+    if (!current || hasAudioMap[current.id]) return;
+    const slide = container?.querySelector(`[data-index="${activeIndex}"]`);
+    const el = slide?.querySelector('video');
+    if (!el) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries++;
+      if (hasAudioMap[current.id]) {
+        clearInterval(timer);
+        return;
+      }
+      if (detectVideoAudio(el) === true) hasAudioMap[current.id] = true;
+      if (tries >= 20) clearInterval(timer); // give up after ~6s
+    }, 300);
+    return () => clearInterval(timer);
+  });
 
   // --- Position tracking & state persistence ---
   let newCount = $state<number | null>(null);
@@ -200,7 +257,16 @@
             // Autoplay the active video, pause others
             const activeVideo = entry.target.querySelector('video');
             if (activeVideo) {
-              activeVideo.play().catch(() => {});
+              // Always start muted so the browser permits autoplay, then unmute
+              // after playback begins if the user enabled sound (unmuting an
+              // already-playing video is not subject to the autoplay policy).
+              activeVideo.muted = true;
+              activeVideo
+                .play()
+                .then(() => {
+                  if (soundOn) activeVideo.muted = false;
+                })
+                .catch(() => {});
             }
             // Pause all other videos
             container?.querySelectorAll('video').forEach((v) => {
@@ -257,6 +323,20 @@
       }
     } catch (err) {
       console.error('Failed to toggle like:', err);
+    }
+  }
+
+  // Toggle sound for the active video. Called from a click (user gesture),
+  // which permits unmuted playback that would otherwise be blocked.
+  function toggleSound() {
+    soundOn = !soundOn;
+    const activeSlide = container?.querySelector(`[data-index="${activeIndex}"]`);
+    const activeVideo = activeSlide?.querySelector('video');
+    if (activeVideo) {
+      activeVideo.muted = !soundOn;
+      if (soundOn) {
+        activeVideo.play().catch(() => {});
+      }
     }
   }
 </script>
@@ -368,9 +448,14 @@
           src={v.final_video_url}
           class="h-full w-full object-contain"
           loop
-          muted
+          muted={!soundOn}
           playsinline
           preload={i >= activeIndex && i <= activeIndex + 2 ? 'auto' : 'none'}
+          onloadedmetadata={(e) => checkVideoAudio(v.id, e.currentTarget)}
+          onloadeddata={(e) => checkVideoAudio(v.id, e.currentTarget)}
+          oncanplay={(e) => checkVideoAudio(v.id, e.currentTarget)}
+          onplaying={(e) => checkVideoAudio(v.id, e.currentTarget)}
+          ontimeupdate={(e) => checkVideoAudio(v.id, e.currentTarget)}
         ></video>
       {:else if v.original_image_url}
         <img src={v.original_image_url} alt={v.prompt || 'Video'} class="h-full w-full object-contain" />
@@ -388,6 +473,30 @@
 
       <!-- Right-side action bar -->
       <div class="absolute right-3 bottom-20 flex flex-col items-center gap-5">
+        <!-- Sound toggle — only for videos with a detected audio track -->
+        {#if hasAudioMap[v.id]}
+          <button
+            class="flex flex-col items-center gap-1"
+            onclick={toggleSound}
+            aria-label={soundOn ? $_('gallery.short.mute') : $_('gallery.short.unmute')}
+          >
+            <div class="w-12 h-12 rounded-full bg-black/40 backdrop-blur flex items-center justify-center transition-transform active:scale-90">
+              {#if soundOn}
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5L6 9H2v6h4l5 4V5z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M19.07 4.93a10 10 0 010 14.14" />
+                </svg>
+              {:else}
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5L6 9H2v6h4l5 4V5z" />
+                  <line x1="23" y1="9" x2="17" y2="15" stroke-linecap="round" stroke-width="2" />
+                  <line x1="17" y1="9" x2="23" y2="15" stroke-linecap="round" stroke-width="2" />
+                </svg>
+              {/if}
+            </div>
+          </button>
+        {/if}
+
         <button
           class="flex flex-col items-center gap-1"
           onclick={() => toggleLike(v.id)}

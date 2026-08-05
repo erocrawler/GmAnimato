@@ -15,6 +15,16 @@ export function roundToMultipleOf16(value: number): number {
 }
 
 /**
+ * Options for calculateVideoDimensions
+ */
+export interface CalculateVideoDimensionsOptions {
+  /** Round dimensions to this multiple (default 16 — WAN). MiniMax H3 needs 32. */
+  roundToMultiple?: number;
+  /** 'nearest' rounds to closest multiple (WAN default); 'floor' never exceeds the pixel budget (MiniMax). */
+  rounding?: 'nearest' | 'floor';
+}
+
+/**
  * Find a node by class_type and optionally by predicate function
  * @param workflow The workflow object
  * @param classType The class_type to search for
@@ -65,14 +75,19 @@ export function getNodeInputs(workflow: any, nodeId: string | null): any {
  * @param imageWidth Original image width
  * @param imageHeight Original image height
  * @param resolution Target resolution (480p or 720p)
- * @returns {width, height} Video dimensions (both multiples of 16)
+ * @param options Optional rounding config (default: multiples of 16, nearest — WAN)
+ * @returns {width, height} Video dimensions (rounded per options)
  */
 export function calculateVideoDimensions(
   imageWidth: number,
   imageHeight: number,
-  resolution: '480p' | '720p'
+  resolution: '480p' | '720p',
+  options: CalculateVideoDimensionsOptions = {}
 ): { width: number; height: number } {
   const totalPixels = resolution === '720p' ? 921600 : 409600;
+  const roundToMultiple = options.roundToMultiple ?? 16;
+  const roundFn = options.rounding === 'floor' ? Math.floor : Math.round;
+  
   let aspectRatio = imageWidth / imageHeight;
   
   // Clamp aspect ratio to reasonable range:
@@ -89,9 +104,9 @@ export function calculateVideoDimensions(
   const width = Math.sqrt(totalPixels * aspectRatio);
   const height = Math.sqrt(totalPixels / aspectRatio);
   
-  // Round both dimensions to multiples of 16
-  let finalWidth = roundToMultipleOf16(width);
-  let finalHeight = roundToMultipleOf16(height);
+  // Round both dimensions to the requested multiple
+  let finalWidth = roundFn(width / roundToMultiple) * roundToMultiple;
+  let finalHeight = roundFn(height / roundToMultiple) * roundToMultiple;
   
   // Ensure minimum dimensions of 256 pixels
   if (finalWidth < 256) finalWidth = 256;
