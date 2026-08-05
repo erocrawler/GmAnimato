@@ -4,6 +4,8 @@ import { Buffer } from 'node:buffer';
 import { claimLocalJob, getAdminSettings, getWorkflowById, getDefaultWorkflow } from '$lib/db';
 import { buildWorkflow } from '$lib/i2vWorkflow';
 import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
+import { buildMiniMaxWorkflow } from '$lib/minimaxWorkflow';
+import { isMiniMaxWorkflow } from '$lib/workflows';
 import { toOriginalUrl } from '$lib/serverImageUrl';
 
 const DEFAULT_IMAGE_MIME = 'image/png';
@@ -91,7 +93,45 @@ export const GET: RequestHandler = async ({ request }) => {
     const shouldSendBase64 = imageInputMode !== 'url';
 
     let payload: any;
-    if (isFL2V) {
+    if (isMiniMaxWorkflow(workflow)) {
+      // MiniMax H3 uses a different node stack — dedicated builder.
+      // The builder handles both i2v (no last image) and fl2v (has last image).
+      const originalImageUrl = toOriginalUrl(job.original_image_url);
+      const originalLastImageUrl = job.last_image_url ? toOriginalUrl(job.last_image_url) : undefined;
+
+      const [firstImageBase64, lastImageBase64] = shouldSendBase64
+        ? await Promise.all([
+            fetchImageAsBase64(originalImageUrl),
+            originalLastImageUrl ? fetchImageAsBase64(originalLastImageUrl) : Promise.resolve(null),
+          ])
+        : [null, null];
+
+      payload = await buildMiniMaxWorkflow({
+        first_image_name: `${job.id}_first.png`,
+        first_image_url: originalImageUrl,
+        ...(originalLastImageUrl
+          ? {
+              last_image_name: `${job.id}_last.png`,
+              last_image_url: originalLastImageUrl,
+            }
+          : {}),
+        input_prompt: job.prompt ?? 'A beautiful video',
+        seed: job.seed ?? Math.floor(Math.random() * 1000000),
+        callback_url: callbackUrl,
+        videoDuration: job.video_duration as 4 | 6 | 8 | 10 | undefined,
+        videoResolution: job.video_resolution as '480p' | '720p' | undefined,
+        workflow: workflow,
+      });
+
+      if (shouldSendBase64 && payload?.input?.images) {
+        payload.input.images = [
+          { name: `${job.id}_first.png`, image: firstImageBase64 },
+          ...(lastImageBase64
+            ? [{ name: `${job.id}_last.png`, image: lastImageBase64 }]
+            : []),
+        ];
+      }
+    } else if (isFL2V) {
       // Convert proxy URLs to original S3 URLs for worker
       const originalImageUrl = toOriginalUrl(job.original_image_url);
       const lastImageUrl = toOriginalUrl(job.last_image_url!);
