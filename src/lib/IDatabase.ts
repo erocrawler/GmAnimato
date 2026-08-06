@@ -134,6 +134,7 @@ export type SponsorClaim = {
   sponsor_avatar?: string;
   sponsor_tier: string;
   applied_role: string;
+  claim_type?: 'sponsor' | 'manual'; // sponsor = API-revalidated, manual = admin-granted (expiry via expired_at)
   claimed_at: string;
   expired_at?: string | null;
 };
@@ -238,6 +239,7 @@ export interface IDatabase {
   expireSponsorClaim(id: string): Promise<boolean>;
   updateSponsorClaim(id: string, patch: { sponsor_tier?: string; applied_role?: string; expired_at?: string | null }): Promise<SponsorClaim | null>;
   getAllSponsorClaims(): Promise<SponsorClaim[]>;
+  deleteSponsorClaimsForRole(userId: string, role: string): Promise<number>; // Remove manual claims for a role (admin revoke)
 
   // Workflow methods
   getWorkflowById(id: string): Promise<Workflow | null>;

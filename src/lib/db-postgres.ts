@@ -1130,6 +1130,7 @@ export class PostgresDatabase implements IDatabase {
       sponsor_avatar: claim.sponsorAvatar || undefined,
       sponsor_tier: claim.sponsorTier,
       applied_role: claim.appliedRole,
+      claim_type: (claim.claimType || 'sponsor') as 'sponsor' | 'manual',
       claimed_at: claim.claimedAt.toISOString(),
       expired_at: claim.expiredAt ? claim.expiredAt.toISOString() : null,
     }));
@@ -1144,6 +1145,7 @@ export class PostgresDatabase implements IDatabase {
         sponsorAvatar: claim.sponsor_avatar || null,
         sponsorTier: claim.sponsor_tier,
         appliedRole: claim.applied_role,
+        claimType: claim.claim_type || 'sponsor',
       },
     });
 
@@ -1155,6 +1157,7 @@ export class PostgresDatabase implements IDatabase {
       sponsor_avatar: created.sponsorAvatar || undefined,
       sponsor_tier: created.sponsorTier,
       applied_role: created.appliedRole,
+      claim_type: (created.claimType || 'sponsor') as 'sponsor' | 'manual',
       claimed_at: created.claimedAt.toISOString(),
       expired_at: null,
     };
@@ -1179,6 +1182,7 @@ export class PostgresDatabase implements IDatabase {
       sponsor_avatar: c.sponsorAvatar || undefined,
       sponsor_tier: c.sponsorTier,
       applied_role: c.appliedRole,
+      claim_type: (c.claimType || 'sponsor') as 'sponsor' | 'manual',
       claimed_at: c.claimedAt.toISOString(),
       expired_at: c.expiredAt ? c.expiredAt.toISOString() : null,
     }));
@@ -1216,11 +1220,23 @@ export class PostgresDatabase implements IDatabase {
         sponsor_avatar: updated.sponsorAvatar || undefined,
         sponsor_tier: updated.sponsorTier,
         applied_role: updated.appliedRole,
+        claim_type: (updated.claimType || 'sponsor') as 'sponsor' | 'manual',
         claimed_at: updated.claimedAt.toISOString(),
         expired_at: updated.expiredAt ? updated.expiredAt.toISOString() : null,
       };
     } catch {
       return null;
+    }
+  }
+
+  async deleteSponsorClaimsForRole(userId: string, role: string): Promise<number> {
+    try {
+      const result = await this.prisma.sponsorClaim.deleteMany({
+        where: { userId, appliedRole: role, claimType: 'manual' },
+      });
+      return result.count;
+    } catch {
+      return 0;
     }
   }
 

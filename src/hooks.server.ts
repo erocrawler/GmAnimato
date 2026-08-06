@@ -32,12 +32,9 @@ function scheduleCleanupTask() {
   }, delay);
 }
 
-async function revalidateSponsors() {
+async function revalidateSponsors(claims: Awaited<ReturnType<typeof getAllSponsorClaims>>) {
   try {
     console.log('[Background Tasks] Revalidating sponsor claims...');
-    
-    // Get all sponsor claims from database (including expired ones to check for renewals)
-    const claims = await getAllSponsorClaims();
     
     if (claims.length === 0) {
       console.log('[Background Tasks] No sponsor claims to validate');
@@ -99,6 +96,10 @@ async function revalidateSponsors() {
 
     // Check each claim against current sponsors
     for (const claim of claims) {
+      // Manual claims (admin-granted roles) are NOT sponsor-API-backed — skip
+      // revalidation here; their expiry is enforced by purgeExpiredManualClaims.
+      if (claim.claim_type === 'manual') continue;
+
       const sponsorInfo = sponsorMap.get(claim.sponsor_username.toLowerCase());
       
       if (!sponsorInfo) {
@@ -201,6 +202,38 @@ async function revalidateSponsors() {
   }
 }
 
+/**
+ * Expire admin-granted (manual) role claims whose expired_at has passed.
+ * Mirrors the sponsor sweep: removes the applied role from the user, keeping
+ * the claim record marked as expired (admin can extend/clear it later).
+ */
+async function purgeExpiredManualClaims(claims: Awaited<ReturnType<typeof getAllSponsorClaims>>) {
+  try {
+    let expiredCount = 0;
+
+    for (const claim of claims) {
+      if (claim.claim_type !== 'manual') continue;
+      if (!claim.expired_at) continue; // no expiry = permanent grant
+      if (new Date(claim.expired_at) > new Date()) continue; // not expired yet
+
+      // Remove the role if the user still has it
+      const user = await getUserById(claim.user_id);
+      if (user && user.roles.includes(claim.applied_role)) {
+        const updatedRoles = user.roles.filter((r) => r !== claim.applied_role);
+        await updateUser(claim.user_id, { roles: updatedRoles });
+        console.log(`[Background Tasks] Manual role expired: removed '${claim.applied_role}' from user ${user.username}`);
+        expiredCount++;
+      }
+    }
+
+    if (expiredCount > 0) {
+      console.log(`[Background Tasks] Manual role expiry complete: ${expiredCount} role(s) removed`);
+    }
+  } catch (err) {
+    console.error('[Background Tasks] Manual role expiry error:', err);
+  }
+}
+
 async function runCleanup() {
   try {
     console.log('[Background Tasks] Running cleanup tasks...');
@@ -209,9 +242,17 @@ async function runCleanup() {
     console.log('[Background Tasks] Running session cleanup...');
     const deleted = await deleteExpiredSessions();
     console.log(`[Background Tasks] Deleted ${deleted} expired sessions`);
+
+    // Load claims once and pass the relevant slices to each pass
+    const allClaims = await getAllSponsorClaims();
+    const manualClaims = allClaims.filter((c) => c.claim_type === 'manual');
+    const sponsorClaims = allClaims.filter((c) => c.claim_type !== 'manual');
+
+    // Expire admin-granted roles past their expiry
+    await purgeExpiredManualClaims(manualClaims);
     
     // Revalidate sponsor claims
-    await revalidateSponsors();
+    await revalidateSponsors(sponsorClaims);
   } catch (err) {
     console.error('[Background Tasks] Cleanup error:', err);
   }

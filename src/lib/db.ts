@@ -252,6 +252,10 @@ export async function getAllSponsorClaims() {
   return db.getAllSponsorClaims();
 }
 
+export async function deleteSponsorClaimsForRole(userId: string, role: string) {
+  return db.deleteSponsorClaimsForRole(userId, role);
+}
+
 // ==================== Workflow Functions ====================
 
 export async function getWorkflowById(id: string) {

@@ -126,6 +126,7 @@ model SponsorClaim {
   sponsorAvatar      String?  @map("sponsor_avatar") @db.VarChar(500)
   sponsorTier        String   @map("sponsor_tier") @db.VarChar(50)
   appliedRole        String   @map("applied_role") @db.VarChar(50)
+  claimType          String   @default("sponsor") @map("claim_type") @db.VarChar(20)
   claimedAt          DateTime @default(now()) @map("claimed_at")
   expiredAt          DateTime? @map("expired_at")
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)

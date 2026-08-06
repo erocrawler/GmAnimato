@@ -663,6 +663,11 @@ export class JsonFileDatabase implements IDatabase {
     return null;
   }
 
+  async deleteSponsorClaimsForRole(userId: string, role: string): Promise<number> {
+    // JSON database doesn't support sponsor claims
+    return 0;
+  }
+
   // ==================== Workflow Methods (JSON DB: Stub) ====================
   async getWorkflowById(id: string): Promise<import('./IDatabase').Workflow | null> {
     console.warn('[JSON DB] getWorkflowById not supported - use PostgreSQL');

@@ -139,6 +139,8 @@
   let showRoleModal = $state(false);
   let editingUser: { id: string; username: string; roles: string[] } | null = $state(null);
   let roleInput = $state('');
+  // role -> ISO datetime (optional expiry for manual role grants); null = permanent
+  let roleExpirations = $state<Record<string, string | null>>({});
   
   // Role config editor state
   let showRoleConfigModal = $state(false);
@@ -368,6 +370,17 @@
     const roles = currentRoles || [];
     editingUser = { id: userId, username, roles };
     roleInput = roles.join(', ');
+    roleExpirations = {};
+    // Load existing manual role expirations so the modal can show/edit them
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/roles`);
+      if (res.ok) {
+        const data = await res.json();
+        roleExpirations = data.expirations || {};
+      }
+    } catch (err) {
+      console.error('Failed to load role expirations:', err);
+    }
     showRoleModal = true;
   }
   
@@ -380,7 +393,7 @@
       const response = await fetch(`/api/admin/users/${editingUser.id}/roles`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roles: updatedRoles }),
+        body: JSON.stringify({ roles: updatedRoles, expirations: roleExpirations }),
       });
       
       if (response.ok) {
@@ -401,6 +414,7 @@
     showRoleModal = false;
     editingUser = null;
     roleInput = '';
+    roleExpirations = {};
   }
   
   function toggleRole(role: string) {
@@ -419,6 +433,27 @@
   function isRoleSelected(role: string) {
     const roles = roleInput.split(',').map(r => r.trim()).filter(r => r);
     return roles.includes(role);
+  }
+
+  // ---- Per-role expiration (manual claims reuse the claim expiry mechanism) ----
+  function getRoleExpiryDatetime(role: string): string {
+    const iso = roleExpirations[role];
+    if (!iso) return '';
+    // Convert ISO to local datetime-local input value
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  function setRoleExpiryDatetime(role: string, value: string) {
+    if (!value) {
+      roleExpirations = { ...roleExpirations, [role]: null };
+    } else {
+      roleExpirations = { ...roleExpirations, [role]: new Date(value).toISOString() };
+    }
+  }
+  function clearRoleExpiry(role: string) {
+    roleExpirations = { ...roleExpirations, [role]: null };
   }
 
   function addLoraPreset() {
@@ -1823,6 +1858,26 @@
               {roleName}
             </button>
           {/each}
+        </div>
+
+        <!-- Per-role expiration (optional) -->
+        <div class="space-y-2 mt-2">
+          {#each getAvailableRoleNames.filter((r: string) => isRoleSelected(r)) as selRole}
+            <div class="flex items-center gap-2 border border-base-300 rounded-lg p-2">
+              <span class="badge badge-primary badge-sm shrink-0">{selRole}</span>
+              <span class="text-xs opacity-60 shrink-0">Expires:</span>
+              <input
+                type="datetime-local"
+                class="input input-bordered input-sm flex-1"
+                value={getRoleExpiryDatetime(selRole)}
+                onchange={(e) => setRoleExpiryDatetime(selRole, e.currentTarget.value)}
+              />
+              <button class="btn btn-xs btn-ghost" onclick={() => clearRoleExpiry(selRole)} title="Clear expiry (permanent)">✕</button>
+            </div>
+          {/each}
+          {#if getAvailableRoleNames.filter((r: string) => isRoleSelected(r)).length === 0}
+            <p class="text-xs opacity-50">Select roles above to set optional expiration dates.</p>
+          {/if}
         </div>
       </div>
       
