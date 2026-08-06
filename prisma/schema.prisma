@@ -69,6 +69,7 @@ model Video {
   additionalOptions   Json?       @map("additional_options")
   loraWeights         Json?       @map("lora_weights")
   seed                Int?
+  quotaCost           Int         @default(1) @map("quota_cost")
   likesCountCache     Int           @default(0) @map("likes_count_cache")
   likes               VideoLike[]
   user                User        @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -145,6 +146,8 @@ model Workflow {
   tags                 Json     @default("[]")
   autoIncludeNewLoras  Boolean  @default(true) @map("auto_include_new_loras")
   presetGroup          String?  @map("preset_group") @db.VarChar(100)
+  quotaCost            Int      @default(1) @map("quota_cost")
+  quotaCostRules       Json     @default("[]") @map("quota_cost_rules")
   isDefault            Boolean  @default(false) @map("is_default")
   isDeleted            Boolean  @default(false) @map("is_deleted")
   createdAt            DateTime @default(now()) @map("created_at")

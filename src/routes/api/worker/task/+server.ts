@@ -120,6 +120,9 @@ export const GET: RequestHandler = async ({ request }) => {
         callback_url: callbackUrl,
         videoDuration: job.video_duration as 4 | 6 | 8 | 10 | undefined,
         videoResolution: job.video_resolution as '480p' | '720p' | undefined,
+        iterationSteps: job.iteration_steps as 8 | 12 | undefined,
+        loraWeights: typeof job.lora_weights === 'object' && job.lora_weights !== null ? job.lora_weights as Record<string, number> : undefined,
+        loraPresets: settings.loraPresets,
         workflow: workflow,
       });
 

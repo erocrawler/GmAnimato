@@ -262,6 +262,14 @@ export async function getWorkflows() {
   return db.getWorkflows();
 }
 
+export async function getAllWorkflowsIncludingDeleted() {
+  return db.getAllWorkflowsIncludingDeleted();
+}
+
+export async function restoreWorkflow(id: string) {
+  return db.restoreWorkflow(id);
+}
+
 export async function getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v') {
   return db.getDefaultWorkflow(workflowType);
 }
@@ -272,9 +280,10 @@ export async function getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v') {
  * Check if a user has exceeded their daily video generation quota
  * @param user The user to check (only id and roles needed)
  * @param settings Admin settings containing quota limits
- * @returns {exceeded: boolean, limit: number, used: number}
+ * @param cost Credits the upcoming job will consume (default 1)
+ * @returns {exceeded: boolean, limit: number, used: number, cost: number}
  */
-export async function checkDailyQuota(user: Pick<User, 'id' | 'roles'>, settings: AdminSettings): Promise<{exceeded: boolean, limit: number, used: number}> {
+export async function checkDailyQuota(user: Pick<User, 'id' | 'roles'>, settings: AdminSettings, cost: number = 1): Promise<{exceeded: boolean, limit: number, used: number, cost: number}> {
   // Determine quota limit based on user roles
   let dailyLimit = 0;
   
@@ -290,9 +299,10 @@ export async function checkDailyQuota(user: Pick<User, 'id' | 'roles'>, settings
   const used = await db.getDailyQuotaUsage(user.id, today);
   
   return {
-    exceeded: used >= dailyLimit,
+    exceeded: used + cost > dailyLimit,
     limit: dailyLimit,
-    used
+    used,
+    cost
   };
 }
 

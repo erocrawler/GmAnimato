@@ -25,6 +25,7 @@ export type LoraPreset = {
   presetGroup?: string; // model family — free-form, fully configurable
   tags?: string[]; // optional style — free-form
   autoAddToWorkflows?: boolean;
+  steps?: number; // target sampler steps when this LoRA is applied (e.g. speed-up LoRAs: 8 instead of 20)
 };
 
 // Suggestions only - not enforced. User can type any name. You mentioned 2-3 presets like wan22 / dasiwa-old / dasiwa-new - use whatever you want.
@@ -64,6 +65,7 @@ export function normalizeLoraPresets(list?: LoraPreset[]): LoraPreset[] {
       presetGroup: typeof item.presetGroup === 'string' && item.presetGroup.trim() ? item.presetGroup.trim() : 'Custom',
       tags: Array.isArray(item.tags) ? item.tags.map((t: string) => String(t).toLowerCase().trim()).filter(Boolean) : [],
       autoAddToWorkflows: typeof item.autoAddToWorkflows === 'boolean' ? item.autoAddToWorkflows : false,
+      steps: typeof (item as any).steps === 'number' && (item as any).steps >= 1 ? (item as any).steps : undefined,
     }));
 }
 

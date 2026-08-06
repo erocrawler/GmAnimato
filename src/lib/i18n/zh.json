@@ -318,7 +318,9 @@
         "fast": "4步",
         "balanced": "6步",
         "quality": "8步"
-      }
+      },
+      "minimaxStepsFast": "8步",
+      "minimaxStepsBalanced": "12步"
     },
     "duration": {
       "title": "视频时长",
@@ -416,7 +418,7 @@
       "message": "成为赞助者以获得更多视频生成次数！",
       "sponsorButton": "成为赞助者",
       "none": "您没有视频生成配额。成为赞助者即可开始创作视频！",
-      "exceeded": "您今天的 {limit} 个视频配额已全部用完（已创建 {used} 个）。请明天再试，或成为赞助者以获得更高限额。",
+      "exceeded": "此视频需要 {cost} 个积分，您剩余的积分不足。您今日已用 {used} 个积分，共 {limit} 个。请明天再试，或成为赞助者以获得更高限额。",
       "queueLimit": "您已有 {limit} 个视频在队列中。请等待其中一些完成后再开始新的。"
     },
     "warnings": {
@@ -426,7 +428,8 @@
       }
     },
     "videoDeleted": "此视频已被删除。",
-    "quotaRemaining": "配额：剩余 {count} 个视频",
+    "quotaRemaining": "配额：剩余 {count} 个积分",
+    "quotaCost": "此视频消耗 {cost} 个积分",
     "quotaNoAccess": "无配额 — 赞助后解锁"
   },
   "users": {
@@ -533,15 +536,15 @@
     "accountInformation": "账户信息",
     "changePassword": "更改密码",
     "dailyQuota": {
-      "title": "每日视频配额",
+      "title": "每日积分配额",
       "used": "今日已用",
-      "videosToday": "个视频",
+      "videosToday": "个积分",
       "limit": "每日限制",
-      "dailyLimit": "个视频/天",
+      "dailyLimit": "个积分/天",
       "remaining": "剩余",
-      "videosLeft": "个视频",
-      "exceeded": "您已达到每日视频配额上限。请明天再试或考虑成为赞助者以获得更高配额。",
-      "almostExceeded": "您今天只剩下 {remaining} 个视频配额了。请合理使用！",
+      "videosLeft": "个积分",
+      "exceeded": "您已达到每日积分配额上限。请明天再试或考虑成为赞助者以获得更高配额。",
+      "almostExceeded": "您今天只剩下 {remaining} 个积分配额了。请合理使用！",
       "resetInfo": "您的配额每天午夜重置。赞助者福利包括更高的每日配额。",
       "loadError": "无法加载配额信息"
     },

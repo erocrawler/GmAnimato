@@ -314,7 +314,8 @@ export class JsonFileDatabase implements IDatabase {
       return ['completed', 'in_queue', 'processing'].includes(v.status);
     });
     
-    return todayVideos.length;
+    // Sum credits (each video consumes its snapshot quota_cost, default 1)
+    return todayVideos.reduce((sum, v) => sum + (v.quota_cost ?? 1), 0);
   }
 
   async getOldestLocalJob(): Promise<VideoEntry | null> {
@@ -703,6 +704,11 @@ export class JsonFileDatabase implements IDatabase {
     return null;
   }
 
+  async getAllWorkflowsIncludingDeleted(): Promise<import('./IDatabase').Workflow[]> {
+    console.warn('[JSON DB] getAllWorkflowsIncludingDeleted not supported - use PostgreSQL');
+    return [];
+  }
+
   async createWorkflow(data: Omit<import('./IDatabase').Workflow, 'createdAt' | 'updatedAt'>): Promise<import('./IDatabase').Workflow> {
     console.warn('[JSON DB] createWorkflow not supported - use PostgreSQL');
     throw new Error('Workflow creation not supported in JSON database');
@@ -716,6 +722,11 @@ export class JsonFileDatabase implements IDatabase {
   async deleteWorkflow(id: string): Promise<boolean> {
     console.warn('[JSON DB] deleteWorkflow not supported - use PostgreSQL');
     return false;
+  }
+
+  async restoreWorkflow(id: string): Promise<import('./IDatabase').Workflow | null> {
+    console.warn('[JSON DB] restoreWorkflow not supported - use PostgreSQL');
+    return null;
   }
 
   async setDefaultWorkflow(id: string): Promise<import('./IDatabase').Workflow | null> {

@@ -33,6 +33,8 @@
   let workflowTags = $state<string[]>([]); // tags for auto matching
   let workflowAutoInclude = $state(true);
   let workflowPresetGroup = $state('');
+  let workflowQuotaCost = $state(1);
+  let workflowQuotaCostRules = $state<any[]>([]);
   let workflowTagInput = $state('');
   let workflowLoraFilter = $state('all'); // all | byGroup | byTag
   let workflowSelectedTagFilter = $state('all');
@@ -491,6 +493,8 @@
       workflowTags = workflow.tags || [];
       workflowAutoInclude = workflow.autoIncludeNewLoras ?? true;
       workflowPresetGroup = workflow.presetGroup || '';
+      workflowQuotaCost = typeof workflow.quotaCost === 'number' && workflow.quotaCost >= 1 ? workflow.quotaCost : 1;
+      workflowQuotaCostRules = (workflow.quotaCostRules || []).map((r: any) => ({ ...r, when: { ...(r.when || {}) } }));
     } else {
       editingWorkflowId = null;
       workflowName = '';
@@ -501,6 +505,8 @@
       workflowTags = [];
       workflowAutoInclude = true;
       workflowPresetGroup = '';
+      workflowQuotaCost = 1;
+      workflowQuotaCostRules = [];
       // New workflow starts empty — no forced base LoRAs (lightx2v only for wan22 base model, not distilled)
       workflowCompatibleLoras = (settings.loraPresets || []).filter((p: any) => p.autoAddToWorkflows).map((p: any) => p.id);
     }
@@ -523,6 +529,8 @@
     workflowTags = [];
     workflowAutoInclude = true;
     workflowPresetGroup = '';
+    workflowQuotaCost = 1;
+    workflowQuotaCostRules = [];
     workflowTagInput = '';
   }
 
@@ -588,6 +596,37 @@
       workflowCompatibleLoras = [...workflowCompatibleLoras, loraId];
     }
   }
+
+  // ---- Quota cost rules editor ----
+  function addQuotaCostRule() {
+    workflowQuotaCostRules = [
+      ...workflowQuotaCostRules,
+      {
+        id: `rule-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        label: '',
+        multiplier: 2,
+        when: {},
+      },
+    ];
+  }
+  function removeQuotaCostRule(index: number) {
+    workflowQuotaCostRules = workflowQuotaCostRules.filter((_, i) => i !== index);
+  }
+  function updateQuotaCostRule(index: number, patch: any) {
+    workflowQuotaCostRules = workflowQuotaCostRules.map((r, i) =>
+      i === index ? { ...r, ...patch } : r
+    );
+  }
+  function updateQuotaCostRuleWhen(index: number, patch: any) {
+    workflowQuotaCostRules = workflowQuotaCostRules.map((r, i) =>
+      i === index ? { ...r, when: { ...(r.when || {}), ...patch } } : r
+    );
+  }
+  function toggleLoraInRule(ruleIndex: number, field: 'notUsingLoras' | 'usingLoras', loraId: string) {
+    const list = (workflowQuotaCostRules[ruleIndex]?.when?.[field] as string[]) || [];
+    const next = list.includes(loraId) ? list.filter(id => id !== loraId) : [...list, loraId];
+    updateQuotaCostRuleWhen(ruleIndex, { [field]: next });
+  }
   
   async function saveWorkflow() {
     if (!workflowName.trim() || !workflowTemplatePath.trim()) {
@@ -607,6 +646,8 @@
         tags: workflowTags,
         autoIncludeNewLoras: workflowAutoInclude,
         presetGroup: workflowPresetGroup || undefined,
+        quotaCost: workflowQuotaCost,
+        quotaCostRules: workflowQuotaCostRules,
       };
 
       if (editingWorkflowId) {
@@ -655,7 +696,7 @@
   }
   
   async function deleteWorkflow(workflowId: string, workflowName: string) {
-    if (!confirm(`Are you sure you want to delete workflow "${workflowName}"? This action cannot be undone.`)) {
+    if (!confirm(`Are you sure you want to delete workflow "${workflowName}"?`)) {
       return;
     }
     
@@ -670,6 +711,25 @@
       } else {
         const error = await response.json();
         showNotification(`Failed to delete workflow: ${error.error || 'Unknown error'}`, 'error');
+      }
+    } catch (err) {
+      showNotification(`Error: ${String(err)}`, 'error');
+    }
+  }
+
+  async function restoreWorkflow(workflowId: string, workflowName: string) {
+    try {
+      const response = await fetch(`/api/admin/workflows/${workflowId}/restore`, {
+        method: 'POST',
+      });
+      
+      if (response.ok) {
+        const restored = await response.json();
+        workflows = workflows.map(w => w.id === workflowId ? restored : w);
+        showNotification(`Workflow "${workflowName}" restored successfully`, 'success');
+      } else {
+        const error = await response.json();
+        showNotification(`Failed to restore workflow: ${error.error || 'Unknown error'}`, 'error');
       }
     } catch (err) {
       showNotification(`Error: ${String(err)}`, 'error');
@@ -1060,6 +1120,8 @@
                       </span>
                       {#if workflow.isDefault}<span class="badge badge-primary badge-sm">Default</span>{/if}
                       {#if (workflow as any).autoIncludeNewLoras}<span class="badge badge-ghost badge-sm" title="Auto includes new matching LoRAs">auto+</span>{/if}
+                      <span class="badge badge-warning badge-sm" title="Credits consumed per video">{(workflow as any).quotaCost ?? 1} credit{(workflow as any).quotaCost > 1 ? 's' : ''}/video</span>
+                      {#if workflow.isDeleted}<span class="badge badge-error badge-sm">Deleted</span>{/if}
                     </div>
                     {#if workflow.description}<p class="text-sm opacity-70 mt-1">{workflow.description}</p>{/if}
                     <p class="text-xs opacity-50 mt-1 font-mono truncate">{workflow.templatePath}</p>
@@ -1069,11 +1131,17 @@
                     </div>
                   </div>
                   <div class="flex flex-col sm:flex-row gap-2 shrink-0">
-                    {#if !workflow.isDefault}
+                    {#if !workflow.isDefault && !workflow.isDeleted}
                       <button class="btn btn-xs btn-outline" onclick={() => setDefaultWorkflow(workflow.id)}>Set Default {workflow.workflowType?.toUpperCase()}</button>
                     {/if}
-                    <button class="btn btn-xs btn-outline" onclick={() => openWorkflowModal(workflow)}>Edit</button>
-                    <button class="btn btn-xs btn-outline btn-error" onclick={() => deleteWorkflow(workflow.id, workflow.name)} disabled={workflow.isDefault}>Delete</button>
+                    {#if !workflow.isDeleted}
+                      <button class="btn btn-xs btn-outline" onclick={() => openWorkflowModal(workflow)}>Edit</button>
+                    {/if}
+                    {#if workflow.isDeleted}
+                      <button class="btn btn-xs btn-outline btn-success" onclick={() => restoreWorkflow(workflow.id, workflow.name)}>Restore</button>
+                    {:else}
+                      <button class="btn btn-xs btn-outline btn-error" onclick={() => deleteWorkflow(workflow.id, workflow.name)} disabled={workflow.isDefault}>Delete</button>
+                    {/if}
                   </div>
                 </div>
 
@@ -1805,7 +1873,7 @@
         <input type="text" bind:value={workflowDescription} placeholder="Brief description (shown in review page)" class="input input-bordered input-sm w-full" />
       </label>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
         <label class="form-control">
           <span class="label-text text-sm">Type</span>
           <select bind:value={workflowType} class="select select-bordered select-sm w-full">
@@ -1813,6 +1881,13 @@
             <option value="fl2v">FL2V</option>
           </select>
         </label>
+        <label class="form-control cursor-pointer flex-row items-center gap-2 mt-5">
+          <input type="checkbox" bind:checked={workflowIsDefault} class="checkbox checkbox-sm" />
+          <span class="label-text text-sm">Default {workflowType.toUpperCase()}</span>
+        </label>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
         <label class="form-control">
           <span class="label-text text-sm">Group</span>
           <input list="workflow-groups-list" type="text" bind:value={workflowPresetGroup} placeholder="wan22" class="input input-bordered input-sm w-full" />
@@ -1820,10 +1895,75 @@
             {#each Array.from(new Set([...allLoraGroups, ...workflows.map((w:any)=>w.presetGroup).filter(Boolean)])) as g}<option value={g}></option>{/each}
           </datalist>
         </label>
-        <label class="form-control cursor-pointer flex-row items-center gap-2 mt-5">
-          <input type="checkbox" bind:checked={workflowIsDefault} class="checkbox checkbox-sm" />
-          <span class="label-text text-sm">Default {workflowType.toUpperCase()}</span>
+        <label class="form-control">
+          <span class="label-text text-sm">Quota Cost (credits/video)</span>
+          <input type="number" min={1} step={1} bind:value={workflowQuotaCost} class="input input-bordered input-sm w-full" />
         </label>
+      </div>
+
+      <!-- Quota cost rules -->
+      <div class="mt-4">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-sm font-semibold">Quota Cost Rules</span>
+          <button class="btn btn-xs btn-outline" onclick={addQuotaCostRule}>+ Add rule</button>
+        </div>
+        <p class="text-xs opacity-50 mb-2">Multipliers stack on the base cost. e.g. "2x if duration ≥ 8s" or "2x if NOT using a speed-up LoRA".</p>
+        {#if workflowQuotaCostRules.length === 0}
+          <p class="text-xs opacity-40">No rules — cost is always {workflowQuotaCost} credit{workflowQuotaCost > 1 ? 's' : ''}/video.</p>
+        {:else}
+          <div class="space-y-3">
+            {#each workflowQuotaCostRules as rule, ri (rule.id)}
+              <div class="border border-base-300 rounded-lg p-3 space-y-2">
+                <div class="flex items-center gap-2">
+                  <input type="number" min={1} step={1} bind:value={rule.multiplier} class="input input-bordered input-xs w-20" title="Multiplier" />
+                  <span class="text-xs">×</span>
+                  <input type="text" placeholder="Label (optional)" bind:value={rule.label} class="input input-bordered input-xs flex-1" />
+                  <button class="btn btn-xs btn-error btn-ghost" onclick={() => removeQuotaCostRule(ri)}>✕</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                  <label class="flex items-center gap-2">
+                    <span class="opacity-60 shrink-0">Duration ≥</span>
+                    <select class="select select-bordered select-xs" value={rule.when.minDuration ?? ''}
+                      onchange={(e) => updateQuotaCostRuleWhen(ri, { minDuration: e.currentTarget.value === '' ? undefined : +e.currentTarget.value })}>
+                      <option value="">(any)</option>
+                      <option value="8">8s</option>
+                      <option value="10">10s</option>
+                    </select>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <span class="opacity-60 shrink-0">Resolution</span>
+                    <select class="select select-bordered select-xs" value={rule.when.exactResolution ?? ''}
+                      onchange={(e) => updateQuotaCostRuleWhen(ri, { exactResolution: e.currentTarget.value === '' ? undefined : e.currentTarget.value })}>
+                      <option value="">(any)</option>
+                      <option value="480p">480p</option>
+                      <option value="720p">720p</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <div class="opacity-60 mb-1">Applies when NONE of these LoRAs used:</div>
+                    <div class="flex flex-wrap gap-1">
+                      {#each (settings.loraPresets || []) as lora}
+                        <button class="badge badge-xs badge-ghost cursor-pointer" class:badge-primary={(rule.when.notUsingLoras || []).includes(lora.id)}
+                          onclick={() => toggleLoraInRule(ri, 'notUsingLoras', lora.id)}>{lora.label}</button>
+                      {/each}
+                    </div>
+                  </div>
+                  <div>
+                    <div class="opacity-60 mb-1">Applies when ANY of these LoRAs used:</div>
+                    <div class="flex flex-wrap gap-1">
+                      {#each (settings.loraPresets || []) as lora}
+                        <button class="badge badge-xs badge-ghost cursor-pointer" class:badge-secondary={(rule.when.usingLoras || []).includes(lora.id)}
+                          onclick={() => toggleLoraInRule(ri, 'usingLoras', lora.id)}>{lora.label}</button>
+                      {/each}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">

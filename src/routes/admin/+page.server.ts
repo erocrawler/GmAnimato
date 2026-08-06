@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
-import { getAdminSettings, getAllUsers, getVideosByUser, getWorkflows } from '$lib/db';
+import { getAdminSettings, getAllUsers, getVideosByUser, getAllWorkflowsIncludingDeleted } from '$lib/db';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
   // Check if user is logged in
@@ -47,7 +47,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     })
   );
 
-  const workflows = await getWorkflows();
+  // Admin sees ALL workflows (including soft-deleted) so they can restore them
+  const workflows = await getAllWorkflowsIncludingDeleted();
 
   return {
     settings,

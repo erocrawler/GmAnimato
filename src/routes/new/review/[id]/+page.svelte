@@ -8,6 +8,7 @@
   import type { LoraPreset } from "$lib/loraPresets";
   import type { Workflow } from "$lib/IDatabase";
   import { isMiniMaxWorkflow } from "$lib/workflows";
+  import { computeWorkflowQuotaCost } from "$lib/quotaCost";
 
   export let data: any;
   let entry = data.entry as any;
@@ -43,6 +44,16 @@
   // Selected workflow + capability flags (MiniMax H3 uses a different node stack)
   $: selectedWorkflow =
     filteredWorkflows.find((w) => w.id === selectedWorkflowId) || null;
+  // Effective credit cost for the CURRENT selections (workflow base + rules like
+  // "2x if duration >= 8s" or "2x if no speed-up LoRA"). Shared calculator with
+  // the kickoff route so the UI always matches what will be charged.
+  $: selectedWorkflowQuotaCost = selectedWorkflow
+    ? computeWorkflowQuotaCost(selectedWorkflow, {
+        videoDuration,
+        videoResolution,
+        loraWeights,
+      })
+    : 1;
   $: isMiniMaxSelected = !!selectedWorkflow && isMiniMaxWorkflow(selectedWorkflow);
 
   // MiniMax H3 has no prompt relay / WAN-only features — force them off
@@ -55,7 +66,7 @@
 
   const hasAdvancedFeatures: boolean = data.hasAdvancedFeatures || false;
 
-  type IterationSteps = 4 | 6;
+  type IterationSteps = 4 | 6 | 8 | 12;
   let stepOptions: {
     value: IterationSteps;
     label: string;
@@ -93,8 +104,7 @@
   let iterationSteps: IterationSteps =
     (entry.iteration_steps as IterationSteps) ||
     (savedSettings?.iterationSteps as IterationSteps) ||
-    4;
-  let videoDuration: VideoDuration =
+    4;  let videoDuration: VideoDuration =
     (entry.video_duration as VideoDuration) ||
     (savedSettings?.videoDuration as VideoDuration) ||
     4;
@@ -329,7 +339,9 @@
         })()
       : LORA_PRESETS;
   $: if (!canUseQuality && videoResolution === "720p") videoResolution = "480p";
-  $: if (!canUseQuality && iterationSteps === 6) iterationSteps = 4;
+  // If the selected step isn't available for the current model/tier, snap to default
+  $: if (!stepOptions.some((o) => o.value === iterationSteps)) iterationSteps = defaultIterationSteps as IterationSteps;
+  $: if (!canUseQuality && iterationSteps === (isMiniMaxSelected ? 12 : 6)) iterationSteps = isMiniMaxSelected ? 8 : 4;
   $: resolutionOptions = [
     {
       value: "480p",
@@ -344,20 +356,38 @@
       requiresPaid: true,
     },
   ];
-  $: stepOptions = [
-    {
-      value: 4,
-      label: $_("review.iteration.fast"),
-      description: $_("review.iteration.steps.fast"),
-      requiresPaid: false,
-    },
-    {
-      value: 6,
-      label: $_("review.iteration.balanced"),
-      description: $_("review.iteration.steps.balanced"),
-      requiresPaid: true,
-    },
-  ];
+  // Iteration steps — WAN uses 4/6 (analogous quality tiers), MiniMax uses 8/12
+  // (12 is premium, like WAN's 6). Default per model: WAN 4, MiniMax 8.
+  $: stepOptions = isMiniMaxSelected
+    ? [
+        {
+          value: 8 as IterationSteps,
+          label: $_("review.iteration.fast"),
+          description: $_("review.iteration.minimaxStepsFast"),
+          requiresPaid: false,
+        },
+        {
+          value: 12 as IterationSteps,
+          label: $_("review.iteration.balanced"),
+          description: $_("review.iteration.minimaxStepsBalanced"),
+          requiresPaid: true,
+        },
+      ]
+    : [
+        {
+          value: 4 as IterationSteps,
+          label: $_("review.iteration.fast"),
+          description: $_("review.iteration.steps.fast"),
+          requiresPaid: false,
+        },
+        {
+          value: 6 as IterationSteps,
+          label: $_("review.iteration.balanced"),
+          description: $_("review.iteration.steps.balanced"),
+          requiresPaid: true,
+        },
+      ];
+  $: defaultIterationSteps = isMiniMaxSelected ? 8 : 4;
 
   // Segment colours — cycle through these
   const SEGMENT_COLORS_HEX = [
@@ -904,6 +934,25 @@
       pollStatus(); // Initial poll
       pollInterval = setInterval(pollStatus, 5000); // Poll every 5 seconds
     }
+
+    // Auto-start AI analysis: MiniMax H3 needs a good prompt to produce good
+    // video, so kick off the suggestion analysis automatically for editable
+    // entries that haven't been analyzed yet (no completed manual recognition,
+    // no pending/errored request). The user can re-run it anytime via the button.
+    const validation = entry.validation_metadata || {};
+    const analysisPending = validation.manual_recognition_requested_at && !validation.manual_recognition_done && !validation.manual_recognition_error;
+    const shouldAutoAnalyze =
+      isEditable &&
+      !validation.manual_recognition_done &&
+      !validation.manual_recognition_error &&
+      !analysisPending;
+
+    if (shouldAutoAnalyze) {
+      // Small delay so the page renders the "Analyzing..." state first
+      setTimeout(() => {
+        runManualAnalysis();
+      }, 300);
+    }
   });
 
   onDestroy(() => {
@@ -1115,7 +1164,7 @@
             busyModalMessage = t("review.quotaLimit.none");
           } else if (j.errorCode === "quota_exceeded") {
             busyModalMessage = t("review.quotaLimit.exceeded", {
-              values: { limit: j.limit, used: j.used },
+              values: { limit: j.limit, used: j.used, cost: j.cost ?? 1 },
             });
           } else if (j.errorCode === "queue_limit") {
             busyModalMessage = t("review.quotaLimit.queueLimit", {
@@ -1771,16 +1820,15 @@
             <div class="divider"></div>
           {/if}
 
-          {#if !isMiniMaxSelected}
-            <div class="space-y-4 mb-6">
-              <div class="flex items-center justify-between">
-                <h3 class="font-semibold">{$_("review.iteration.title")}</h3>
-                <span class="text-xs opacity-70"
-                  >{$_("review.iteration.help")}</span
-                >
-              </div>
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {#each visibleStepOptions as option}
+          <div class="space-y-4 mb-6">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold">{$_("review.iteration.title")}</h3>
+              <span class="text-xs opacity-70"
+                >{$_("review.iteration.help")}</span
+              >
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {#each visibleStepOptions as option}
                   <label
                     class="btn btn-outline flex items-center gap-3 justify-start"
                     class:btn-active={iterationSteps === option.value}
@@ -1803,7 +1851,6 @@
             </div>
 
             <div class="divider"></div>
-          {/if}
 
           {#if !promptRelayMode}
             <!-- Video Duration -->
@@ -1910,18 +1957,17 @@
           </div>
 
           <div class="divider"></div>
-          {#if !isMiniMaxSelected}
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="font-semibold">{$_("review.loraWeights")}</h3>
-              <button
-                class="btn btn-ghost btn-sm"
-                on:click={resetLoraWeights}
-                disabled={!isEditable}>{$_("review.reset")}</button
-              >
-            </div>
-            <p class="text-sm opacity-70 mb-4">{$_("review.loraWeightsHelp")}</p>
-            <div class="space-y-4">
-              {#each filteredLoraPresets as lora}
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-semibold">{$_("review.loraWeights")}</h3>
+            <button
+              class="btn btn-ghost btn-sm"
+              on:click={resetLoraWeights}
+              disabled={!isEditable}>{$_("review.reset")}</button
+            >
+          </div>
+          <p class="text-sm opacity-70 mb-4">{$_("review.loraWeightsHelp")}</p>
+          <div class="space-y-4">
+            {#each filteredLoraPresets as lora}
                 <div class="space-y-1">
                   <div class="flex items-center justify-between text-sm">
                     <span>{lora.label}</span>
@@ -1962,7 +2008,6 @@
                 </div>
               {/each}
             </div>
-          {/if}
 
           <div class="divider"></div>
 
@@ -2118,9 +2163,12 @@
             {:else}
               <div
                 class="badge badge-lg"
-                class:badge-error={quotaRemaining === 0}
-                class:badge-warning={quotaRemaining > 0 && quotaRemaining < 3}
-                class:badge-success={quotaRemaining > 0}
+                class:badge-error={quotaRemaining < selectedWorkflowQuotaCost}
+                class:badge-warning={quotaRemaining >= selectedWorkflowQuotaCost && quotaRemaining < 3}
+                class:badge-success={quotaRemaining >= 3}
+                title={selectedWorkflowQuotaCost > 1
+                  ? $_("review.quotaCost", { values: { cost: selectedWorkflowQuotaCost } })
+                  : undefined}
               >
                 {$_("review.quotaRemaining", {
                   values: { count: quotaRemaining },
@@ -2195,6 +2243,7 @@
               disabled={busy ||
                 entry.status === "processing" ||
                 entry.status === "in_queue" ||
+                (quotaRemaining !== null && quotaRemaining < selectedWorkflowQuotaCost) ||
                 (promptRelayMode && !relayFramesValid) ||
                 (promptRelayMode && !relaySegmentFramesValid) ||
                 (promptRelayMode && !relaySegmentPromptsValid)}

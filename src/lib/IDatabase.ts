@@ -27,6 +27,7 @@ export type VideoEntry = {
   iteration_steps?: number; // 4, 6, or 8 steps
   video_duration?: number; // 4, 6, 8, or 10 seconds (8 = MiniMax H3 premium only)
   video_resolution?: string; // '480p' or '720p'
+  quota_cost?: number; // Credits this video consumed (snapshot of workflow quotaCost at kickoff)
   validation_metadata?: {
     manual_recognition_done?: boolean;
     manual_recognition_requested_at?: string;
@@ -97,6 +98,8 @@ export type Workflow = {
   tags?: string[]; // e.g. ['wan22', 'nsfw'] — used for auto-matching LoRAs
   autoIncludeNewLoras?: boolean; // if true, new LoRAs with matching tags auto-added
   presetGroup?: string; // optional UI grouping
+  quotaCost?: number; // Credits consumed per video generated with this workflow (default 1)
+  quotaCostRules?: import('./quotaCost').QuotaCostRule[]; // Optional multiplier rules (e.g. 2x if duration >= 8s)
   isDefault: boolean;
   isDeleted: boolean; // Soft-delete: workflow is retired but kept for historical video reference
   createdAt: string;
@@ -239,9 +242,11 @@ export interface IDatabase {
   // Workflow methods
   getWorkflowById(id: string): Promise<Workflow | null>;
   getWorkflows(): Promise<Workflow[]>;
+  getAllWorkflowsIncludingDeleted(): Promise<Workflow[]>; // Admin: includes soft-deleted workflows
   getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v'): Promise<Workflow | null>;
   createWorkflow(data: Omit<Workflow, 'createdAt' | 'updatedAt'>): Promise<Workflow>;
   updateWorkflow(id: string, patch: Partial<Omit<Workflow, 'id' | 'createdAt'>>): Promise<Workflow | null>;
   deleteWorkflow(id: string): Promise<boolean>;
+  restoreWorkflow(id: string): Promise<Workflow | null>; // Un-soft-delete a workflow
   setDefaultWorkflow(id: string): Promise<Workflow | null>;
 }

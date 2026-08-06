@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import probe from 'probe-image-size';
 import type { Workflow } from './IDatabase';
+import type { LoraPreset } from './loraPresets';
 import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes } from './workflowUtils';
 
 interface MiniMaxWorkflowParams {
@@ -14,6 +15,9 @@ interface MiniMaxWorkflowParams {
   callback_url?: string;
   videoDuration?: 4 | 6 | 8 | 10; // seconds; frames derived via ComfyMathExpression (24fps)
   videoResolution?: '480p' | '720p';
+  iterationSteps?: 8 | 12; // sampler steps (MiniMax fast/balanced, like WAN's 4/6)
+  loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
+  loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
   workflow?: Workflow;
 }
 
@@ -99,6 +103,57 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
   const noiseInputs = getNodeInputs(workflow, randomNoiseNode);
   if (noiseInputs) {
     noiseInputs.noise_seed = Math.floor(params.seed);
+  }
+
+  // Speed-up LoRA (WAN lightx2v pattern): apply the workflow's required LoRA
+  // (isConfigurable=false preset present in loraWeights) after the UNETLoader,
+  // and reduce sampler steps to the preset's `steps` (default 8). The LoRA
+  // filename is fully configurable via admin — no hardcoding. If none is
+  // configured, the workflow runs at the template's 20 steps with no LoRA.
+  const schedulerNode = findNode(workflow, 'BasicScheduler');
+  const guiderNode = findNode(workflow, 'BasicGuider');
+  const unetLoaderNode = findNode(workflow, 'UNETLoader');
+
+  const appliedLora = (params.loraPresets ?? [])
+    .filter((p) => p.isConfigurable === false)
+    .find((p) => params.loraWeights && Object.prototype.hasOwnProperty.call(params.loraWeights, p.id));
+
+  if (appliedLora && unetLoaderNode && schedulerNode) {
+    const loraNodeId = '105:1000:lora_speedup';
+    const strength =
+      typeof params.loraWeights?.[appliedLora.id] === 'number'
+        ? params.loraWeights![appliedLora.id]
+        : (appliedLora.default ?? 1);
+
+    workflow.input.workflow[loraNodeId] = {
+      inputs: {
+        lora_name: appliedLora.id,
+        strength_model: strength,
+        model: [unetLoaderNode, 0],
+      },
+      class_type: 'LoraLoaderModelOnly',
+      _meta: { title: 'LoraLoaderModelOnly (Speed-Up)' },
+    };
+    workflow.input.node_weights[loraNodeId] = 1.0;
+
+    // Rewire BasicScheduler.model and BasicGuider.model to the LoRA output
+    const schedulerInputs = getNodeInputs(workflow, schedulerNode);
+    const guiderInputs = getNodeInputs(workflow, guiderNode);
+    if (schedulerInputs && Array.isArray(schedulerInputs.model) && schedulerInputs.model[0] === unetLoaderNode) {
+      schedulerInputs.model = [loraNodeId, 0];
+    }
+    if (guiderInputs && Array.isArray(guiderInputs.model) && guiderInputs.model[0] === unetLoaderNode) {
+      guiderInputs.model = [loraNodeId, 0];
+    }
+
+    // Reduce steps: user-selected iteration steps (8 fast / 12 balanced),
+    // defaulting to 8. The speed-up LoRA makes low step counts viable.
+    if (schedulerInputs) {
+      schedulerInputs.steps = params.iterationSteps ?? 8;
+    }
+    console.log(`[MiniMax] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
+  } else {
+    console.log('[MiniMax] No speed-up LoRA configured — using template steps (20)');
   }
 
   // i2v mode: no last image -> drop the last-frame LoadImage node and

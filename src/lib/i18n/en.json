@@ -319,7 +319,9 @@
         "fast": "4 steps",
         "balanced": "6 steps",
         "quality": "8 steps"
-      }
+      },
+      "minimaxStepsFast": "8 steps",
+      "minimaxStepsBalanced": "12 steps"
     },
     "duration": {
       "title": "Video Duration",
@@ -417,7 +419,7 @@
       "message": "Become a sponsor to get more video generation quota!",
       "sponsorButton": "Become a Sponsor",
       "none": "You don't have video generation quota. Become a sponsor to start creating videos!",
-      "exceeded": "You've used all {limit} video{limit,plural,=1{} other{s}} for today ({used} created). Please try again tomorrow, or become a sponsor for a higher limit.",
+      "exceeded": "This video costs {cost} credit{cost,plural,=1{} other{s}} and you don't have enough left. You've used {used} of your {limit} daily credits. Please try again tomorrow, or become a sponsor for a higher limit.",
       "queueLimit": "You already have {limit} video{limit,plural,=1{} other{s}} in the queue. Please wait for some to complete before starting new ones."
     },
     "warnings": {
@@ -427,7 +429,8 @@
       }
     },
     "videoDeleted": "This video has been deleted.",
-    "quotaRemaining": "Quota: {count} video{count,plural,=1{} other{s}} left",
+    "quotaRemaining": "Quota: {count} credit{count,plural,=1{} other{s}} left",
+    "quotaCost": "This video uses {cost} credit{cost,plural,=1{} other{s}}",
     "quotaNoAccess": "No quota — sponsor to unlock"
   },
   "users": {
@@ -534,15 +537,15 @@
     "accountInformation": "Account Information",
     "changePassword": "Change Password",
     "dailyQuota": {
-      "title": "Daily Video Quota",
+      "title": "Daily Credit Quota",
       "used": "Used Today",
-      "videosToday": "videos created",
+      "videosToday": "credits used",
       "limit": "Daily Limit",
-      "dailyLimit": "videos per day",
+      "dailyLimit": "credits per day",
       "remaining": "Remaining",
-      "videosLeft": "videos left",
-      "exceeded": "You have reached your daily video limit. Please try again tomorrow or consider becoming a sponsor for higher quotas.",
-      "almostExceeded": "You have only {remaining} videos left today. Create them wisely!",
+      "videosLeft": "credits left",
+      "exceeded": "You have reached your daily credit limit. Please try again tomorrow or consider becoming a sponsor for higher quotas.",
+      "almostExceeded": "You have only {remaining} credits left today. Create them wisely!",
       "resetInfo": "Your quota resets daily at midnight. Sponsor benefits include higher daily limits.",
       "loadError": "Failed to load quota information"
     },

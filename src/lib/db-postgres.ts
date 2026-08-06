@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic, Workflow, SponsorClaim } from './IDatabase';
 import { DEFAULT_LORA_PRESETS, normalizeLoraPresets } from './loraPresets';
+import { normalizeQuotaCostRules } from './quotaCost';
 import { PrismaPg } from '@prisma/adapter-pg'
 
 export class PostgresDatabase implements IDatabase {
@@ -468,11 +469,9 @@ export class PostgresDatabase implements IDatabase {
     const endOfDay = new Date(date);
     endOfDay.setHours(23, 59, 59, 999);
     
-    // Count videos that consumed quota:
-    // 1. Status is completed, in_queue, or processing
-    // 2. Status is deleted AND finalVideoUrl is not null (was successfully processed before deletion)
-    // Count by processingStartedAt (when job was submitted)
-    const count = await this.prisma.video.count({
+    // Sum credits consumed today. Videos without an explicit quota_cost default
+    // to 1 (backfilled by the migration), so legacy rows count as 1 each.
+    const result = await this.prisma.video.aggregate({
       where: {
         userId,
         processingStartedAt: {
@@ -486,10 +485,11 @@ export class PostgresDatabase implements IDatabase {
             finalVideoUrl: { not: null }
           }
         ]
-      }
+      },
+      _sum: { quotaCost: true },
     });
     
-    return count;
+    return result._sum.quotaCost ?? 0;
   }
 
   async getOldestLocalJob(): Promise<VideoEntry | null> {
@@ -1237,6 +1237,12 @@ export class PostgresDatabase implements IDatabase {
     return workflows.map(w => this.mapToWorkflow(w));
   }
 
+  async getAllWorkflowsIncludingDeleted(): Promise<Workflow[]> {
+    // Admin only: include soft-deleted workflows so they can be restored
+    const workflows = await this.prisma.workflow.findMany({ orderBy: { createdAt: 'asc' } });
+    return workflows.map(w => this.mapToWorkflow(w));
+  }
+
   async getDefaultWorkflow(workflowType: 'i2v' | 'fl2v' = 'i2v'): Promise<Workflow | null> {
     const workflow = await this.prisma.workflow.findFirst({ 
       where: { 
@@ -1248,7 +1254,7 @@ export class PostgresDatabase implements IDatabase {
   }
 
   async createWorkflow(data: Omit<Workflow, 'createdAt' | 'updatedAt'>): Promise<Workflow> {
-    const { id, name, description, templatePath, workflowType, isDefault, compatibleLoraIds, tags, autoIncludeNewLoras, presetGroup } = data as any;
+    const { id, name, description, templatePath, workflowType, isDefault, compatibleLoraIds, tags, autoIncludeNewLoras, presetGroup, quotaCost, quotaCostRules } = data as any;
     if (isDefault) {
       await this.prisma.workflow.updateMany({
         where: { workflowType: workflowType || 'i2v' },
@@ -1269,6 +1275,8 @@ export class PostgresDatabase implements IDatabase {
         ...(tags !== undefined ? { tags } : {}),
         ...(autoIncludeNewLoras !== undefined ? { autoIncludeNewLoras } : {}),
         ...(presetGroup !== undefined ? { presetGroup } : {}),
+        quotaCost: typeof quotaCost === 'number' && quotaCost >= 1 ? quotaCost : 1,
+        quotaCostRules: quotaCostRules !== undefined ? normalizeQuotaCostRules(quotaCostRules) : [],
       } as any,
     });
     return this.mapToWorkflow(created);
@@ -1284,6 +1292,8 @@ export class PostgresDatabase implements IDatabase {
     if ((patch as any).tags !== undefined) updateData.tags = (patch as any).tags;
     if ((patch as any).autoIncludeNewLoras !== undefined) updateData.autoIncludeNewLoras = (patch as any).autoIncludeNewLoras;
     if ((patch as any).presetGroup !== undefined) updateData.presetGroup = (patch as any).presetGroup;
+    if ((patch as any).quotaCost !== undefined) updateData.quotaCost = Math.max(1, (patch as any).quotaCost);
+    if ((patch as any).quotaCostRules !== undefined) updateData.quotaCostRules = normalizeQuotaCostRules((patch as any).quotaCostRules);
     if (patch.isDefault !== undefined) {
       if (patch.isDefault) {
         const current = await this.prisma.workflow.findUnique({ where: { id }, select: { workflowType: true } });
@@ -1318,6 +1328,18 @@ export class PostgresDatabase implements IDatabase {
     }
   }
 
+  async restoreWorkflow(id: string): Promise<Workflow | null> {
+    try {
+      const restored = await this.prisma.workflow.update({
+        where: { id },
+        data: { isDeleted: false, updatedAt: new Date() },
+      });
+      return this.mapToWorkflow(restored);
+    } catch {
+      return null;
+    }
+  }
+
   async setDefaultWorkflow(id: string): Promise<Workflow | null> {
     await this.prisma.workflow.updateMany({ data: { isDefault: false } });
     try {
@@ -1346,6 +1368,8 @@ export class PostgresDatabase implements IDatabase {
         : (typeof workflow.compatibleLoraIds === 'string'
           ? JSON.parse(workflow.compatibleLoraIds)
           : []),
+      quotaCost: typeof (workflow as any).quotaCost === 'number' ? (workflow as any).quotaCost : 1,
+      quotaCostRules: normalizeQuotaCostRules((workflow as any).quotaCostRules),
       tags: Array.isArray(rawTags) ? rawTags : (typeof rawTags === 'string' ? JSON.parse(rawTags) : []),
       autoIncludeNewLoras: typeof rawAuto === 'boolean' ? rawAuto : true,
       presetGroup: typeof rawGroup === 'string' ? rawGroup : undefined,

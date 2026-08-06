@@ -1,6 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/db';
+import { normalizeQuotaCostRules } from '$lib/quotaCost';
 
 export const PUT: RequestHandler = async ({ locals, params, request }) => {
   // Check authentication
@@ -25,6 +26,11 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
     throw error(400, 'workflowType must be either "i2v" or "fl2v"');
   }
 
+  const { quotaCost, quotaCostRules } = body as any;
+  if (quotaCost !== undefined && (!Number.isInteger(quotaCost) || quotaCost < 1)) {
+    throw error(400, 'quotaCost must be an integer >= 1');
+  }
+
   try {
     // Build patch object (extra fields via any cast for new columns)
     const patch: any = {};
@@ -38,6 +44,8 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
     if (tags !== undefined) patch.tags = Array.isArray(tags) ? tags.map((t: string) => String(t).toLowerCase()) : [];
     if (autoIncludeNewLoras !== undefined) patch.autoIncludeNewLoras = !!autoIncludeNewLoras;
     if (presetGroup !== undefined) patch.presetGroup = presetGroup || undefined;
+    if (quotaCost !== undefined) patch.quotaCost = quotaCost;
+    if (quotaCostRules !== undefined) patch.quotaCostRules = normalizeQuotaCostRules(quotaCostRules);
 
     const updated = await db.updateWorkflow(id, patch);
 

@@ -7,6 +7,7 @@ import { buildMiniMaxWorkflow } from '$lib/minimaxWorkflow';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { submitJob } from '$lib/local-queue';
 import { filterLoraWeights, isMiniMaxWorkflow } from '$lib/workflows';
+import { computeWorkflowQuotaCost } from '$lib/quotaCost';
 import { toOriginalUrl } from '$lib/serverImageUrl';
 import { evaluatePromptProperties } from '$lib/imageRecognition';
 
@@ -128,7 +129,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const loraWeights = body?.loraWeights;
     const iterationStepsRaw = body?.iterationSteps;
     const parsedSteps = Number(iterationStepsRaw);
-    const allowedSteps = [4, 6] as const;
+    const allowedSteps = [4, 6, 8, 12] as const;
     type IterationSteps = (typeof allowedSteps)[number];
     let iterationSteps: IterationSteps = 4;
 
@@ -303,8 +304,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 
     // Save user's settings first (before quota check) so their preferences are preserved
+    // Snapshot the workflow's effective credit cost so historical usage stays accurate
+    // even if the workflow is later edited or deleted. The cost is computed from the
+    // base quotaCost plus any matching quotaCostRules (e.g. 2x if duration >= 8s or
+    // if a speed-up LoRA is not used).
+    const workflowQuotaCost = computeWorkflowQuotaCost(workflow, {
+      videoDuration,
+      videoResolution: resolution,
+      loraWeights: filteredLoraWeights,
+    });
     const settingsPayload: any = { 
       workflow_id: workflow.id,
+      quota_cost: workflowQuotaCost,
       iteration_steps: iterationSteps,
       video_duration: videoDuration,
       video_resolution: resolution,
@@ -324,16 +335,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
     await updateVideo(id, settingsPayload);
 
-    // Check daily quota if user is logged in
+    // Check daily quota if user is logged in (in credits — cost may be > 1)
     if (locals.user) {
-      const quotaCheck = await checkDailyQuota(locals.user, settings);
+      const quotaCheck = await checkDailyQuota(locals.user, settings, workflowQuotaCost);
       if (quotaCheck.exceeded) {
         const errorCode = quotaCheck.limit === 0 ? 'quota_none' : 'quota_exceeded';
         return new Response(JSON.stringify({ 
-          error: `You have reached your daily limit of ${quotaCheck.limit} videos. You've created ${quotaCheck.used} videos today.`,
+          error: `This video costs ${workflowQuotaCost} credit${workflowQuotaCost > 1 ? 's' : ''}. You have used ${quotaCheck.used} of your ${quotaCheck.limit} daily credits.`,
           errorCode,
           limit: quotaCheck.limit,
           used: quotaCheck.used,
+          cost: workflowQuotaCost,
         }), { 
           status: 429, 
           headers: { 'Content-Type': 'application/json' } 
@@ -361,8 +373,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
-    // Enforce role requirement for 6 iteration steps
-    if (iterationSteps === 6) {
+    // Enforce role requirement for balanced iteration steps (6 for WAN, 12 for MiniMax)
+    const isMiniMax = isMiniMaxWorkflow(workflow);
+    const balancedStep = isMiniMax ? 12 : 6;
+    if (iterationSteps === balancedStep) {
       // Check if any of user's roles has allowAdvancedFeatures enabled
       const hasAdvancedFeatures = roles.some(roleName => 
         settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
@@ -370,7 +384,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
       if (!hasAdvancedFeatures) {
         return new Response(JSON.stringify({ 
-          error: '6 iteration steps is available to users with advanced features only.' 
+          error: `${balancedStep} iteration steps is available to users with advanced features only.` 
         }), { 
           status: 403, 
           headers: { 'Content-Type': 'application/json' } 
@@ -573,6 +587,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
               callback_url: callbackUrl,
               videoDuration: video.video_duration as any,
               videoResolution: video.video_resolution as any,
+              iterationSteps: video.iteration_steps as any,
+              loraWeights: video.lora_weights as any,
+              loraPresets: settings.loraPresets,
               workflow: workflowRecord,
             });
           }

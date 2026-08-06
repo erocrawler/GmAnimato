@@ -1,6 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/db';
+import { normalizeQuotaCostRules } from '$lib/quotaCost';
 
 export const POST: RequestHandler = async ({ locals, request }) => {
   // Check authentication
@@ -14,7 +15,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
   }
 
   const body = await request.json();
-  const { id, name, description, templatePath, workflowType, isDefault, compatibleLoraIds, tags, autoIncludeNewLoras, presetGroup } = body;
+  const { id, name, description, templatePath, workflowType, isDefault, compatibleLoraIds, tags, autoIncludeNewLoras, presetGroup, quotaCost, quotaCostRules } = body;
 
   if (!id || !name || !templatePath) {
     throw error(400, 'id, name, and templatePath are required');
@@ -26,6 +27,10 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
   if (!Array.isArray(compatibleLoraIds)) {
     throw error(400, 'compatibleLoraIds must be an array');
+  }
+
+  if (quotaCost !== undefined && (!Number.isInteger(quotaCost) || quotaCost < 1)) {
+    throw error(400, 'quotaCost must be an integer >= 1');
   }
 
   try {
@@ -40,6 +45,8 @@ export const POST: RequestHandler = async ({ locals, request }) => {
       tags: Array.isArray(tags) ? tags.map((t: string) => String(t).toLowerCase()) : [],
       autoIncludeNewLoras: typeof autoIncludeNewLoras === 'boolean' ? autoIncludeNewLoras : true,
       presetGroup: typeof presetGroup === 'string' ? presetGroup : undefined,
+      quotaCost: typeof quotaCost === 'number' ? quotaCost : 1,
+      quotaCostRules: normalizeQuotaCostRules(quotaCostRules),
     } as any);
 
     return json(created);
