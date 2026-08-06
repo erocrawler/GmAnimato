@@ -320,8 +320,9 @@
         "balanced": "6 steps",
         "quality": "8 steps"
       },
-      "minimaxStepsFast": "8 steps",
-      "minimaxStepsBalanced": "12 steps"
+      "minimaxStepsFast": "10 steps",
+      "minimaxStepsBalanced": "12 steps",
+      "minimaxStepsQuality": "15 steps"
     },
     "duration": {
       "title": "Video Duration",

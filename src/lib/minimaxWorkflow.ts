@@ -15,7 +15,7 @@ interface MiniMaxWorkflowParams {
   callback_url?: string;
   videoDuration?: 4 | 6 | 8 | 10; // seconds; frames derived via ComfyMathExpression (24fps)
   videoResolution?: '480p' | '720p';
-  iterationSteps?: 8 | 12; // sampler steps (MiniMax fast/balanced, like WAN's 4/6)
+  iterationSteps?: 10 | 12 | 15; // sampler steps (MiniMax fast/balanced/quality)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
   workflow?: Workflow;
@@ -146,10 +146,10 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
       guiderInputs.model = [loraNodeId, 0];
     }
 
-    // Reduce steps: user-selected iteration steps (8 fast / 12 balanced),
-    // defaulting to 8. The speed-up LoRA makes low step counts viable.
+    // Reduce steps: user-selected iteration steps (10 fast / 12 balanced / 15 quality),
+    // defaulting to 10. The speed-up LoRA makes low step counts viable.
     if (schedulerInputs) {
-      schedulerInputs.steps = params.iterationSteps ?? 8;
+      schedulerInputs.steps = params.iterationSteps ?? 10;
     }
     console.log(`[MiniMax] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
   } else {

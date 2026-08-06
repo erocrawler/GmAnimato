@@ -319,8 +319,9 @@
         "balanced": "6步",
         "quality": "8步"
       },
-      "minimaxStepsFast": "8步",
-      "minimaxStepsBalanced": "12步"
+      "minimaxStepsFast": "10步",
+      "minimaxStepsBalanced": "12步",
+      "minimaxStepsQuality": "15步"
     },
     "duration": {
       "title": "视频时长",

@@ -66,7 +66,7 @@
 
   const hasAdvancedFeatures: boolean = data.hasAdvancedFeatures || false;
 
-  type IterationSteps = 4 | 6 | 8 | 12;
+  type IterationSteps = 4 | 6 | 10 | 15;
   let stepOptions: {
     value: IterationSteps;
     label: string;
@@ -341,7 +341,8 @@
   $: if (!canUseQuality && videoResolution === "720p") videoResolution = "480p";
   // If the selected step isn't available for the current model/tier, snap to default
   $: if (!stepOptions.some((o) => o.value === iterationSteps)) iterationSteps = defaultIterationSteps as IterationSteps;
-  $: if (!canUseQuality && iterationSteps === (isMiniMaxSelected ? 12 : 6)) iterationSteps = isMiniMaxSelected ? 8 : 4;
+  $: if (!canUseQuality && iterationSteps === (isMiniMaxSelected ? 12 : 6)) iterationSteps = isMiniMaxSelected ? 10 : 4;
+  $: if (!canUseQuality && isMiniMaxSelected && iterationSteps === 15) iterationSteps = 10;
   $: resolutionOptions = [
     {
       value: "480p",
@@ -356,12 +357,14 @@
       requiresPaid: true,
     },
   ];
-  // Iteration steps — WAN uses 4/6 (analogous quality tiers), MiniMax uses 8/12
-  // (12 is premium, like WAN's 6). Default per model: WAN 4, MiniMax 8.
+  // Iteration steps — WAN uses 4/6 (analogous quality tiers), MiniMax uses 10/12/15
+  // (10 fast/free to limit GPU time, 12 balanced/premium = quality baseline with
+  // reasonable audio, 15 quality/premium = top tier for a visible difference).
+  // Default per model: WAN 4, MiniMax 10.
   $: stepOptions = isMiniMaxSelected
     ? [
         {
-          value: 8 as IterationSteps,
+          value: 10 as IterationSteps,
           label: $_("review.iteration.fast"),
           description: $_("review.iteration.minimaxStepsFast"),
           requiresPaid: false,
@@ -370,6 +373,12 @@
           value: 12 as IterationSteps,
           label: $_("review.iteration.balanced"),
           description: $_("review.iteration.minimaxStepsBalanced"),
+          requiresPaid: true,
+        },
+        {
+          value: 15 as IterationSteps,
+          label: $_("review.iteration.quality"),
+          description: $_("review.iteration.minimaxStepsQuality"),
           requiresPaid: true,
         },
       ]
@@ -387,7 +396,7 @@
           requiresPaid: true,
         },
       ];
-  $: defaultIterationSteps = isMiniMaxSelected ? 8 : 4;
+  $: defaultIterationSteps = isMiniMaxSelected ? 10 : 4;
 
   // Segment colours — cycle through these
   const SEGMENT_COLORS_HEX = [

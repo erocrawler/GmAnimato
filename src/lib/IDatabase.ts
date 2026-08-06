@@ -24,7 +24,7 @@ export type VideoEntry = {
     current_node?: string;
     current_node_progress?: number;
   };
-  iteration_steps?: number; // 4, 6, or 8 steps
+  iteration_steps?: number; // 4, 6 (WAN), 10, 12, or 15 (MiniMax) steps
   video_duration?: number; // 4, 6, 8, or 10 seconds (8 = MiniMax H3 premium only)
   video_resolution?: string; // '480p' or '720p'
   quota_cost?: number; // Credits this video consumed (snapshot of workflow quotaCost at kickoff)

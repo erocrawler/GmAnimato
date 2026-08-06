@@ -129,7 +129,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const loraWeights = body?.loraWeights;
     const iterationStepsRaw = body?.iterationSteps;
     const parsedSteps = Number(iterationStepsRaw);
-    const allowedSteps = [4, 6, 8, 12] as const;
+    const allowedSteps = [4, 6, 10, 12, 15] as const;
     type IterationSteps = (typeof allowedSteps)[number];
     let iterationSteps: IterationSteps = 4;
 
@@ -373,10 +373,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
-    // Enforce role requirement for balanced iteration steps (6 for WAN, 12 for MiniMax)
+    // Enforce role requirement for premium iteration steps (6 for WAN, 12/15 for MiniMax)
     const isMiniMax = isMiniMaxWorkflow(workflow);
-    const balancedStep = isMiniMax ? 12 : 6;
-    if (iterationSteps === balancedStep) {
+    const isPremiumStep = isMiniMax ? (iterationSteps === 12 || iterationSteps === 15) : iterationSteps === 6;
+    if (isPremiumStep) {
       // Check if any of user's roles has allowAdvancedFeatures enabled
       const hasAdvancedFeatures = roles.some(roleName => 
         settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
@@ -384,7 +384,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
       if (!hasAdvancedFeatures) {
         return new Response(JSON.stringify({ 
-          error: `${balancedStep} iteration steps is available to users with advanced features only.` 
+          error: `${iterationSteps} iteration steps is available to users with advanced features only.` 
         }), { 
           status: 403, 
           headers: { 'Content-Type': 'application/json' } 
