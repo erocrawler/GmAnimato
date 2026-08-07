@@ -704,7 +704,7 @@ export class JsonFileDatabase implements IDatabase {
     return result;
   }
 
-  async getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v'): Promise<import('./IDatabase').Workflow | null> {
+  async getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v' | 'ref2v'): Promise<import('./IDatabase').Workflow | null> {
     console.warn('[JSON DB] getDefaultWorkflow not supported - use PostgreSQL');
     return null;
   }

@@ -55,15 +55,16 @@ export const GET: RequestHandler = async ({ request }) => {
     // supported for tunneled/remote setups via getCallbackUrl.)
     const callbackUrl = getCallbackUrl(workerOrigin, job.id);
     
-    // Detect workflow type from job
+    // Detect workflow type from job (for logging; actual build in jobWorkflow)
+    const isRef2V = job.additional_options?.ref2v === true;
     const isFL2V = !!job.last_image_url;
-    const workflowType = isFL2V ? 'fl2v' : 'i2v';
+    const workflowType = isRef2V ? 'ref2v' : isFL2V ? 'fl2v' : 'i2v';
 
     const imageInputMode = (env.WORKER_IMAGE_INPUT_MODE ?? 'base64').toLowerCase();
     const shouldSendBase64 = imageInputMode !== 'url';
 
     // Build the workflow payload using the single shared construction path
-    // (MiniMax / FL2V / I2V) — see src/lib/jobWorkflow.ts
+    // (Ref2V / MiniMax / FL2V / I2V) — see src/lib/jobWorkflow.ts
     const { workflow: resolvedWorkflow, payload } = await buildJobWorkflow({
       video: job,
       settings,

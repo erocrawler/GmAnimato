@@ -3,8 +3,8 @@ import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
 
 export interface CreateVideoEntryParams {
   userId: string;
-  mode: 'i2v' | 'fl2v';
-  originalImageUrl: string;
+  mode: 'i2v' | 'fl2v' | 'ref2v';
+  originalImageUrl?: string;
   lastImageUrl?: string;
   prompt?: string;
   additionalOptions?: Record<string, any>;
@@ -26,7 +26,8 @@ export async function createVideoEntryForReview(
   const { userId, mode, originalImageUrl, lastImageUrl, prompt, additionalOptions } = params;
 
   try {
-    // Validate field lengths
+    // Validate field lengths. original_image_url is optional for ref2v (refs
+    // live in additional_options; the poster frame is stored there too).
     const validationData = {
       original_image_url: originalImageUrl,
       last_image_url: lastImageUrl,
@@ -51,7 +52,7 @@ export async function createVideoEntryForReview(
     const entry = await createVideoEntry({
       user_id: userId,
       workflow_id: defaultWorkflow?.id,
-      original_image_url: originalImageUrl,
+      original_image_url: originalImageUrl || '',
       last_image_url: lastImageUrl,
       prompt: prompt || '',
       tags: [],

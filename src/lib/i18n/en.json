@@ -270,6 +270,25 @@
         "firstFrame": "First Frame",
         "lastFrame": "Last Frame",
         "generateButton": "Generate Morphing Video"
+      },
+      "ref2v": {
+        "title": "Reference Video (Ref2V)",
+        "description": "Condition on a clip + images",
+        "videoLabel": "Reference Video (optional)",
+        "videoHint": "Max {max}s — clip it below",
+        "reuseLabel": "Or reuse one of your videos:",
+        "clipStart": "Start (s)",
+        "clipEnd": "End (s)",
+        "clipButton": "Clip Video",
+        "clipped": "Clipped:",
+        "imagesLabel": "Reference Images (optional, up to 5)",
+        "imagesHint": "Referenced in the prompt as <Picture 1..5>",
+        "optionalHint": "All references are optional — without any, this becomes a text-to-video job.",
+        "generateButton": "Generate Video",
+        "errors": {
+          "notVideo": "Selected file is not a video.",
+          "tooLarge": "Video is too large (max 50 MB before clipping)."
+        }
       }
     },
     "errors": {
@@ -289,6 +308,17 @@
     "imagePreview": "Image Preview",
     "firstFrame": "First Frame",
     "lastFrame": "Last Frame",
+    "ref2v": {
+      "noRefVideo": "No reference video — this will run as a text-to-video job",
+      "referencesLabel": "References:",
+      "addReference": "Add reference to prompt",
+      "removeReference": "Remove {ref} from prompt",
+      "referencesHint": "Click + to insert a <Picture N> / <Video 1> tag into the prompt at the cursor.",
+      "allReferencesUsed": "All references already added",
+      "allReferencesUsedShort": "All references tagged",
+      "addAllReferences": "Add all references",
+      "unreferencedHint": "{count} reference(s) not tagged — they still influence the output. Click + to reference them explicitly."
+    },
     "tags": "Tags",
     "addTag": "Add",
     "tagPlaceholder": "Type and press Enter...",

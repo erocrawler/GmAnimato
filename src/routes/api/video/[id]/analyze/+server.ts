@@ -79,6 +79,20 @@ export const POST: RequestHandler = async ({ params, locals }) => {
     const existingValidation = video.validation_metadata || {};
     const existingRequestedAtRaw = existingValidation.manual_recognition_requested_at;
 
+    // Ref2V pure t2v entries have no image to analyze (refs are optional and
+    // the poster may be empty) — nothing for the vision model to look at.
+    if (!video.original_image_url && video.additional_options?.ref2v === true) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          errorCode: 'analysis_unavailable',
+          error: 'No reference image to analyze for this ref2v job.',
+          entry: video,
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     // 4b: previous request already finished successfully — return result directly.
     if (existingValidation.manual_recognition_done) {
       return new Response(JSON.stringify({ success: true, entry: video }), {

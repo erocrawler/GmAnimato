@@ -14,6 +14,67 @@
   let entry = data.entry as any;
   let sponsorUrl = data.sponsorUrl || "";
   let prompt = entry.prompt || "";
+  // Ref2V reference-chip state: a "+" button opens a picker of the ref video /
+  // ref images; selecting one inserts its <Picture N> / <Video 1> token into the
+  // prompt at the cursor. The raw tokens are what gets sent to the server (the
+  // MiniMax H3 model splices the vision blocks at those exact tags).
+  let promptTextarea: HTMLTextAreaElement | undefined;
+  let promptCursor = -1;
+  // Available references, in the same order the model presents them (video 1st,
+  // then images 1..5). Token ordinals are per-type (always <Video 1>, <Picture N>).
+  $: refItems = (() => {
+    const ao = entry.additional_options || {};
+    const items: { kind: "video" | "image"; token: string; url: string; label: string }[] = [];
+    if (ao.ref_video_url) {
+      items.push({ kind: "video", token: "<Video 1>", url: ao.ref_video_url, label: "Video 1" });
+    }
+    (ao.ref_image_urls || []).forEach((u: string, i: number) => {
+      items.push({ kind: "image", token: `<Picture ${i + 1}>`, url: u, label: `Picture ${i + 1}` });
+    });
+    return items;
+  })();
+  // Tokens already present in the prompt (in any position)
+  $: referencedTokens = [...prompt.matchAll(/<(Picture|Video)\s*\d+>/g)].map((m) => m[0]);
+  // Refs not yet referenced — shown in the "+" picker
+  $: availableRefs = refItems.filter((r) => !referencedTokens.includes(r.token));
+
+  function escapeRegex(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function insertRefToken(token: string) {
+    if (!isEditable) return;
+    if (!promptTextarea) {
+      prompt = (prompt.trim() + " " + token).trim();
+      return;
+    }
+    const pos = promptCursor >= 0 ? promptCursor : promptTextarea.selectionStart ?? prompt.length;
+    const end = promptTextarea.selectionEnd ?? pos;
+    const before = prompt.slice(0, pos);
+    const after = prompt.slice(end);
+    const sepBefore = before && !/\s$/.test(before) ? " " : "";
+    const sepAfter = after && !/^\s/.test(after) ? " " : "";
+    prompt = before + sepBefore + token + sepAfter + after;
+    promptCursor = (before + sepBefore + token).length;
+    promptTextarea.focus();
+  }
+
+  function removeRefToken(token: string) {
+    if (!isEditable) return;
+    prompt = prompt
+      .replace(new RegExp(`\\s*${escapeRegex(token)}\\s*`, "g"), " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function insertAllRefTokens() {
+    if (!isEditable || availableRefs.length === 0) return;
+    // Append every not-yet-referenced token at the end of the prompt (separated
+    // by a space), so a user can quickly make all refs explicit.
+    const suffix = availableRefs.map((r) => r.token).join(" ");
+    prompt = (prompt.trim() + " " + suffix).trim();
+    if (promptTextarea) promptTextarea.focus();
+  }
   let busy = false;
   let message = "";
   let newtag = "";
@@ -34,7 +95,11 @@
   let loadingWorkflows = false;
 
   // Detect workflow type based on video mode
-  $: videoWorkflowType = entry.last_image_url ? "fl2v" : "i2v";
+  $: videoWorkflowType = entry.additional_options?.ref2v === true
+    ? "ref2v"
+    : entry.last_image_url
+      ? "fl2v"
+      : "i2v";
 
   // Filter workflows by type to match the video
   $: filteredWorkflows = workflows.filter(
@@ -1302,7 +1367,33 @@
     <!-- Image Preview Card -->
     <div class="card bg-base-100 shadow-xl">
       <figure class="px-4 pt-4">
-        {#if entry.last_image_url}
+        {#if videoWorkflowType === "ref2v"}
+          <!-- Ref2V Mode: show ref video (if any) + ref images -->
+          {#if entry.additional_options?.ref_video_url}
+            <video
+              src={entry.additional_options.ref_video_url}
+              controls
+              muted
+              playsinline
+              class="rounded-lg max-h-72 w-full object-contain bg-base-200"
+            ></video>
+          {:else}
+            <div class="w-full rounded-lg bg-base-200 py-10 text-center text-sm opacity-70">
+              {$_("review.ref2v.noRefVideo")}
+            </div>
+          {/if}
+          {#if entry.additional_options?.ref_image_urls?.length}
+            <div class="grid grid-cols-3 gap-2 w-full mt-3">
+              {#each entry.additional_options.ref_image_urls as refUrl, i}
+                <img
+                  src={refUrl}
+                  alt="ref image {i + 1}"
+                  class="rounded-lg max-h-32 object-contain w-full bg-base-200"
+                />
+              {/each}
+            </div>
+          {/if}
+        {:else if entry.last_image_url}
           <!-- FL2V Mode: Show both images -->
           <div class="grid grid-cols-2 gap-2 w-full">
             <div>
@@ -1455,12 +1546,101 @@
               : $_("review.yourPrompt")}
           </span>
         </label>
+
+        {#if videoWorkflowType === "ref2v" && refItems.length > 0}
+          <!-- Ref2V reference picker: insert <Picture N> / <Video 1> tokens into the prompt -->
+          <div class="flex flex-wrap items-center gap-2 mb-2">
+            <span class="text-xs opacity-70">{$_("review.ref2v.referencesLabel")}</span>
+
+            <!-- Active reference chips (parsed from the prompt tokens) -->
+            {#each refItems as ref (ref.token)}
+              {#if referencedTokens.includes(ref.token)}
+                <span
+                  class="badge badge-lg badge-primary gap-1 pl-1"
+                  title={ref.url}
+                >
+                  {#if ref.kind === "video"}
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
+                  {:else}
+                    <img src={ref.url} alt={ref.label} class="w-5 h-5 rounded object-cover" />
+                  {/if}
+                  <span>{ref.label}</span>
+                  <button
+                    type="button"
+                    class="btn btn-xs btn-circle btn-ghost btn-active"
+                    aria-label={$_("review.ref2v.removeReference", { values: { ref: ref.label } })}
+                    disabled={!isEditable}
+                    on:click={() => removeRefToken(ref.token)}
+                  >✕</button>
+                </span>
+              {/if}
+            {/each}
+
+            <!-- "+" button opens the picker of not-yet-referenced refs -->
+            <details class="dropdown dropdown-end">
+              <summary
+                class="btn btn-xs btn-outline btn-circle"
+                aria-label={$_("review.ref2v.addReference")}
+              >+</summary>
+              <ul
+                class="menu dropdown-content bg-base-200 rounded-box z-10 w-56 max-h-64 overflow-y-auto p-1 shadow"
+              >
+                {#if availableRefs.length > 1}
+                  <li>
+                    <button
+                      type="button"
+                      class="flex items-center gap-2 text-xs font-semibold"
+                      on:click={() => { insertAllRefTokens(); }}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                      {$_("review.ref2v.addAllReferences")}
+                    </button>
+                  </li>
+                  <li class="menu-title"><span class="text-xs opacity-50">{$_("review.ref2v.referencesLabel")}</span></li>
+                {/if}
+                {#each availableRefs as ref (ref.token)}
+                  <li>
+                    <button
+                      type="button"
+                      class="flex items-center gap-2 text-sm"
+                      on:click={() => { insertRefToken(ref.token); }}
+                    >
+                      {#if ref.kind === "video"}
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
+                      {:else}
+                        <img src={ref.url} alt={ref.label} class="w-8 h-8 rounded object-cover" />
+                      {/if}
+                      {ref.label}
+                    </button>
+                  </li>
+                {/each}
+                {#if availableRefs.length === 0}
+                  <li><span class="text-xs opacity-60 px-2 py-1">{$_("review.ref2v.allReferencesUsed")}</span></li>
+                {/if}
+              </ul>
+            </details>
+
+            {#if availableRefs.length > 0}
+              <span class="text-xs text-warning">
+                {$_("review.ref2v.unreferencedHint", { values: { count: availableRefs.length } })}
+              </span>
+            {:else}
+              <span class="text-xs text-success">{$_("review.ref2v.allReferencesUsedShort")}</span>
+            {/if}
+            <span class="text-xs opacity-50">{$_("review.ref2v.referencesHint")}</span>
+          </div>
+        {/if}
+
         <textarea
           id="prompt"
           bind:value={prompt}
+          bind:this={promptTextarea}
           placeholder={$_("review.promptPlaceholder")}
           class="textarea textarea-bordered textarea-lg h-32 w-full"
           disabled={!isEditable}
+          on:click={() => (promptCursor = promptTextarea?.selectionStart ?? -1)}
+          on:keyup={() => (promptCursor = promptTextarea?.selectionStart ?? -1)}
+          on:focus={() => (promptCursor = promptTextarea?.selectionStart ?? -1)}
         ></textarea>
       </div>
 

@@ -1259,7 +1259,7 @@ export class PostgresDatabase implements IDatabase {
     return workflows.map(w => this.mapToWorkflow(w));
   }
 
-  async getDefaultWorkflow(workflowType: 'i2v' | 'fl2v' = 'i2v'): Promise<Workflow | null> {
+  async getDefaultWorkflow(workflowType: 'i2v' | 'fl2v' | 'ref2v' = 'i2v'): Promise<Workflow | null> {
     const workflow = await this.prisma.workflow.findFirst({ 
       where: { 
         isDefault: true,
@@ -1357,7 +1357,14 @@ export class PostgresDatabase implements IDatabase {
   }
 
   async setDefaultWorkflow(id: string): Promise<Workflow | null> {
-    await this.prisma.workflow.updateMany({ data: { isDefault: false } });
+    // Only unset defaults of the SAME type — an i2v default and a fl2v default
+    // can coexist (each type needs its own default for job routing).
+    const current = await this.prisma.workflow.findUnique({ where: { id }, select: { workflowType: true } });
+    if (!current) return null;
+    await this.prisma.workflow.updateMany({
+      where: { workflowType: current.workflowType },
+      data: { isDefault: false },
+    });
     try {
       const updated = await this.prisma.workflow.update({
         where: { id },

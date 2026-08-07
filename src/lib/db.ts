@@ -274,7 +274,7 @@ export async function restoreWorkflow(id: string) {
   return db.restoreWorkflow(id);
 }
 
-export async function getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v') {
+export async function getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v' | 'ref2v') {
   return db.getDefaultWorkflow(workflowType);
 }
 

@@ -3,13 +3,41 @@ import { redirect } from '@sveltejs/kit';
 import { uploadBufferToS3 } from '$lib/s3';
 import { Buffer } from 'buffer';
 import { validateAndConvertImage } from '$lib/imageValidation';
+import { validateAndConvertVideo } from '$lib/videoValidation';
 import { createVideoEntryForReview } from '$lib/videoEntryCreation';
+import { getVideosByUser, getWorkflows } from '$lib/db';
+
+const MAX_REF_IMAGES = 5;
 
 export const load: PageServerLoad = async ({ locals }) => {
   if (!locals.user) {
     throw redirect(303, '/login');
   }
-  return {};
+  // Completed videos the user can reuse as a ref video (proxied URLs load in a
+  // same-origin <video>, so client-side clipping works without CORS issues).
+  let reusableVideos: { id: string; prompt: string; url: string }[] = [];
+  try {
+    const page = await getVideosByUser(locals.user.id, 1, 20, {
+      status: 'completed',
+      sortBy: 'completion'
+    });
+    reusableVideos = (page.videos ?? [])
+      .filter((v) => v.final_video_url)
+      .map((v) => ({ id: v.id, prompt: v.prompt || '', url: v.final_video_url! }));
+  } catch (e) {
+    console.error('[New] Failed to load reusable videos:', e);
+  }
+  // Hide the ref2v mode until an admin has configured a ref2v workflow
+  // (jobs can't run without one). Active (non-deleted) workflows only.
+  let hasRef2vWorkflow = false;
+  try {
+    const workflows = await getWorkflows();
+    hasRef2vWorkflow = workflows.some((w) => w.workflowType === 'ref2v');
+  } catch (e) {
+    console.error('[New] Failed to load workflows:', e);
+  }
+
+  return { reusableVideos, hasRef2vWorkflow };
 };
 
 export const actions: Actions = {
@@ -55,6 +83,83 @@ export const actions: Actions = {
         mode: 'fl2v',
         originalImageUrl: firstS3Url,
         lastImageUrl: lastS3Url
+      });
+
+      if (!result.success) {
+        return { error: result.error };
+      }
+
+      return { success: true, entry: result.entry };
+    } else if (mode === 'ref2v') {
+      // Handle Ref2V mode: optional reference video (client-clipped webm) +
+      // up to 5 optional reference images. Refs are ALL optional — with none
+      // provided the workflow degrades to pure text-to-video.
+      const refVideoFile = form.get('ref_video') as File | null;
+
+      // Upload ref video (if any) to S3. The buffer is validated + downscaled
+      // to ~480p (long edge ≤854, aspect preserved, audio kept) via ffmpeg,
+      // mirroring how ref images are validated/converted.
+      let refVideoUrl = '';
+      let refVideoName = '';
+      if (refVideoFile && refVideoFile.size > 0) {
+        const rawVideoBuffer = Buffer.from(await refVideoFile.arrayBuffer());
+        const videoResult = await validateAndConvertVideo(rawVideoBuffer, refVideoFile.type);
+        if (videoResult.error) {
+          return { error: videoResult.error };
+        }
+        refVideoUrl = await uploadBufferToS3(videoResult.buffer, videoResult.ext || 'webm');
+        refVideoName = refVideoFile.name || `ref_video.${videoResult.ext || 'webm'}`;
+      }
+
+      // Process up to 5 ref images
+      const refImageUrls: string[] = [];
+      const refImageNames: string[] = [];
+      for (let i = 1; i <= MAX_REF_IMAGES; i++) {
+        const imgFile = form.get(`ref_image_${i}`) as File | null;
+        if (!imgFile || imgFile.size === 0) continue;
+
+        let imgBuffer: Buffer<ArrayBufferLike> = Buffer.from(await imgFile.arrayBuffer());
+        const imgResult = await validateAndConvertImage(imgBuffer);
+        if (imgResult.error) {
+          return { error: `Ref image ${i}: ${imgResult.error}` };
+        }
+        imgBuffer = imgResult.buffer;
+        const imgExt = imgResult.ext || undefined;
+        const url = await uploadBufferToS3(imgBuffer, imgExt);
+        refImageUrls.push(url);
+        refImageNames.push(imgFile.name || `ref_image_${i}.${imgExt || 'png'}`);
+      }
+
+      // Poster frame: the client clips the ref video client-side and can send a
+      // poster PNG to use as the entry thumbnail (original_image_url is
+      // required). Fall back to the first ref image, else a placeholder.
+      const posterFile = form.get('poster_image') as File | null;
+      let posterUrl = '';
+      if (posterFile && posterFile.size > 0) {
+        let posterBuffer: Buffer<ArrayBufferLike> = Buffer.from(await posterFile.arrayBuffer());
+        const posterResult = await validateAndConvertImage(posterBuffer);
+        if (posterResult.error) {
+          return { error: `Poster: ${posterResult.error}` };
+        }
+        posterBuffer = posterResult.buffer;
+        posterUrl = await uploadBufferToS3(posterBuffer, posterResult.ext || 'png');
+      } else if (refImageUrls.length > 0) {
+        posterUrl = refImageUrls[0];
+      } else if (refVideoUrl) {
+        return { error: 'poster_image required when a ref video is provided' };
+      }
+
+      const result = await createVideoEntryForReview({
+        userId: locals.user.id,
+        mode: 'ref2v',
+        originalImageUrl: posterUrl,
+        additionalOptions: {
+          ref2v: true,
+          ref_video_url: refVideoUrl,
+          ref_video_name: refVideoName,
+          ref_image_urls: refImageUrls,
+          ref_image_names: refImageNames
+        }
       });
 
       if (!result.success) {

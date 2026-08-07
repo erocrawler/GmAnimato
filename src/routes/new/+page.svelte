@@ -3,8 +3,10 @@
   import { goto } from '$app/navigation';
   import { _ } from 'svelte-i18n';
   import { onMount } from 'svelte';
+  import { clipVideoToWebm, extractPosterFrame, getVideoDuration } from '$lib/videoClipper';
+  import type { LoraPreset } from '$lib/loraPresets';
 
-  type Mode = 'i2v' | 'fl2v';
+  type Mode = 'i2v' | 'fl2v' | 'ref2v';
   let mode: Mode = 'i2v';
   let imageFile: File | null = null;
   let firstImageFile: File | null = null;
@@ -27,6 +29,29 @@
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
   let lastDragoverTimestamp = 0;
   let dragoverCheckInterval: ReturnType<typeof setInterval> | null = null;
+
+  // ---- Ref2V state ----
+  export let data: any = {};
+  const reusableVideos: { id: string; prompt: string; url: string }[] = data.reusableVideos || [];
+  // Ref2V mode is only offered once an admin has configured a ref2v workflow.
+  const hasRef2vWorkflow: boolean = data.hasRef2vWorkflow === true;
+  // Current ref video source: either an uploaded File or a reused video URL
+  let refVideoSource: File | string | null = null;
+  let refVideoFile: File | null = null; // the client-clipped webm sent to the server
+  let refVideoName = '';
+  let refVideoDuration = 0;
+  let clipStart = 0;
+  let clipEnd = 10;
+  let clipBusy = false;
+  let clipError = '';
+  let refVideoPreviewUrl = '';
+  // Up to 5 ref images
+  let refImages: { file: File | null; preview: string; valid: boolean }[] = [];
+  for (let i = 0; i < 5; i++) refImages.push({ file: null, preview: '', valid: false });
+  let refImageInputs: (HTMLInputElement | undefined)[] = [];
+  let refVideoInput: HTMLInputElement;
+  let posterInput: HTMLInputElement;
+  const MAX_REF_VIDEO_SECONDS = 10;
 
   function setFileInput(inputEl: HTMLInputElement | undefined, file: File | null) {
     if (!inputEl) return;
@@ -145,8 +170,32 @@
     });
   }
 
-  function handleUploadEnhance() {
+  // The submit callback passed to `use:enhance` is awaited BEFORE the fetch
+  // (see SvelteKit forms.js), so async work here (ref2v client-side clipping)
+  // completes before FormData is serialized. It must return the result-handler.
+  async function handleUploadEnhance({ formData }: any) {
     submitting = true;
+    if (mode === 'ref2v' && refVideoSource && !refVideoFile) {
+      await applyClip();
+    }
+    if (refVideoFile) {
+      formData.set('ref_video', refVideoFile);
+    } else {
+      formData.delete('ref_video');
+    }
+    if (posterInput?.files?.[0]) {
+      formData.set('poster_image', posterInput.files[0]);
+    } else {
+      formData.delete('poster_image');
+    }
+    for (let i = 0; i < 5; i++) {
+      const f = refImages[i].file;
+      if (f) {
+        formData.set(`ref_image_${i + 1}`, f);
+      } else {
+        formData.delete(`ref_image_${i + 1}`);
+      }
+    }
     return async ({ result }: any) => {
       submitting = false;
       if (result.type === 'success' && result.data) {
@@ -163,6 +212,8 @@
             validFile = false;
             validFirstFile = false;
             validLastFile = false;
+            resetRefVideo();
+            for (let i = 0; i < 5; i++) removeRefImage(i);
             await goto(`/new/review/${entry.id}`);
             return;
           }
@@ -180,7 +231,117 @@
     };
   }
 
-  $: isFormValid = mode === 'i2v' ? validFile : (validFirstFile && validLastFile);
+  $: isFormValid = mode === 'i2v' ? validFile : mode === 'fl2v' ? (validFirstFile && validLastFile) : true;
+
+  // ---- Ref2V handlers ----
+
+  function resetRefVideo() {
+    refVideoSource = null;
+    refVideoFile = null;
+    refVideoName = '';
+    refVideoDuration = 0;
+    clipStart = 0;
+    clipEnd = MAX_REF_VIDEO_SECONDS;
+    clipError = '';
+    if (refVideoPreviewUrl && refVideoPreviewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(refVideoPreviewUrl);
+    }
+    refVideoPreviewUrl = '';
+    setFileInput(refVideoInput, null);
+  }
+
+  async function onRefVideoFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const f = input.files?.[0] || null;
+    if (!f) return;
+    if (!f.type.startsWith('video/')) {
+      clipError = $_('newVideo.mode.ref2v.errors.notVideo');
+      return;
+    }
+    if (f.size > 50 * 1024 * 1024) {
+      clipError = $_('newVideo.mode.ref2v.errors.tooLarge');
+      return;
+    }
+    clipError = '';
+    resetRefVideo();
+    refVideoSource = f;
+    refVideoName = f.name || 'ref_video.webm';
+    refVideoPreviewUrl = URL.createObjectURL(f);
+    try {
+      const dur = await getVideoDuration(f);
+      refVideoDuration = dur;
+      clipStart = 0;
+      clipEnd = Math.min(MAX_REF_VIDEO_SECONDS, dur);
+    } catch (err) {
+      clipError = String(err);
+    }
+  }
+
+  function reuseVideo(url: string, prompt: string) {
+    resetRefVideo();
+    refVideoSource = url;
+    refVideoName = (prompt || 'video').slice(0, 40).replace(/[^\w.-]+/g, '_') + '.webm';
+    refVideoPreviewUrl = url;
+  }
+
+  async function applyClip() {
+    if (!refVideoSource) return;
+    clipBusy = true;
+    clipError = '';
+    try {
+      const result = await clipVideoToWebm(refVideoSource, clipStart, clipEnd, MAX_REF_VIDEO_SECONDS);
+      const clippedName = refVideoName || 'ref_video.webm';
+      refVideoFile = new File([result.blob], clippedName, { type: result.mimeType });
+      setFileInput(refVideoInput, refVideoFile);
+      if (refVideoPreviewUrl && refVideoPreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(refVideoPreviewUrl);
+      }
+      refVideoPreviewUrl = URL.createObjectURL(refVideoFile);
+
+      // Extract a poster frame for the entry thumbnail (original_image_url is
+      // required by the DB). The worker can also use it as a preview.
+      try {
+        const poster = await extractPosterFrame(refVideoSource, clipStart);
+        setFileInput(posterInput, new File([poster], 'poster.png', { type: 'image/png' }));
+      } catch (posterErr) {
+        console.warn('[Ref2V] Poster extraction failed:', posterErr);
+      }
+    } catch (err) {
+      clipError = String(err);
+    } finally {
+      clipBusy = false;
+    }
+  }
+
+  function onRefImageFile(e: Event, index: number) {
+    const input = e.target as HTMLInputElement;
+    const f = input.files?.[0] || null;
+    if (!f) {
+      removeRefImage(index);
+      return;
+    }
+    validateFile(f).then((err) => {
+      if (err) {
+        message = err;
+        messageType = 'error';
+        setTimeout(() => (message = ''), 4000);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        refImages[index] = { file: f, preview: String(reader.result), valid: true };
+        refImages = [...refImages];
+        setFileInput(refImageInputs[index], f);
+      };
+      reader.readAsDataURL(f);
+    });
+  }
+
+  function removeRefImage(index: number) {
+    refImages[index] = { file: null, preview: '', valid: false };
+    refImages = [...refImages];
+    setFileInput(refImageInputs[index], null);
+  }
 
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
@@ -223,6 +384,12 @@
     if (mode === 'i2v') {
       // For i2v mode, take the first image file
       handleFileInput(imageFiles[0], 'image');
+    } else if (mode === 'ref2v') {
+      // For ref2v mode, assign dropped images to the first empty ref slot
+      const emptySlot = refImages.findIndex((r) => !r.valid);
+      if (emptySlot !== -1) {
+        onRefImageFile({ target: { files: [imageFiles[0]] } } as unknown as Event, emptySlot);
+      }
     } else {
       // For fl2v mode, assign intelligently
       if (imageFiles.length >= 2) {
@@ -314,6 +481,12 @@
   }
 
   onMount(() => {
+    // If ref2v became unavailable (no ref2v workflow configured), fall back to
+    // i2v so the UI never shows a ref2v-only state.
+    if (mode === 'ref2v' && !hasRef2vWorkflow) {
+      mode = 'i2v';
+    }
+
     // Heartbeat strategy: check if dragover events are still firing
     // If no dragover event for 100ms, the user has dragged away
     dragoverCheckInterval = setInterval(() => {
@@ -402,6 +575,15 @@
                 <p class="text-xs opacity-70 mt-1">{$_('newVideo.mode.fl2v.description')}</p>
               </div>
             </label>
+            {#if hasRef2vWorkflow}
+              <label class="label cursor-pointer gap-2 flex-1 border rounded-lg p-4" class:border-primary={mode === 'ref2v'} class:bg-base-200={mode === 'ref2v'}>
+                <input type="radio" name="mode" value="ref2v" bind:group={mode} on:change={onModeChange} class="radio radio-primary" />
+                <div class="flex-1">
+                  <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.title')}</span>
+                  <p class="text-xs opacity-70 mt-1">{$_('newVideo.mode.ref2v.description')}</p>
+                </div>
+              </label>
+            {/if}
           </div>
         </div>
 
@@ -432,7 +614,7 @@
               </div>
             </div>
           {/if}
-        {:else}
+        {:else if mode === 'fl2v'}
           <!-- FL2V Mode: Two Images -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="form-control w-full">
@@ -497,6 +679,147 @@
               </button>
             </div>
           {/if}
+        {:else}
+          <!-- Ref2V Mode: optional ref video (client-clipped) + up to 5 optional ref images -->
+          <div class="alert alert-info shadow-lg mb-6">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <div class="text-sm">{$_('newVideo.mode.ref2v.optionalHint')}</div>
+          </div>
+
+          <!-- Reference video -->
+          <div class="form-control w-full mb-4">
+            <div class="label">
+              <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.videoLabel')}</span>
+              <span class="label-text-alt">{$_('newVideo.mode.ref2v.videoHint', { values: { max: MAX_REF_VIDEO_SECONDS } })}</span>
+            </div>
+            <input 
+              id="ref_video_source" 
+              type="file" 
+              accept="video/*" 
+              on:change={onRefVideoFile}
+              class="file-input file-input-bordered file-input-primary w-full"
+            />
+            <input id="ref_video" name="ref_video" type="file" accept="video/*" class="hidden" bind:this={refVideoInput} />
+            <input id="poster_image" name="poster_image" type="file" accept="image/*" class="hidden" bind:this={posterInput} />
+          </div>
+
+          {#if reusableVideos.length > 0}
+            <div class="form-control w-full mb-4">
+              <div class="label">
+                <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.reuseLabel')}</span>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                {#each reusableVideos as v}
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline"
+                    class:btn-primary={refVideoSource === v.url}
+                    on:click={() => reuseVideo(v.url, v.prompt)}
+                  >
+                    {v.prompt || v.id}
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          {#if refVideoSource}
+            <div class="mt-4 rounded-lg overflow-hidden shadow-lg bg-base-200">
+              <video src={refVideoPreviewUrl} controls muted playsinline class="w-full max-h-72" preload="metadata"></video>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 mt-4">
+              <div class="form-control w-full">
+                <label class="label" for="clip_start">
+                  <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.clipStart')}</span>
+                  <span class="label-text-alt">{clipStart.toFixed(1)}s</span>
+                </label>
+                <input
+                  id="clip_start"
+                  type="range"
+                  min="0"
+                  max={Math.max(0, refVideoDuration || MAX_REF_VIDEO_SECONDS)}
+                  step="0.1"
+                  value={clipStart}
+                  on:input={(e) => (clipStart = Math.min(Number((e.target as HTMLInputElement).value), clipEnd - 0.1))}
+                  class="range range-primary"
+                />
+              </div>
+              <div class="form-control w-full">
+                <label class="label" for="clip_end">
+                  <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.clipEnd')}</span>
+                  <span class="label-text-alt">{clipEnd.toFixed(1)}s</span>
+                </label>
+                <input
+                  id="clip_end"
+                  type="range"
+                  min="0"
+                  max={Math.max(0, refVideoDuration || MAX_REF_VIDEO_SECONDS)}
+                  step="0.1"
+                  value={clipEnd}
+                  on:input={(e) => (clipEnd = Math.max(Number((e.target as HTMLInputElement).value), clipStart + 0.1))}
+                  class="range range-primary"
+                />
+              </div>
+            </div>
+
+            <div class="flex items-center gap-3 mt-4">
+              <button type="button" class="btn btn-primary" disabled={clipBusy} on:click={applyClip}>
+                {#if clipBusy}
+                  <span class="loading loading-spinner"></span>
+                {:else}
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                {/if}
+                {$_('newVideo.mode.ref2v.clipButton')}
+              </button>
+              {#if refVideoFile}
+                <span class="text-sm opacity-70">{$_('newVideo.mode.ref2v.clipped')} {refVideoFile.name}</span>
+              {/if}
+            </div>
+            {#if clipError}
+              <div class="alert alert-error shadow-lg mt-4">
+                <span>{clipError}</span>
+              </div>
+            {/if}
+          {/if}
+
+          <!-- Reference images (up to 5) -->
+          <div class="form-control w-full mt-6">
+            <div class="label">
+              <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.imagesLabel')}</span>
+              <span class="label-text-alt">{$_('newVideo.mode.ref2v.imagesHint')}</span>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {#each refImages as rimg, i}
+                <div class="card bg-base-200 rounded-lg p-2">
+                  <input
+                    id="ref_image_{i + 1}"
+                    name="ref_image_{i + 1}"
+                    type="file"
+                    accept="image/*"
+                    class="file-input file-input-bordered file-input-sm file-input-ghost w-full text-xs"
+                    bind:this={refImageInputs[i]}
+                    on:change={(e) => onRefImageFile(e, i)}
+                  />
+                  {#if rimg.preview}
+                    <div class="relative mt-2">
+                      <img src={rimg.preview} alt={`ref image ${i + 1}`} class="w-full h-24 object-cover rounded" />
+                      <button
+                        type="button"
+                        class="btn btn-circle btn-xs btn-error absolute top-1 right-1"
+                        on:click={() => removeRefImage(i)}
+                        aria-label="Remove"
+                      >✕</button>
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </div>
         {/if}
         
         <div class="card-actions justify-end mt-6">
@@ -510,8 +833,10 @@
               </svg>
               {#if mode === 'i2v'}
                 {$_('newVideo.startProcessing')}
-              {:else}
+              {:else if mode === 'fl2v'}
                 {$_('newVideo.mode.fl2v.generateButton')}
+              {:else}
+                {$_('newVideo.mode.ref2v.generateButton')}
               {/if}
             {/if}
           </button>

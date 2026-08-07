@@ -43,6 +43,14 @@ export type VideoEntry = {
     freelong_blend_strength?: number; // FreeLong blend strength (0 to 1)
     prompt_relay_mode?: boolean;
     prompt_relay_segments?: { prompt: string; frames: number }[];
+    // Ref2V (MiniMax H3 reference-to-video): refs are ALL optional; the
+    // workflow degrades to pure t2v when neither ref video nor ref images
+    // are provided. URLs are the original (S3) URLs.
+    ref2v?: boolean;
+    ref_video_url?: string;
+    ref_video_name?: string;
+    ref_image_urls?: string[];
+    ref_image_names?: string[];
     // Add future options here without DB migration
   };
   lora_weights?: Record<string, number>; // LoRA weights for customization
@@ -92,7 +100,7 @@ export type Workflow = {
   name: string;
   description?: string;
   templatePath: string;
-  workflowType: 'i2v' | 'fl2v'; // Type of workflow: i2v (single image) or fl2v (two images)
+  workflowType: 'i2v' | 'fl2v' | 'ref2v'; // i2v (single image), fl2v (two images), ref2v (reference video + optional images)
   compatibleLoraIds: string[]; // Array of LoRA IDs compatible with this workflow
   // Preset mechanism extensions
   tags?: string[]; // e.g. ['wan22', 'nsfw'] — used for auto-matching LoRAs
@@ -245,7 +253,7 @@ export interface IDatabase {
   getWorkflowById(id: string): Promise<Workflow | null>;
   getWorkflows(): Promise<Workflow[]>;
   getAllWorkflowsIncludingDeleted(): Promise<Workflow[]>; // Admin: includes soft-deleted workflows
-  getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v'): Promise<Workflow | null>;
+  getDefaultWorkflow(workflowType?: 'i2v' | 'fl2v' | 'ref2v'): Promise<Workflow | null>;
   createWorkflow(data: Omit<Workflow, 'createdAt' | 'updatedAt'>): Promise<Workflow>;
   updateWorkflow(id: string, patch: Partial<Omit<Workflow, 'id' | 'createdAt'>>): Promise<Workflow | null>;
   deleteWorkflow(id: string): Promise<boolean>;

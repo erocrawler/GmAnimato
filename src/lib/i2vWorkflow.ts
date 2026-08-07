@@ -166,17 +166,26 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
     originalSourceNodeId: string,
     newSourceNodeId: string
   ) => {
+    const samplerModelKey = variant === 'high' ? 'model_high_noise' : 'model_low_noise';
+    // Prefer rewiring the sampler's model input when it directly consumes the
+    // original source. (Old templates had a TeaCache pass-through node between
+    // the UNet and the sampler; with it removed, the sampler consumes the UNet
+    // directly — scanning for an intermediate node would self-loop on a
+    // just-created chain node.)
+    if (
+      samplerInputs &&
+      Array.isArray(samplerInputs[samplerModelKey]) &&
+      samplerInputs[samplerModelKey][0] === originalSourceNodeId
+    ) {
+      samplerInputs[samplerModelKey] = [newSourceNodeId, 0];
+      return true;
+    }
+
     for (const node of Object.values(workflowNodes) as any[]) {
       if (Array.isArray(node.inputs?.model) && node.inputs.model[0] === originalSourceNodeId) {
         node.inputs.model = [newSourceNodeId, 0];
         return true;
       }
-    }
-
-    const samplerModelKey = variant === 'high' ? 'model_high_noise' : 'model_low_noise';
-    if (samplerInputs && Array.isArray(samplerInputs[samplerModelKey])) {
-      samplerInputs[samplerModelKey] = [newSourceNodeId, 0];
-      return true;
     }
 
     return false;

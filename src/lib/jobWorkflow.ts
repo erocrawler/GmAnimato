@@ -20,6 +20,7 @@ import { getWorkflowById, getDefaultWorkflow } from '$lib/db';
 import { buildWorkflow } from '$lib/i2vWorkflow';
 import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
 import { buildMiniMaxWorkflow } from '$lib/minimaxWorkflow';
+import { buildRef2VWorkflow } from '$lib/ref2vWorkflow';
 import { isMiniMaxWorkflow } from '$lib/workflows';
 import { toOriginalUrl } from '$lib/serverImageUrl';
 import type { AdminSettings, VideoEntry, Workflow } from '$lib/IDatabase';
@@ -87,9 +88,11 @@ export interface BuildJobWorkflowResult {
 export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promise<BuildJobWorkflowResult> {
   const { video, settings, callbackUrl, imageMode = 'url', useSageAttention = false } = options;
 
-  // Detect workflow type from the job (first+last image => fl2v, else i2v)
+  // Detect workflow type from the job: ref2v flag takes precedence (its template
+  // path contains 'minimax'), then first+last image => fl2v, else i2v.
+  const isRef2V = video.additional_options?.ref2v === true;
   const isFL2V = !!video.last_image_url;
-  const workflowType = isFL2V ? 'fl2v' : 'i2v';
+  const workflowType = isRef2V ? 'ref2v' : isFL2V ? 'fl2v' : 'i2v';
 
   // Resolve workflow record (explicit selection or type default)
   let workflow: Workflow | null = null;
@@ -114,7 +117,57 @@ export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promis
 
   let payload: any;
 
-  if (isMiniMaxWorkflow(workflow)) {
+  if (isRef2V) {
+    // MiniMax H3 reference-to-video — refs are ALL optional (no ref video +
+    // no ref images degrades to pure t2v). Refs are snapshotted in
+    // additional_options at upload time. Must be checked BEFORE
+    // isMiniMaxWorkflow because the ref2v template path also contains 'minimax'.
+    const refVideoUrl = video.additional_options?.ref_video_url
+      ? toOriginalUrl(video.additional_options.ref_video_url)
+      : undefined;
+    const refImageUrls: string[] | undefined = Array.isArray(video.additional_options?.ref_image_urls)
+      ? video.additional_options.ref_image_urls.map((u: string) => toOriginalUrl(u))
+      : undefined;
+
+    const [refVideoBase64, refImageBase64s] = shouldSendBase64
+      ? await Promise.all([
+          refVideoUrl ? fetchImageAsBase64(refVideoUrl) : Promise.resolve(null),
+          refImageUrls && refImageUrls.length > 0
+            ? Promise.all(refImageUrls.map((u) => fetchImageAsBase64(u)))
+            : Promise.resolve([]),
+        ])
+      : [null, [] as string[]];
+
+    payload = await buildRef2VWorkflow({
+      ref_video_name: video.additional_options?.ref_video_name ?? '',
+      ref_video_url: refVideoUrl ?? '',
+      ref_image_names: Array.isArray(video.additional_options?.ref_image_names)
+        ? (video.additional_options.ref_image_names as string[])
+        : undefined,
+      ref_image_urls: refImageUrls,
+      input_prompt: video.prompt ?? 'A beautiful video',
+      seed,
+      callback_url: callbackUrl,
+      videoDuration: video.video_duration as 4 | 6 | 8 | 10 | undefined,
+      videoResolution: video.video_resolution as '480p' | '720p' | undefined,
+      iterationSteps: video.iteration_steps as 10 | 12 | 15 | undefined,
+      loraWeights,
+      loraPresets: settings.loraPresets,
+      workflow,
+    });
+
+    if (shouldSendBase64 && payload?.input?.images) {
+      payload.input.images = refImageBase64s.map((b64, i) => ({
+        name: payload.input.images[i]?.name ?? `ref_image_${i + 1}.png`,
+        image: b64,
+      }));
+    }
+    if (shouldSendBase64 && refVideoBase64 && payload?.input?.videos) {
+      payload.input.videos = [
+        { name: payload.input.videos[0]?.name ?? 'ref_video.mp4', image: refVideoBase64 },
+      ];
+    }
+  } else if (isMiniMaxWorkflow(workflow)) {
     // MiniMax H3 uses a different node stack — dedicated builder.
     // It handles both i2v (no last image) and fl2v (has last image).
     const originalImageUrl = toOriginalUrl(video.original_image_url);

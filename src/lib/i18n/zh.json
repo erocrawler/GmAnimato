@@ -269,6 +269,25 @@
         "firstFrame": "首帧",
         "lastFrame": "末帧",
         "generateButton": "生成渐变视频"
+      },
+      "ref2v": {
+        "title": "参考视频 (Ref2V)",
+        "description": "使用片段和图像作为条件",
+        "videoLabel": "参考视频（可选）",
+        "videoHint": "最长 {max} 秒 — 可在下方裁剪",
+        "reuseLabel": "或复用您的一个视频：",
+        "clipStart": "开始 (秒)",
+        "clipEnd": "结束 (秒)",
+        "clipButton": "裁剪视频",
+        "clipped": "已裁剪：",
+        "imagesLabel": "参考图像（可选，最多 5 张）",
+        "imagesHint": "在提示词中用 <Picture 1..5> 引用",
+        "optionalHint": "所有参考均为可选 — 若未提供任何参考，将退化为文本转视频。",
+        "generateButton": "生成视频",
+        "errors": {
+          "notVideo": "所选文件不是视频。",
+          "tooLarge": "视频过大（裁剪前最大 50 MB）。"
+        }
       }
     },
     "errors": {
@@ -288,6 +307,17 @@
     "imagePreview": "图像预览",
     "firstFrame": "第一帧",
     "lastFrame": "最后一帧",
+    "ref2v": {
+      "noRefVideo": "没有参考视频 — 将以文本转视频方式生成",
+      "referencesLabel": "参考元素：",
+      "addReference": "在提示词中添加参考",
+      "removeReference": "从提示词中移除 {ref}",
+      "referencesHint": "点击 + 在提示词光标处插入 <Picture N> / <Video 1> 标签。",
+      "allReferencesUsed": "所有参考已添加",
+      "allReferencesUsedShort": "所有参考已标记",
+      "addAllReferences": "添加所有参考",
+      "unreferencedHint": "有 {count} 个参考未标记 — 它们仍会影响输出。点击 + 显式引用它们。"
+    },
     "tags": "标签",
     "addTag": "添加",
     "tagPlaceholder": "输入后按回车...",

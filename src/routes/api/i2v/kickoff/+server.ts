@@ -219,9 +219,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return new Response(JSON.stringify({ error: 'workflow not found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
       }
     } else {
-      // Detect if this is FL2V mode (has last_image_url) to get appropriate default
+      // Detect if this is FL2V mode (has last_image_url) or ref2v (additional_options.ref2v)
       const isFL2V = !!existing.last_image_url;
-      const workflowType = isFL2V ? 'fl2v' : 'i2v';
+      const isRef2V = existing.additional_options?.ref2v === true;
+      const workflowType = isRef2V ? 'ref2v' : isFL2V ? 'fl2v' : 'i2v';
       
       // Use default workflow for this type
       workflow = await getDefaultWorkflow(workflowType);
@@ -232,9 +233,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
     console.log(`[I2V] Using workflow: ${workflow.name} (${workflow.id})`);
 
-    // Detect if this is FL2V mode (has last_image_url)
+    // Detect if this is FL2V mode (has last_image_url) or ref2v (additional_options.ref2v)
     const isFL2V = !!existing.last_image_url;
-    const expectedWorkflowType = isFL2V ? 'fl2v' : 'i2v';
+    const isRef2V = existing.additional_options?.ref2v === true;
+    const expectedWorkflowType = isRef2V ? 'ref2v' : isFL2V ? 'fl2v' : 'i2v';
 
     // Validate workflow type matches job type
     if (workflow.workflowType !== expectedWorkflowType) {
@@ -552,7 +554,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         updateVideo,
         async (video) => {
           // This callback builds workflow for migrated jobs or RunPod-direct jobs.
-          // Single shared construction path (MiniMax / FL2V / I2V) — see src/lib/jobWorkflow.ts
+          // Single shared construction path (MiniMax / FL2V / I2V / Ref2V) —
+          // see src/lib/jobWorkflow.ts
           const origin = new URL(request.url).origin;
           // Always include the callback (CALLBACK_BASE_URL override supported).
           const callbackUrl = getCallbackUrl(origin, video.id);
