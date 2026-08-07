@@ -27,7 +27,7 @@
   let workflowName = $state('');
   let workflowDescription = $state('');
   let workflowTemplatePath = $state('');
-  let workflowType: 'i2v' | 'fl2v' = $state('i2v');
+  let workflowType: 'i2v' | 'fl2v' | 'ref2v' = $state('i2v');
   let workflowIsDefault = $state(false);
   let workflowCompatibleLoras = $state<string[]>([]);
   let workflowTags = $state<string[]>([]); // tags for auto matching
@@ -1165,7 +1165,7 @@
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2 flex-wrap">
                       <h3 class="text-lg font-bold">{workflow.name}</h3>
-                      <span class="badge badge-sm" class:badge-info={workflow.workflowType === 'i2v'} class:badge-secondary={workflow.workflowType === 'fl2v'}>
+                      <span class="badge badge-sm" class:badge-info={workflow.workflowType === 'i2v'} class:badge-secondary={workflow.workflowType === 'fl2v'} class:badge-accent={workflow.workflowType === 'ref2v'}>
                         {workflow.workflowType?.toUpperCase()}
                       </span>
                       {#if workflow.isDefault}<span class="badge badge-primary badge-sm">Default</span>{/if}
@@ -1949,6 +1949,7 @@
           <select bind:value={workflowType} class="select select-bordered select-sm w-full">
             <option value="i2v">I2V</option>
             <option value="fl2v">FL2V</option>
+            <option value="ref2v">Ref2V</option>
           </select>
         </label>
         <label class="form-control cursor-pointer flex-row items-center gap-2 mt-5">

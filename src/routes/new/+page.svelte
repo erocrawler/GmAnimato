@@ -35,19 +35,35 @@
   const reusableVideos: { id: string; prompt: string; url: string }[] = data.reusableVideos || [];
   // Ref2V mode is only offered once an admin has configured a ref2v workflow.
   const hasRef2vWorkflow: boolean = data.hasRef2vWorkflow === true;
-  // Current ref video source: either an uploaded File or a reused video URL
+  // Current ref video source: either an uploaded File or a video URL
   let refVideoSource: File | string | null = null;
   let refVideoFile: File | null = null; // the client-clipped webm sent to the server
+  let refVideoUrlInput = ''; // user-pasted video URL (from their videos or the gallery)
   let refVideoName = '';
   let refVideoDuration = 0;
   let clipStart = 0;
   let clipEnd = 10;
   let clipBusy = false;
   let clipError = '';
+  let includeAudio = true; // include the source audio track in the clip (default on)
   let refVideoPreviewUrl = '';
-  // Up to 5 ref images
+  // Clip range: one of the two thumbs is "active" so overlapping thumbs stay draggable
+  let clipActiveThumb: 'start' | 'end' = 'start';
+  // Whether the current source can be clipped client-side (File or same-origin
+  // URL). Cross-origin URLs (legacy S3 links) can't be read by canvas — the
+  // clip controls are hidden and the URL is passed through to the server.
+  $: canClipRefVideo =
+    !refVideoSource ||
+    refVideoSource instanceof File ||
+    (typeof refVideoSource === 'string' &&
+      (refVideoSource.startsWith('/') ||
+        (typeof location !== 'undefined' && refVideoSource.startsWith(location.origin))));
+  // Slider range: never exceed the clip cap (10s); round max to a 0.1 step so
+  // the end thumb can actually reach the far edge.
+  $: sliderMax = Math.min(refVideoDuration || MAX_REF_VIDEO_SECONDS, MAX_REF_VIDEO_SECONDS);
+  // Up to 6 ref images (2 per row x 3 rows)
   let refImages: { file: File | null; preview: string; valid: boolean }[] = [];
-  for (let i = 0; i < 5; i++) refImages.push({ file: null, preview: '', valid: false });
+  for (let i = 0; i < 6; i++) refImages.push({ file: null, preview: '', valid: false });
   let refImageInputs: (HTMLInputElement | undefined)[] = [];
   let refVideoInput: HTMLInputElement;
   let posterInput: HTMLInputElement;
@@ -176,7 +192,13 @@
   async function handleUploadEnhance({ formData }: any) {
     submitting = true;
     if (mode === 'ref2v' && refVideoSource && !refVideoFile) {
-      await applyClip();
+      // Only clip when the source is a File or same-origin URL. Cross-origin
+      // URLs can't be read by canvas — pass the URL through to the server.
+      if (canClipRefVideo) {
+        await applyClip();
+      } else if (typeof refVideoSource === 'string') {
+        formData.set('ref_video_url', refVideoSource);
+      }
     }
     if (refVideoFile) {
       formData.set('ref_video', refVideoFile);
@@ -188,7 +210,7 @@
     } else {
       formData.delete('poster_image');
     }
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       const f = refImages[i].file;
       if (f) {
         formData.set(`ref_image_${i + 1}`, f);
@@ -213,7 +235,7 @@
             validFirstFile = false;
             validLastFile = false;
             resetRefVideo();
-            for (let i = 0; i < 5; i++) removeRefImage(i);
+            for (let i = 0; i < 6; i++) removeRefImage(i);
             await goto(`/new/review/${entry.id}`);
             return;
           }
@@ -240,6 +262,7 @@
     refVideoFile = null;
     refVideoName = '';
     refVideoDuration = 0;
+    refVideoUrlInput = '';
     clipStart = 0;
     clipEnd = MAX_REF_VIDEO_SECONDS;
     clipError = '';
@@ -277,11 +300,54 @@
     }
   }
 
-  function reuseVideo(url: string, prompt: string) {
+  async function useVideoUrl(url: string) {
+    const trimmed = (url || '').trim();
+    if (!trimmed) return;
+    // Accept proxied (/media/...) or absolute http(s) URLs
+    if (!/^(\/|https?:\/\/)/i.test(trimmed)) {
+      clipError = $_('newVideo.mode.ref2v.errors.invalidUrl');
+      return;
+    }
+    clipError = '';
     resetRefVideo();
-    refVideoSource = url;
-    refVideoName = (prompt || 'video').slice(0, 40).replace(/[^\w.-]+/g, '_') + '.webm';
-    refVideoPreviewUrl = url;
+    refVideoSource = trimmed;
+    refVideoName = 'ref_video.webm';
+    refVideoPreviewUrl = trimmed;
+    try {
+      // Best-effort: probe duration so the clip slider has a sane range.
+      const dur = await getVideoDuration(trimmed);
+      refVideoDuration = dur;
+      clipStart = 0;
+      clipEnd = Math.min(MAX_REF_VIDEO_SECONDS, dur);
+    } catch {
+      // Cross-origin URLs can't be probed — leave duration 0 and rely on the
+      // MAX cap (clip controls are hidden for those anyway).
+      refVideoDuration = 0;
+      clipStart = 0;
+      clipEnd = MAX_REF_VIDEO_SECONDS;
+    }
+  }
+
+  function onClipStartInput(e: Event) {
+    const v = Number((e.target as HTMLInputElement).value);
+    clipStart = Math.min(v, Math.max(0, clipEnd - 0.1));
+    clipActiveThumb = 'start';
+  }
+
+  function onClipEndInput(e: Event) {
+    const v = Number((e.target as HTMLInputElement).value);
+    clipEnd = Math.max(v, Math.min(sliderMax, clipStart + 0.1));
+    clipActiveThumb = 'end';
+  }
+
+  function onClipRangePointerDown(e: PointerEvent) {
+    // Raise whichever thumb is closer to the pointer so overlapping thumbs
+    // remain individually draggable.
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const val = pct * sliderMax;
+    clipActiveThumb = Math.abs(val - clipStart) <= Math.abs(val - clipEnd) ? 'start' : 'end';
   }
 
   async function applyClip() {
@@ -289,8 +355,12 @@
     clipBusy = true;
     clipError = '';
     try {
-      const result = await clipVideoToWebm(refVideoSource, clipStart, clipEnd, MAX_REF_VIDEO_SECONDS);
-      const clippedName = refVideoName || 'ref_video.webm';
+      const result = await clipVideoToWebm(refVideoSource, clipStart, clipEnd, MAX_REF_VIDEO_SECONDS, includeAudio);
+      // Name the clipped file after the output container (result.mimeType is
+      // the clean base type, e.g. 'video/mp4' -> .mp4).
+      const ext = result.mimeType.includes('mp4') ? 'mp4' : 'webm';
+      const baseName = (refVideoName || 'ref_video').replace(/\.(mp4|webm|mov|mkv)$/i, '');
+      const clippedName = `${baseName}.${ext}`;
       refVideoFile = new File([result.blob], clippedName, { type: result.mimeType });
       setFileInput(refVideoInput, refVideoFile);
       if (refVideoPreviewUrl && refVideoPreviewUrl.startsWith('blob:')) {
@@ -379,19 +449,42 @@
     if (!files || files.length === 0) return;
 
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'));
-    if (imageFiles.length === 0) return;
+    const videoFiles = Array.from(files).filter((f) => f.type.startsWith('video/'));
 
     if (mode === 'i2v') {
       // For i2v mode, take the first image file
+      if (imageFiles.length === 0) return;
       handleFileInput(imageFiles[0], 'image');
     } else if (mode === 'ref2v') {
-      // For ref2v mode, assign dropped images to the first empty ref slot
-      const emptySlot = refImages.findIndex((r) => !r.valid);
-      if (emptySlot !== -1) {
-        onRefImageFile({ target: { files: [imageFiles[0]] } } as unknown as Event, emptySlot);
+      // For ref2v mode, auto-detect: video -> ref video, image -> next ref slot.
+      const videoFile = videoFiles[0];
+      if (videoFile) {
+        // Reuse the same validation as the file input handler.
+        if (!videoFile.type.startsWith('video/')) {
+          clipError = $_('newVideo.mode.ref2v.errors.notVideo');
+        } else if (videoFile.size > 50 * 1024 * 1024) {
+          clipError = $_('newVideo.mode.ref2v.errors.tooLarge');
+        } else {
+          clipError = '';
+          resetRefVideo();
+          refVideoSource = videoFile;
+          refVideoName = videoFile.name || 'ref_video.webm';
+          refVideoPreviewUrl = URL.createObjectURL(videoFile);
+          getVideoDuration(videoFile).then((dur) => {
+            refVideoDuration = dur;
+            clipStart = 0;
+            clipEnd = Math.min(MAX_REF_VIDEO_SECONDS, dur);
+          }).catch((err) => { clipError = String(err); });
+        }
+      }
+      for (const img of imageFiles) {
+        const emptySlot = refImages.findIndex((r) => !r.valid);
+        if (emptySlot === -1) break; // all 6 slots filled
+        onRefImageFile({ target: { files: [img] } } as unknown as Event, emptySlot);
       }
     } else {
       // For fl2v mode, assign intelligently
+      if (imageFiles.length === 0) return;
       if (imageFiles.length >= 2) {
         // If user dropped 2+ images, assign first and second
         handleFileInput(imageFiles[0], 'first_image');
@@ -560,27 +653,27 @@
           <div class="label">
             <span class="label-text font-semibold">{$_('newVideo.mode.title')}</span>
           </div>
-          <div class="flex flex-col sm:flex-row gap-4">
-            <label class="label cursor-pointer gap-2 flex-1 border rounded-lg p-4" class:border-primary={mode === 'i2v'} class:bg-base-200={mode === 'i2v'}>
-              <input type="radio" name="mode" value="i2v" bind:group={mode} on:change={onModeChange} class="radio radio-primary" />
-              <div class="flex-1">
-                <span class="label-text font-semibold">{$_('newVideo.mode.i2v.title')}</span>
-                <p class="text-xs opacity-70 mt-1">{$_('newVideo.mode.i2v.description')}</p>
+          <div class="flex flex-col sm:flex-row sm:flex-wrap gap-4">
+            <label class="label cursor-pointer gap-2 flex-1 min-w-0 basis-full sm:basis-[30%] border rounded-lg p-4" class:border-primary={mode === 'i2v'} class:bg-base-200={mode === 'i2v'}>
+              <input type="radio" name="mode" value="i2v" bind:group={mode} on:change={onModeChange} class="radio radio-primary shrink-0" />
+              <div class="flex-1 min-w-0 whitespace-normal">
+                <span class="label-text font-semibold break-words">{$_('newVideo.mode.i2v.title')}</span>
+                <p class="text-xs opacity-70 mt-1 break-words">{$_('newVideo.mode.i2v.description')}</p>
               </div>
             </label>
-            <label class="label cursor-pointer gap-2 flex-1 border rounded-lg p-4" class:border-primary={mode === 'fl2v'} class:bg-base-200={mode === 'fl2v'}>
-              <input type="radio" name="mode" value="fl2v" bind:group={mode} on:change={onModeChange} class="radio radio-primary" />
-              <div class="flex-1">
-                <span class="label-text font-semibold">{$_('newVideo.mode.fl2v.title')}</span>
-                <p class="text-xs opacity-70 mt-1">{$_('newVideo.mode.fl2v.description')}</p>
+            <label class="label cursor-pointer gap-2 flex-1 min-w-0 basis-full sm:basis-[30%] border rounded-lg p-4" class:border-primary={mode === 'fl2v'} class:bg-base-200={mode === 'fl2v'}>
+              <input type="radio" name="mode" value="fl2v" bind:group={mode} on:change={onModeChange} class="radio radio-primary shrink-0" />
+              <div class="flex-1 min-w-0 whitespace-normal">
+                <span class="label-text font-semibold break-words">{$_('newVideo.mode.fl2v.title')}</span>
+                <p class="text-xs opacity-70 mt-1 break-words">{$_('newVideo.mode.fl2v.description')}</p>
               </div>
             </label>
             {#if hasRef2vWorkflow}
-              <label class="label cursor-pointer gap-2 flex-1 border rounded-lg p-4" class:border-primary={mode === 'ref2v'} class:bg-base-200={mode === 'ref2v'}>
-                <input type="radio" name="mode" value="ref2v" bind:group={mode} on:change={onModeChange} class="radio radio-primary" />
-                <div class="flex-1">
-                  <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.title')}</span>
-                  <p class="text-xs opacity-70 mt-1">{$_('newVideo.mode.ref2v.description')}</p>
+              <label class="label cursor-pointer gap-2 flex-1 min-w-0 basis-full sm:basis-[30%] border rounded-lg p-4" class:border-primary={mode === 'ref2v'} class:bg-base-200={mode === 'ref2v'}>
+                <input type="radio" name="mode" value="ref2v" bind:group={mode} on:change={onModeChange} class="radio radio-primary shrink-0" />
+                <div class="flex-1 min-w-0 whitespace-normal">
+                  <span class="label-text font-semibold break-words">{$_('newVideo.mode.ref2v.title')}</span>
+                  <p class="text-xs opacity-70 mt-1 break-words">{$_('newVideo.mode.ref2v.description')}</p>
                 </div>
               </label>
             {/if}
@@ -705,81 +798,118 @@
             <input id="poster_image" name="poster_image" type="file" accept="image/*" class="hidden" bind:this={posterInput} />
           </div>
 
-          {#if reusableVideos.length > 0}
-            <div class="form-control w-full mb-4">
-              <div class="label">
-                <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.reuseLabel')}</span>
-              </div>
-              <div class="flex flex-wrap gap-2">
-                {#each reusableVideos as v}
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-outline"
-                    class:btn-primary={refVideoSource === v.url}
-                    on:click={() => reuseVideo(v.url, v.prompt)}
-                  >
-                    {v.prompt || v.id}
-                  </button>
-                {/each}
-              </div>
+          <!-- Or paste a video URL (from your videos or the gallery) -->
+          <div class="form-control w-full mb-4">
+            <div class="label">
+              <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.urlLabel')}</span>
+              <span class="label-text-alt">{$_('newVideo.mode.ref2v.urlHint')}</span>
             </div>
-          {/if}
+            <div class="flex gap-2">
+              <input
+                type="url"
+                class="input input-bordered input-sm flex-1 min-w-0"
+                placeholder={$_('newVideo.mode.ref2v.urlPlaceholder')}
+                bind:value={refVideoUrlInput}
+                list="ref2v-video-suggestions"
+                on:keydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); useVideoUrl(refVideoUrlInput); } }}
+              />
+              <button
+                type="button"
+                class="btn btn-sm btn-outline"
+                disabled={!refVideoUrlInput.trim()}
+                on:click={() => useVideoUrl(refVideoUrlInput)}
+              >{$_('newVideo.mode.ref2v.urlUse')}</button>
+            </div>
+            {#if reusableVideos.length > 0}
+              <datalist id="ref2v-video-suggestions">
+                {#each reusableVideos as v}
+                  <option value={v.url}>{v.prompt || v.id}</option>
+                {/each}
+              </datalist>
+            {/if}
+          </div>
 
           {#if refVideoSource}
             <div class="mt-4 rounded-lg overflow-hidden shadow-lg bg-base-200">
-              <video src={refVideoPreviewUrl} controls muted playsinline class="w-full max-h-72" preload="metadata"></video>
+              {#key refVideoPreviewUrl}
+                <video
+                  src={refVideoPreviewUrl}
+                  controls
+                  muted
+                  playsinline
+                  preload="auto"
+                  class="w-full max-h-72"
+                ></video>
+              {/key}
             </div>
 
-            <div class="grid grid-cols-2 gap-4 mt-4">
-              <div class="form-control w-full">
-                <label class="label" for="clip_start">
-                  <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.clipStart')}</span>
-                  <span class="label-text-alt">{clipStart.toFixed(1)}s</span>
+            {#if canClipRefVideo}
+              <div class="form-control w-full mt-4">
+                <label class="label" for="clip_range">
+                  <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.clipRange')}</span>
+                  <span class="label-text-alt font-mono">{clipStart.toFixed(1)}s — {clipEnd.toFixed(1)}s</span>
                 </label>
-                <input
-                  id="clip_start"
-                  type="range"
-                  min="0"
-                  max={Math.max(0, refVideoDuration || MAX_REF_VIDEO_SECONDS)}
-                  step="0.1"
-                  value={clipStart}
-                  on:input={(e) => (clipStart = Math.min(Number((e.target as HTMLInputElement).value), clipEnd - 0.1))}
-                  class="range range-primary"
-                />
+                <div
+                  id="clip_range"
+                  class="dual-range"
+                  style={`--range-min: 0; --range-max: ${sliderMax}; --range-a: ${clipStart}; --range-b: ${clipEnd};`}
+                  role="group"
+                  aria-label={$_('newVideo.mode.ref2v.clipRange')}
+                  on:pointerdown={onClipRangePointerDown}
+                >
+                  <input
+                    type="range"
+                    min="0"
+                    max={sliderMax}
+                    step="0.1"
+                    bind:value={clipStart}
+                    on:input={onClipStartInput}
+                    class:z-raise={clipActiveThumb === 'start'}
+                    aria-label={$_('newVideo.mode.ref2v.clipStart')}
+                  />
+                  <input
+                    type="range"
+                    min="0"
+                    max={sliderMax}
+                    step="0.1"
+                    bind:value={clipEnd}
+                    on:input={onClipEndInput}
+                    class:z-raise={clipActiveThumb === 'end'}
+                    aria-label={$_('newVideo.mode.ref2v.clipEnd')}
+                  />
+                </div>
               </div>
-              <div class="form-control w-full">
-                <label class="label" for="clip_end">
-                  <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.clipEnd')}</span>
-                  <span class="label-text-alt">{clipEnd.toFixed(1)}s</span>
-                </label>
-                <input
-                  id="clip_end"
-                  type="range"
-                  min="0"
-                  max={Math.max(0, refVideoDuration || MAX_REF_VIDEO_SECONDS)}
-                  step="0.1"
-                  value={clipEnd}
-                  on:input={(e) => (clipEnd = Math.max(Number((e.target as HTMLInputElement).value), clipStart + 0.1))}
-                  class="range range-primary"
-                />
-              </div>
-            </div>
 
-            <div class="flex items-center gap-3 mt-4">
-              <button type="button" class="btn btn-primary" disabled={clipBusy} on:click={applyClip}>
-                {#if clipBusy}
-                  <span class="loading loading-spinner"></span>
-                {:else}
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
+              <div class="flex items-center gap-3 mt-4">
+                <button type="button" class="btn btn-primary" disabled={clipBusy} on:click={applyClip}>
+                  {#if clipBusy}
+                    <span class="loading loading-spinner"></span>
+                  {:else}
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  {/if}
+                  {$_('newVideo.mode.ref2v.clipButton')}
+                </button>
+                {#if refVideoFile}
+                  <span class="text-sm opacity-70">{$_('newVideo.mode.ref2v.clipped')} {refVideoFile.name}</span>
                 {/if}
-                {$_('newVideo.mode.ref2v.clipButton')}
-              </button>
-              {#if refVideoFile}
-                <span class="text-sm opacity-70">{$_('newVideo.mode.ref2v.clipped')} {refVideoFile.name}</span>
-              {/if}
-            </div>
+              </div>
+
+              <!-- Include audio in the clip (default on) -->
+              <label class="flex items-center gap-2 mt-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  class="checkbox checkbox-primary checkbox-sm"
+                  bind:checked={includeAudio}
+                />
+                <span class="text-sm">{$_('newVideo.mode.ref2v.includeAudio')}</span>
+              </label>
+            {:else}
+              <div class="alert alert-info shadow-lg mt-4 py-2">
+                <span class="text-sm">{$_('newVideo.mode.ref2v.crossOriginHint')}</span>
+              </div>
+            {/if}
             {#if clipError}
               <div class="alert alert-error shadow-lg mt-4">
                 <span>{clipError}</span>
@@ -787,13 +917,13 @@
             {/if}
           {/if}
 
-          <!-- Reference images (up to 5) -->
+          <!-- Reference images (up to 6) -->
           <div class="form-control w-full mt-6">
             <div class="label">
               <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.imagesLabel')}</span>
               <span class="label-text-alt">{$_('newVideo.mode.ref2v.imagesHint')}</span>
             </div>
-            <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div class="grid grid-cols-2 gap-3">
               {#each refImages as rimg, i}
                 <div class="card bg-base-200 rounded-lg p-2">
                   <input
@@ -855,3 +985,82 @@
     </div>
   </div>
 </div>
+
+<style>
+  /* Dual-thumb range slider (start/end clip) */
+  .dual-range {
+    position: relative;
+    height: 2rem;
+  }
+  .dual-range::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 6px;
+    transform: translateY(-50%);
+    border-radius: 3px;
+    background: linear-gradient(
+      to right,
+      color-mix(in oklch, var(--color-base-content) 20%, transparent) 0%,
+      color-mix(in oklch, var(--color-base-content) 20%, transparent) calc(var(--range-a) / var(--range-max) * 100%),
+      var(--color-primary) calc(var(--range-a) / var(--range-max) * 100%),
+      var(--color-primary) calc(var(--range-b) / var(--range-max) * 100%),
+      color-mix(in oklch, var(--color-base-content) 20%, transparent) calc(var(--range-b) / var(--range-max) * 100%),
+      color-mix(in oklch, var(--color-base-content) 20%, transparent) 100%
+    );
+  }
+  .dual-range input[type='range'] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    background: transparent;
+    pointer-events: none;
+    -webkit-appearance: none;
+    appearance: none;
+    z-index: 1;
+  }
+  .dual-range input[type='range'].z-raise {
+    z-index: 2;
+  }
+  .dual-range input[type='range']::-webkit-slider-runnable-track {
+    background: transparent;
+    height: 6px;
+  }
+  .dual-range input[type='range']::-moz-range-track {
+    background: transparent;
+    height: 6px;
+  }
+  .dual-range input[type='range']::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    pointer-events: auto;
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    background: var(--color-primary);
+    border: 2px solid var(--color-base-100);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+    margin-top: -6px;
+    cursor: grab;
+  }
+  .dual-range input[type='range']::-webkit-slider-thumb:active {
+    cursor: grabbing;
+  }
+  .dual-range input[type='range']::-moz-range-thumb {
+    pointer-events: auto;
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    background: var(--color-primary);
+    border: 2px solid var(--color-base-100);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+    cursor: grab;
+  }
+  .dual-range input[type='range']::-moz-range-thumb:active {
+    cursor: grabbing;
+  }
+</style>

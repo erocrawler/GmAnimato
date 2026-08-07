@@ -275,18 +275,25 @@
         "description": "使用片段和图像作为条件",
         "videoLabel": "参考视频（可选）",
         "videoHint": "最长 {max} 秒 — 可在下方裁剪",
-        "reuseLabel": "或复用您的一个视频：",
+        "urlLabel": "或粘贴视频链接：",
+        "urlHint": "来自我的视频或画廊",
+        "urlPlaceholder": "https://... 或 /media/...",
+        "urlUse": "使用",
+        "clipRange": "裁剪范围（开始 — 结束）",
         "clipStart": "开始 (秒)",
         "clipEnd": "结束 (秒)",
         "clipButton": "裁剪视频",
         "clipped": "已裁剪：",
-        "imagesLabel": "参考图像（可选，最多 5 张）",
-        "imagesHint": "在提示词中用 <Picture 1..5> 引用",
+        "includeAudio": "在裁剪片段中包含音频",
+        "crossOriginHint": "该视频来自其他源，无法在浏览器中裁剪 — 将直接使用原视频。",
+        "imagesLabel": "参考图像（可选，最多 6 张）",
+        "imagesHint": "在提示词中用 <Picture 1..6> 引用",
         "optionalHint": "所有参考均为可选 — 若未提供任何参考，将退化为文本转视频。",
         "generateButton": "生成视频",
         "errors": {
           "notVideo": "所选文件不是视频。",
-          "tooLarge": "视频过大（裁剪前最大 50 MB）。"
+          "tooLarge": "视频过大（裁剪前最大 50 MB）。",
+          "invalidUrl": "请输入有效的视频链接（http(s) 或 /media/...）。"
         }
       }
     },

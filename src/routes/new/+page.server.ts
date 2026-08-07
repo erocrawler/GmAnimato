@@ -3,11 +3,11 @@ import { redirect } from '@sveltejs/kit';
 import { uploadBufferToS3 } from '$lib/s3';
 import { Buffer } from 'buffer';
 import { validateAndConvertImage } from '$lib/imageValidation';
-import { validateAndConvertVideo } from '$lib/videoValidation';
+import { validateAndConvertVideo, extractVideoPoster } from '$lib/videoValidation';
 import { createVideoEntryForReview } from '$lib/videoEntryCreation';
 import { getVideosByUser, getWorkflows } from '$lib/db';
 
-const MAX_REF_IMAGES = 5;
+const MAX_REF_IMAGES = 6;
 
 export const load: PageServerLoad = async ({ locals }) => {
   if (!locals.user) {
@@ -91,14 +91,19 @@ export const actions: Actions = {
 
       return { success: true, entry: result.entry };
     } else if (mode === 'ref2v') {
-      // Handle Ref2V mode: optional reference video (client-clipped webm) +
-      // up to 5 optional reference images. Refs are ALL optional — with none
-      // provided the workflow degrades to pure text-to-video.
+      // Handle Ref2V mode: optional reference video (client-clipped webm OR a
+      // user-provided URL) + up to 6 optional reference images. Refs are ALL
+      // optional — with none provided the workflow degrades to pure t2v.
       const refVideoFile = form.get('ref_video') as File | null;
+      const refVideoUrlInput = form.get('ref_video_url')?.toString()?.trim() || '';
+      if (refVideoFile && refVideoFile.size > 0) {
+        console.log(`[Ref2V action] received ref_video: ${refVideoFile.name} (${refVideoFile.size}b)`);
+      }
 
       // Upload ref video (if any) to S3. The buffer is validated + downscaled
       // to ~480p (long edge ≤854, aspect preserved, audio kept) via ffmpeg,
-      // mirroring how ref images are validated/converted.
+      // mirroring how ref images are validated/converted. Cross-origin URLs
+      // can't be clipped client-side, so they're passed through as-is.
       let refVideoUrl = '';
       let refVideoName = '';
       if (refVideoFile && refVideoFile.size > 0) {
@@ -109,9 +114,15 @@ export const actions: Actions = {
         }
         refVideoUrl = await uploadBufferToS3(videoResult.buffer, videoResult.ext || 'webm');
         refVideoName = refVideoFile.name || `ref_video.${videoResult.ext || 'webm'}`;
+      } else if (refVideoUrlInput) {
+        if (!/^https?:\/\//i.test(refVideoUrlInput)) {
+          return { error: 'ref video URL must be an http(s) URL' };
+        }
+        refVideoUrl = refVideoUrlInput;
+        refVideoName = 'ref_video.webm';
       }
 
-      // Process up to 5 ref images
+      // Process up to 6 ref images
       const refImageUrls: string[] = [];
       const refImageNames: string[] = [];
       for (let i = 1; i <= MAX_REF_IMAGES; i++) {
@@ -132,7 +143,8 @@ export const actions: Actions = {
 
       // Poster frame: the client clips the ref video client-side and can send a
       // poster PNG to use as the entry thumbnail (original_image_url is
-      // required). Fall back to the first ref image, else a placeholder.
+      // required). Fall back to the first ref image; for a URL-sourced video
+      // (no client frame possible) extract a frame server-side with ffmpeg.
       const posterFile = form.get('poster_image') as File | null;
       let posterUrl = '';
       if (posterFile && posterFile.size > 0) {
@@ -145,8 +157,14 @@ export const actions: Actions = {
         posterUrl = await uploadBufferToS3(posterBuffer, posterResult.ext || 'png');
       } else if (refImageUrls.length > 0) {
         posterUrl = refImageUrls[0];
-      } else if (refVideoUrl) {
+      } else if (refVideoUrl && refVideoFile && refVideoFile.size > 0) {
         return { error: 'poster_image required when a ref video is provided' };
+      } else if (refVideoUrl) {
+        // URL-sourced video: grab a frame server-side (best-effort).
+        const posterFrame = await extractVideoPoster(refVideoUrl);
+        if (posterFrame) {
+          posterUrl = await uploadBufferToS3(posterFrame, 'png');
+        }
       }
 
       const result = await createVideoEntryForReview({

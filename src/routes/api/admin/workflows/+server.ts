@@ -21,8 +21,8 @@ export const POST: RequestHandler = async ({ locals, request }) => {
     throw error(400, 'id, name, and templatePath are required');
   }
 
-  if (workflowType && !['i2v', 'fl2v'].includes(workflowType)) {
-    throw error(400, 'workflowType must be either "i2v" or "fl2v"');
+  if (workflowType && !['i2v', 'fl2v', 'ref2v'].includes(workflowType)) {
+    throw error(400, 'workflowType must be "i2v", "fl2v", or "ref2v"');
   }
 
   if (!Array.isArray(compatibleLoraIds)) {

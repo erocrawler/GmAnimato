@@ -22,8 +22,8 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
     throw error(400, 'compatibleLoraIds must be an array');
   }
 
-  if (workflowType !== undefined && !['i2v', 'fl2v'].includes(workflowType)) {
-    throw error(400, 'workflowType must be either "i2v" or "fl2v"');
+  if (workflowType !== undefined && !['i2v', 'fl2v', 'ref2v'].includes(workflowType)) {
+    throw error(400, 'workflowType must be "i2v", "fl2v", or "ref2v"');
   }
 
   const { quotaCost, quotaCostRules } = body as any;

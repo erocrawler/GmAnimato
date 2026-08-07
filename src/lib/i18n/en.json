@@ -276,18 +276,25 @@
         "description": "Condition on a clip + images",
         "videoLabel": "Reference Video (optional)",
         "videoHint": "Max {max}s — clip it below",
-        "reuseLabel": "Or reuse one of your videos:",
+        "urlLabel": "Or paste a video URL:",
+        "urlHint": "From your videos or the gallery",
+        "urlPlaceholder": "https://... or /media/...",
+        "urlUse": "Use",
+        "clipRange": "Clip range (start — end)",
         "clipStart": "Start (s)",
         "clipEnd": "End (s)",
         "clipButton": "Clip Video",
         "clipped": "Clipped:",
-        "imagesLabel": "Reference Images (optional, up to 5)",
-        "imagesHint": "Referenced in the prompt as <Picture 1..5>",
+        "includeAudio": "Include audio in the clip",
+        "crossOriginHint": "This video is from another origin and can't be clipped in the browser — it will be used as-is.",
+        "imagesLabel": "Reference Images (optional, up to 6)",
+        "imagesHint": "Referenced in the prompt as <Picture 1..6>",
         "optionalHint": "All references are optional — without any, this becomes a text-to-video job.",
         "generateButton": "Generate Video",
         "errors": {
           "notVideo": "Selected file is not a video.",
-          "tooLarge": "Video is too large (max 50 MB before clipping)."
+          "tooLarge": "Video is too large (max 50 MB before clipping).",
+          "invalidUrl": "Please enter a valid video URL (http(s) or /media/...)."
         }
       }
     },

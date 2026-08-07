@@ -21,7 +21,7 @@ interface Ref2VWorkflowParams {
   workflow?: Workflow;
 }
 
-const MAX_REF_IMAGES = 5;
+const MAX_REF_IMAGES = 6;
 
 /**
  * Build a MiniMax H3 reference-to-video (ref2v) workflow payload.

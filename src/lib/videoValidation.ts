@@ -108,3 +108,42 @@ export async function validateAndConvertVideo(buffer: Buffer, mime: string): Pro
     return { buffer, ext, wasConverted: false };
   }
 }
+
+/**
+ * Grab a poster frame (PNG) from a video URL using ffmpeg.
+ * Used as the entry thumbnail (original_image_url) when a ref video URL is
+ * provided instead of an uploaded file (client can't extract a frame from a
+ * cross-origin URL). Best-effort: returns null on any failure.
+ */
+export async function extractVideoPoster(url: string, atSeconds = 0): Promise<Buffer | null> {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ref2v-poster-'));
+  const outPath = path.join(tmpDir, 'poster.png');
+  try {
+    const args = [
+      '-y',
+      '-ss', String(atSeconds),
+      '-i', url,
+      '-frames:v', '1',
+      '-vf', 'scale=480:-2',
+      '-f', 'image2',
+      outPath,
+    ];
+    await new Promise<void>((resolve, reject) => {
+      const errChunks: Buffer[] = [];
+      const proc = spawn('ffmpeg', args);
+      proc.stderr.on('data', (c: Buffer) => errChunks.push(c));
+      proc.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg exited with code ${code}: ${Buffer.concat(errChunks).toString().slice(-400)}`));
+      });
+      proc.on('error', (err) => reject(new Error(`Failed to spawn ffmpeg: ${err.message}`)));
+    });
+    const out = await fs.readFile(outPath);
+    return out.length > 0 ? out : null;
+  } catch (e) {
+    console.warn('[Video] Poster extraction failed for', url, e);
+    return null;
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
