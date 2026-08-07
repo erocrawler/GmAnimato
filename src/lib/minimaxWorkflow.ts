@@ -18,6 +18,7 @@ interface MiniMaxWorkflowParams {
   iterationSteps?: 10 | 12 | 15; // sampler steps (MiniMax fast/balanced/quality)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
+  useSageAttention?: boolean; // inject MiniMaxH3MemoryEfficientSageAttentionPatch
   workflow?: Workflow;
 }
 
@@ -29,7 +30,10 @@ interface MiniMaxWorkflowParams {
  * - RandomNoise -> BasicScheduler -> SamplerCustomAdvanced (res_multistep)
  * - Single UNETLoader (minimax_h3_fl2va_pruned_fp8_scaled.safetensors)
  * - Separate video + audio VAEs, with VAEDecodeAudio -> VHS_VideoCombine.audio
- * - No negative prompt, no LoRA chains, no motion scale / free-long / relay / sage attention
+ * - No negative prompt, no motion scale / free-long / relay
+ * - Optional sage attention (MiniMaxH3MemoryEfficientSageAttentionPatch) when
+ *   useSageAttention is set — the patch node slots into the model chain
+ *   (after the speed-up LoRA, if present) and rewires BasicScheduler/BasicGuider.
  *
  * The only shared utility is add720pUpscaleNodes for the 720p upscale path.
  */
@@ -114,12 +118,14 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
   const guiderNode = findNode(workflow, 'BasicGuider');
   const unetLoaderNode = findNode(workflow, 'UNETLoader');
 
+  // Fixed node ids for injected nodes (speed-up LoRA + sage attention patch)
+  const loraNodeId = '105:1000:lora_speedup';
+
   const appliedLora = (params.loraPresets ?? [])
     .filter((p) => p.isConfigurable === false)
     .find((p) => params.loraWeights && Object.prototype.hasOwnProperty.call(params.loraWeights, p.id));
 
   if (appliedLora && unetLoaderNode && schedulerNode) {
-    const loraNodeId = '105:1000:lora_speedup';
     const strength =
       typeof params.loraWeights?.[appliedLora.id] === 'number'
         ? params.loraWeights![appliedLora.id]
@@ -154,6 +160,35 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
     console.log(`[MiniMax] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
   } else {
     console.log('[MiniMax] No speed-up LoRA configured — using template steps (20)');
+  }
+
+  // MiniMax H3 sage attention: inject MiniMaxH3MemoryEfficientSageAttentionPatch
+  // (from ComfyUI-KJNodes ltxv_nodes.py) into the model chain. It takes the
+  // current model (UNETLoader, or the speed-up LoRA output if one was applied)
+  // and re-emits the patched model, so we rewire BasicScheduler.model and
+  // BasicGuider.model to its output. Requires sageattention on the worker.
+  const sageAttentionNodeId = '105:1001:sage';
+  if (params.useSageAttention && unetLoaderNode && schedulerNode) {
+    const modelSourceId = appliedLora ? loraNodeId : unetLoaderNode;
+
+    workflow.input.workflow[sageAttentionNodeId] = {
+      inputs: {
+        model: [modelSourceId, 0],
+      },
+      class_type: 'MiniMaxH3MemoryEfficientSageAttentionPatch',
+      _meta: { title: 'MiniMax H3 Mem Eff Sage Attention Patch' },
+    };
+    workflow.input.node_weights[sageAttentionNodeId] = 1.0;
+
+    const schedulerInputs = getNodeInputs(workflow, schedulerNode);
+    const guiderInputs = guiderNode ? getNodeInputs(workflow, guiderNode) : null;
+    if (schedulerInputs && Array.isArray(schedulerInputs.model)) {
+      schedulerInputs.model = [sageAttentionNodeId, 0];
+    }
+    if (guiderInputs && Array.isArray(guiderInputs.model)) {
+      guiderInputs.model = [sageAttentionNodeId, 0];
+    }
+    console.log('[MiniMax] Applied MiniMaxH3MemoryEfficientSageAttentionPatch');
   }
 
   // i2v mode: no last image -> drop the last-frame LoadImage node and
