@@ -30,10 +30,11 @@ export async function migrateOldestEligibleJob(
     return false;
   }
 
+  let candidate: VideoEntry | null = null;
   try {
     // Atomically claim a job for migration (prevents race with workers)
     // This marks the job as 'processing' to prevent workers from claiming it
-    const candidate = await claimJobForMigration(settings);
+    candidate = await claimJobForMigration(settings);
     
     if (!candidate) {
       console.log('[Queue Migration] No eligible jobs found for migration');
@@ -60,9 +61,17 @@ export async function migrateOldestEligibleJob(
     return true;
   } catch (error) {
     console.error('[Queue Migration] Failed to migrate job:', error);
-    // On failure, the job is still marked as 'processing' from claimJobForMigration
-    // It will remain stuck unless we reset it. Let's try to reset it:
-    // (This is best-effort; if this fails too, manual intervention may be needed)
+    // claimJobForMigration marked the job as 'processing' to reserve it; if the
+    // workflow build or RunPod submission failed we MUST reset it — otherwise
+    // the job sits in 'processing' forever and no worker can ever pick it up.
+    if (candidate?.id) {
+      try {
+        await updateVideo(candidate.id, { status: 'in_queue' });
+        console.log(`[Queue Migration] Reset video ${candidate.id} back to in_queue after failed migration`);
+      } catch (resetError) {
+        console.error('[Queue Migration] Failed to reset job status after migration failure:', resetError);
+      }
+    }
     return false;
   }
 }

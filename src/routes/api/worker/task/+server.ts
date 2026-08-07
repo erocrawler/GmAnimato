@@ -1,26 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { Buffer } from 'node:buffer';
-import { claimLocalJob, getAdminSettings, getWorkflowById, getDefaultWorkflow } from '$lib/db';
-import { buildWorkflow } from '$lib/i2vWorkflow';
-import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
-import { buildMiniMaxWorkflow } from '$lib/minimaxWorkflow';
-import { isMiniMaxWorkflow } from '$lib/workflows';
-import { toOriginalUrl } from '$lib/serverImageUrl';
-
-const DEFAULT_IMAGE_MIME = 'image/png';
-
-async function fetchImageAsBase64(url: string): Promise<string> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
-  }
-
-  const contentType = response.headers.get('content-type') ?? DEFAULT_IMAGE_MIME;
-  const buffer = Buffer.from(await response.arrayBuffer());
-  const base64 = buffer.toString('base64');
-  return `data:${contentType};base64,${base64}`;
-}
+import { claimLocalJob, getAdminSettings, updateVideo } from '$lib/db';
+import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
 
 /**
  * GET /api/worker/task
@@ -31,6 +12,10 @@ async function fetchImageAsBase64(url: string): Promise<string> {
  * are polling for tasks simultaneously.
  */
 export const GET: RequestHandler = async ({ request }) => {
+  // Track the job we claimed so that if workflow construction fails after the
+  // claim we can fail the job instead of leaving it stuck in 'processing'
+  // (no task is delivered, so no worker will ever send a webhook for it).
+  let claimedJob: Awaited<ReturnType<typeof claimLocalJob>> = null;
   try {
     const workerSecret = env.WORKER_TASK_SECRET;
     if (!workerSecret) {
@@ -58,152 +43,36 @@ export const GET: RequestHandler = async ({ request }) => {
         { status: 404, headers: { 'Content-Type': 'application/json' } }
       );
     }
+    claimedJob = job;
     
     console.log(`[Worker] Assigned task ${job.id} to worker (status automatically set to processing)`);
     
     // Build the workflow for this job
     const settings = await getAdminSettings();
-    const { origin: workerOrigin, hostname: workerHostname } = new URL(request.url);
-    const callbackUrl = workerHostname === 'localhost' || workerHostname === '127.0.0.1' || workerHostname === '::1'
-      ? undefined
-      : `${workerOrigin}/api/i2v-webhook/${job.id}`;
+    const { origin: workerOrigin } = new URL(request.url);
+    // Always include the callback: the worker just reached this origin to fetch
+    // the task, so it can reach the webhook too. (CALLBACK_BASE_URL override
+    // supported for tunneled/remote setups via getCallbackUrl.)
+    const callbackUrl = getCallbackUrl(workerOrigin, job.id);
     
     // Detect workflow type from job
     const isFL2V = !!job.last_image_url;
     const workflowType = isFL2V ? 'fl2v' : 'i2v';
-    
-    // Resolve workflow to use
-    let workflow = null;
-    if (job.workflow_id) {
-      workflow = await getWorkflowById(job.workflow_id);
-    }
-    if (!workflow) {
-      workflow = await getDefaultWorkflow(workflowType);
-    }
-    if (!workflow) {
-      return new Response(
-        JSON.stringify({ error: `No ${workflowType.toUpperCase()} workflow configured` }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    console.log(`[Worker] Using workflow: ${workflow.name} (${workflow.id}) for ${workflowType.toUpperCase()} job ${job.id}`);
-    
+
     const imageInputMode = (env.WORKER_IMAGE_INPUT_MODE ?? 'base64').toLowerCase();
     const shouldSendBase64 = imageInputMode !== 'url';
 
-    let payload: any;
-    if (isMiniMaxWorkflow(workflow)) {
-      // MiniMax H3 uses a different node stack — dedicated builder.
-      // The builder handles both i2v (no last image) and fl2v (has last image).
-      const originalImageUrl = toOriginalUrl(job.original_image_url);
-      const originalLastImageUrl = job.last_image_url ? toOriginalUrl(job.last_image_url) : undefined;
+    // Build the workflow payload using the single shared construction path
+    // (MiniMax / FL2V / I2V) — see src/lib/jobWorkflow.ts
+    const { workflow: resolvedWorkflow, payload } = await buildJobWorkflow({
+      video: job,
+      settings,
+      callbackUrl,
+      imageMode: shouldSendBase64 ? 'base64' : 'url',
+      useSageAttention: env.ENABLE_SAGE_ATTENTION_LOCAL === 'true',
+    });
 
-      const [firstImageBase64, lastImageBase64] = shouldSendBase64
-        ? await Promise.all([
-            fetchImageAsBase64(originalImageUrl),
-            originalLastImageUrl ? fetchImageAsBase64(originalLastImageUrl) : Promise.resolve(null),
-          ])
-        : [null, null];
-
-      payload = await buildMiniMaxWorkflow({
-        first_image_name: `${job.id}_first.png`,
-        first_image_url: originalImageUrl,
-        ...(originalLastImageUrl
-          ? {
-              last_image_name: `${job.id}_last.png`,
-              last_image_url: originalLastImageUrl,
-            }
-          : {}),
-        input_prompt: job.prompt ?? 'A beautiful video',
-        seed: job.seed ?? Math.floor(Math.random() * 1000000),
-        callback_url: callbackUrl,
-        videoDuration: job.video_duration as 4 | 6 | 8 | 10 | undefined,
-        videoResolution: job.video_resolution as '480p' | '720p' | undefined,
-        iterationSteps: job.iteration_steps as 10 | 12 | 15 | undefined,
-        loraWeights: typeof job.lora_weights === 'object' && job.lora_weights !== null ? job.lora_weights as Record<string, number> : undefined,
-        loraPresets: settings.loraPresets,
-        workflow: workflow,
-      });
-
-      if (shouldSendBase64 && payload?.input?.images) {
-        payload.input.images = [
-          { name: `${job.id}_first.png`, image: firstImageBase64 },
-          ...(lastImageBase64
-            ? [{ name: `${job.id}_last.png`, image: lastImageBase64 }]
-            : []),
-        ];
-      }
-    } else if (isFL2V) {
-      // Convert proxy URLs to original S3 URLs for worker
-      const originalImageUrl = toOriginalUrl(job.original_image_url);
-      const lastImageUrl = toOriginalUrl(job.last_image_url!);
-
-      const [firstImageBase64, lastImageBase64] = shouldSendBase64
-        ? await Promise.all([
-            fetchImageAsBase64(originalImageUrl),
-            fetchImageAsBase64(lastImageUrl),
-          ])
-        : [null, null];
-      
-      payload = await buildFL2VWorkflow({
-        first_image_name: `${job.id}_first.png`,
-        first_image_url: originalImageUrl,
-        last_image_name: `${job.id}_last.png`,
-        last_image_url: lastImageUrl,
-        input_prompt: job.prompt ?? 'A beautiful video',
-        seed: job.seed ?? Math.floor(Math.random() * 1000000),
-        callback_url: callbackUrl,
-        iterationSteps: job.iteration_steps as 4 | 6 | 8 | undefined,
-        videoDuration: job.video_duration as 4 | 6 | undefined,
-        videoResolution: job.video_resolution as '480p' | '720p' | undefined,
-        motionScale: typeof job.additional_options?.motion_scale === 'number' ? job.additional_options.motion_scale : undefined,
-        freeLongBlendStrength: typeof job.additional_options?.freelong_blend_strength === 'number' ? job.additional_options.freelong_blend_strength : undefined,
-        useSageAttention: env.ENABLE_SAGE_ATTENTION_LOCAL === 'true',
-        loraWeights: typeof job.lora_weights === 'object' && job.lora_weights !== null ? job.lora_weights as Record<string, number> : undefined,
-        loraPresets: settings.loraPresets,
-        workflow: workflow,
-        promptRelayMode: job.additional_options?.prompt_relay_mode === true,
-        promptRelaySegments: Array.isArray(job.additional_options?.prompt_relay_segments) ? job.additional_options.prompt_relay_segments : undefined,
-      });
-
-      if (shouldSendBase64 && payload?.input?.images) {
-        payload.input.images = [
-          { name: `${job.id}_first.png`, image: firstImageBase64 },
-          { name: `${job.id}_last.png`, image: lastImageBase64 },
-        ];
-      }
-    } else {
-      // Convert proxy URL to original S3 URL for worker
-      const originalImageUrl = toOriginalUrl(job.original_image_url);
-
-      const imageBase64 = shouldSendBase64
-        ? await fetchImageAsBase64(originalImageUrl)
-        : null;
-      
-      payload = await buildWorkflow({
-        image_name: `${job.id}.png`,
-        image_url: originalImageUrl,
-        input_prompt: job.prompt ?? 'A beautiful video',
-        seed: job.seed ?? Math.floor(Math.random() * 1000000),
-        callback_url: callbackUrl,
-        iterationSteps: job.iteration_steps as 4 | 6 | 8 | undefined,
-        videoDuration: job.video_duration as 4 | 6 | undefined,
-        videoResolution: job.video_resolution as '480p' | '720p' | undefined,
-        motionScale: typeof job.additional_options?.motion_scale === 'number' ? job.additional_options.motion_scale : undefined,
-        freeLongBlendStrength: typeof job.additional_options?.freelong_blend_strength === 'number' ? job.additional_options.freelong_blend_strength : undefined,
-        useSageAttention: env.ENABLE_SAGE_ATTENTION_LOCAL === 'true',
-        loraWeights: typeof job.lora_weights === 'object' && job.lora_weights !== null ? job.lora_weights as Record<string, number> : undefined,
-        loraPresets: settings.loraPresets,
-        workflow: workflow,
-        promptRelayMode: job.additional_options?.prompt_relay_mode === true,
-        promptRelaySegments: Array.isArray(job.additional_options?.prompt_relay_segments) ? job.additional_options.prompt_relay_segments : undefined,
-      });
-
-      if (shouldSendBase64 && payload?.input?.images) {
-        payload.input.images = [{ name: `${job.id}.png`, image: imageBase64 }];
-      }
-    }
+    console.log(`[Worker] Using workflow: ${resolvedWorkflow.name} (${resolvedWorkflow.id}) for ${workflowType.toUpperCase()} job ${job.id}`);
     
     // Return the complete workflow payload for the worker
     // payload already contains everything: { input: { workflow: {...}, images: [...], callback_url: ... } }
@@ -216,6 +85,18 @@ export const GET: RequestHandler = async ({ request }) => {
     );
   } catch (err) {
     console.error('[Worker] Error fetching task:', err);
+    // If we already claimed a job, the task will never be delivered to a worker
+    // (the 500 response means the worker got nothing), so no webhook will ever
+    // arrive for it. Mark it failed so it doesn't sit in 'processing' until the
+    // processing timeout kicks in.
+    if (claimedJob) {
+      try {
+        await updateVideo(claimedJob.id, { status: 'failed' });
+        console.error(`[Worker] Marked job ${claimedJob.id} failed after task build error`);
+      } catch (markErr) {
+        console.error(`[Worker] Failed to mark job ${claimedJob.id} failed:`, markErr);
+      }
+    }
     return new Response(
       JSON.stringify({ error: String(err) }), 
       { status: 500, headers: { 'Content-Type': 'application/json' } }

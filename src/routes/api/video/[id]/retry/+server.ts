@@ -1,87 +1,27 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { getVideoById, updateVideo, getAdminSettings, getWorkflowById, getDefaultWorkflow } from '$lib/db';
+import { getVideoById, updateVideo, getAdminSettings } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { getRunPodConfig, retryRunPodJob, getRunPodJobStatus, mapRunPodStatus, submitRunPodJob } from '$lib/runpod';
-import { buildWorkflow } from '$lib/i2vWorkflow';
-import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
-import { toOriginalUrl } from '$lib/serverImageUrl';
+import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
 
 /**
  * Helper to submit a new RunPod job for a video
- * Uses stored workflow parameters from the original job submission
+ * Uses stored workflow parameters from the original job submission.
+ * Construction goes through the single shared path (MiniMax / FL2V / I2V) —
+ * see src/lib/jobWorkflow.ts. (This is the "convert local job to RunPod" path
+ * and previously duplicated construction logic without MiniMax support.)
  */
 async function submitNewRunPodJob(runpodConfig: any, video: any, origin: string) {
   const settings = await getAdminSettings();
-  const originHost = new URL(origin).hostname;
-  const callbackUrl = originHost === 'localhost' || originHost === '127.0.0.1' || originHost === '::1'
-    ? undefined
-    : `${origin}/api/i2v-webhook/${video.id}`;
+  // Always include the callback (CALLBACK_BASE_URL override supported).
+  const callbackUrl = getCallbackUrl(origin, video.id);
 
-  // Use stored parameters from the video, or defaults if not available
-  const iterationSteps = video.iteration_steps as (4 | 6 | 8) | undefined;
-  const videoDuration = video.video_duration as (4 | 6) | undefined;
-  const videoResolution = video.video_resolution as ('480p' | '720p') | undefined;
-
-  // Detect workflow type from video
-  const isFL2V = !!video.last_image_url;
-  const workflowType = isFL2V ? 'fl2v' : 'i2v';
-
-  // Resolve workflow to use
-  let workflow = null;
-  if (video.workflow_id) {
-    workflow = await getWorkflowById(video.workflow_id);
-  }
-  if (!workflow) {
-    workflow = await getDefaultWorkflow(workflowType);
-  }
-  if (!workflow) {
-    throw new Error(`No ${workflowType.toUpperCase()} workflow configured`);
-  }
-
-  // Build the workflow from template with callback URL
-  let payload;
-  if (isFL2V) {
-    // Convert proxy URLs to original S3 URLs for worker
-    const originalImageUrl = toOriginalUrl(video.original_image_url);
-    const lastImageUrl = toOriginalUrl(video.last_image_url!);
-    
-    payload = await buildFL2VWorkflow({
-      first_image_name: `${video.id}_first.png`,
-      first_image_url: originalImageUrl,
-      last_image_name: `${video.id}_last.png`,
-      last_image_url: lastImageUrl,
-      input_prompt: video.prompt ?? 'A beautiful video',
-      seed: video.seed ?? Math.floor(Math.random() * 1000000),
-      callback_url: callbackUrl,
-      iterationSteps,
-      videoDuration,
-      videoResolution,
-      motionScale: video.additional_options?.motion_scale,
-      freeLongBlendStrength: video.additional_options?.freelong_blend_strength,
-      loraWeights: video.lora_weights,
-      loraPresets: settings.loraPresets,
-      workflow: workflow,
-    });
-  } else {
-    // Convert proxy URL to original S3 URL for worker
-    const originalImageUrl = toOriginalUrl(video.original_image_url);
-    
-    payload = await buildWorkflow({
-      image_name: `${video.id}.png`,
-      image_url: originalImageUrl,
-      input_prompt: video.prompt ?? 'A beautiful video',
-      seed: video.seed ?? Math.floor(Math.random() * 1000000),
-      callback_url: callbackUrl,
-      iterationSteps,
-      videoDuration,
-      videoResolution,
-      motionScale: video.additional_options?.motion_scale,
-      freeLongBlendStrength: video.additional_options?.freelong_blend_strength,
-      loraWeights: video.lora_weights,
-      loraPresets: settings.loraPresets,
-      workflow: workflow,
-    });
-  }
+  const { payload } = await buildJobWorkflow({
+    video,
+    settings,
+    callbackUrl,
+    useSageAttention: env.ENABLE_SAGE_ATTENTION_RUNPOD === 'true',
+  });
 
   return await submitRunPodJob(runpodConfig, payload);
 }

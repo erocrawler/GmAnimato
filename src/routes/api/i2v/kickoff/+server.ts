@@ -1,9 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { updateVideo, getVideoById, getActiveJobCountByUser, getAdminSettings, checkDailyQuota, getLocalJobStats, getWorkflowById, getDefaultWorkflow, claimJobForMigration, isUserPaid } from '$lib/db';
 import { env } from '$env/dynamic/private';
-import { buildWorkflow } from '$lib/i2vWorkflow';
-import { buildFL2VWorkflow } from '$lib/fl2vWorkflow';
-import { buildMiniMaxWorkflow } from '$lib/minimaxWorkflow';
+import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { submitJob } from '$lib/local-queue';
 import { filterLoraWeights, isMiniMaxWorkflow } from '$lib/workflows';
@@ -553,88 +551,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         claimJobForMigration,
         updateVideo,
         async (video) => {
-          // This callback builds workflow for migrated jobs or RunPod-direct jobs
+          // This callback builds workflow for migrated jobs or RunPod-direct jobs.
+          // Single shared construction path (MiniMax / FL2V / I2V) — see src/lib/jobWorkflow.ts
           const origin = new URL(request.url).origin;
-          const originHost = new URL(request.url).hostname;
-          const callbackUrl = originHost === 'localhost' || originHost === '127.0.0.1' || originHost === '::1'
-            ? undefined
-            : `${origin}/api/i2v-webhook/${video.id}`;
-          
-          // Check if this is FL2V workflow (has last_image_url)
-          const isFL2VJob = !!video.last_image_url;
-          
-          // Resolve the workflow record once (explicit selection or type default)
-          const workflowRecord = (await getWorkflowById(video.workflow_id!))
-            || await getDefaultWorkflow(isFL2VJob ? 'fl2v' : 'i2v');
+          // Always include the callback (CALLBACK_BASE_URL override supported).
+          const callbackUrl = getCallbackUrl(origin, video.id);
 
-          if (!workflowRecord) {
-            throw new Error(`No workflow configured for ${isFL2VJob ? 'fl2v' : 'i2v'} jobs`);
-          }
+          const { payload } = await buildJobWorkflow({
+            video,
+            settings,
+            callbackUrl,
+            useSageAttention: env.ENABLE_SAGE_ATTENTION_RUNPOD === 'true',
+          });
 
-          // MiniMax H3 uses a different node stack — dedicated builder
-          if (isMiniMaxWorkflow(workflowRecord)) {
-            return await buildMiniMaxWorkflow({
-              first_image_name: `${video.id}_first.png`,
-              first_image_url: toOriginalUrl(video.original_image_url),
-              ...(isFL2VJob
-                ? {
-                    last_image_name: `${video.id}_last.png`,
-                    last_image_url: toOriginalUrl(video.last_image_url!),
-                  }
-                : {}),
-              input_prompt: video.prompt ?? 'A beautiful video',
-              seed: video.seed ?? Math.floor(Math.random() * 1000000),
-              callback_url: callbackUrl,
-              videoDuration: video.video_duration as any,
-              videoResolution: video.video_resolution as any,
-              iterationSteps: video.iteration_steps as any,
-              loraWeights: video.lora_weights as any,
-              loraPresets: settings.loraPresets,
-              workflow: workflowRecord,
-            });
-          }
-
-          if (isFL2VJob) {
-            return await buildFL2VWorkflow({
-              first_image_name: `${video.id}_first.png`,
-              first_image_url: toOriginalUrl(video.original_image_url),
-              last_image_name: `${video.id}_last.png`,
-              last_image_url: toOriginalUrl(video.last_image_url!),
-              input_prompt: video.prompt ?? 'A beautiful video',
-              seed: video.seed ?? Math.floor(Math.random() * 1000000),
-              callback_url: callbackUrl,
-              iterationSteps: video.iteration_steps as any,
-              videoDuration: video.video_duration as any,
-              videoResolution: video.video_resolution as any,
-              motionScale: video.additional_options?.motion_scale as any,
-              freeLongBlendStrength: video.additional_options?.freelong_blend_strength as any,
-              useSageAttention: env.ENABLE_SAGE_ATTENTION_RUNPOD === 'true',
-              loraWeights: video.lora_weights as any,
-              loraPresets: settings.loraPresets,
-              workflow: workflowRecord,
-              promptRelayMode: (video.additional_options as any)?.prompt_relay_mode === true,
-              promptRelaySegments: (video.additional_options as any)?.prompt_relay_segments as any,
-            });
-          } else {
-            return await buildWorkflow({
-              image_name: `${video.id}.png`,
-              image_url: toOriginalUrl(video.original_image_url),
-              input_prompt: video.prompt ?? 'A beautiful video',
-              seed: video.seed ?? Math.floor(Math.random() * 1000000),
-              callback_url: callbackUrl,
-              iterationSteps: video.iteration_steps as any,
-              videoDuration: video.video_duration as any,
-              videoResolution: video.video_resolution as any,
-              motionScale: video.additional_options?.motion_scale as any,
-              freeLongBlendStrength: video.additional_options?.freelong_blend_strength as any,
-              useSageAttention: env.ENABLE_SAGE_ATTENTION_RUNPOD === 'true',
-              loraWeights: video.lora_weights as any,
-              loraPresets: settings.loraPresets,
-              workflow: workflowRecord,
-              promptRelayMode: (video.additional_options as any)?.prompt_relay_mode === true,
-              promptRelaySegments: (video.additional_options as any)?.prompt_relay_segments as any,
-            });
-          }
+          return payload;
         }
       );
       jobId = result.jobId;
