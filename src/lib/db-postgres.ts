@@ -894,16 +894,21 @@ export class PostgresDatabase implements IDatabase {
     if (patch.paidUserQueueLimit !== undefined) data.paidUserQueueLimit = patch.paidUserQueueLimit;
     let newLoraIds: string[] = [];
     let newLoras: any[] = [];
+    let removedLoraIds: string[] = [];
+    let validLoraIds: Set<string> | null = null;
     if (patch.loraPresets !== undefined) {
       const normalized = normalizeLoraPresets(patch.loraPresets);
       data.loraPresets = normalized;
-      // Detect new LoRA IDs vs existing
+      validLoraIds = new Set(normalized.map(l => l.id));
+      // Detect new vs removed LoRA IDs vs existing (rename = old removed + new added)
       try {
         const existing = await this.prisma.adminSettings.findUnique({ where: { id: 'default' }, select: { loraPresets: true } });
         const existedNormalized = normalizeLoraPresets((existing?.loraPresets as any) ?? []);
         const oldIds = new Set(existedNormalized.map(l => l.id));
+        const newIds = new Set(normalized.map(l => l.id));
         newLoras = normalized.filter(l => !oldIds.has(l.id));
         newLoraIds = newLoras.map(l => l.id);
+        removedLoraIds = [...oldIds].filter(id => !newIds.has(id));
       } catch { /* ignore */ }
     }
     
@@ -928,6 +933,45 @@ export class PostgresDatabase implements IDatabase {
         loraPresets: normalizeLoraPresets(patch.loraPresets) ?? DEFAULT_LORA_PRESETS,
       },
     });
+
+    // Orphan cleanup: purge any workflow refs to LoRA ids that no longer exist
+    // in the preset list. Handles both the current rename (removedLoraIds) and
+    // historical ghosts from renames that happened before this fix — we filter
+    // by the authoritative validLoraIds set, not just the delta.
+    // Also cleans quotaCostRules that reference deleted ids. Otherwise the old
+    // filename stays assigned as a ghost checkbox and kickoff fails loading it.
+    if (validLoraIds) {
+      try {
+        const allWorkflows = await this.prisma.workflow.findMany({ where: { isDeleted: false } });
+        for (const wf of allWorkflows) {
+          const w = wf as any;
+          const compatibleIds: string[] = Array.isArray(w.compatibleLoraIds) ? w.compatibleLoraIds as string[] : [];
+          const rules: any[] = Array.isArray(w.quotaCostRules) ? w.quotaCostRules : [];
+          const filteredIds = compatibleIds.filter((id: string) => validLoraIds.has(id));
+          let rulesChanged = false;
+          const filteredRules = rules.map((r: any) => {
+            const when = r?.when || {};
+            const rawNot = when.notUsingLoras as string[] | undefined;
+            const rawUsing = when.usingLoras as string[] | undefined;
+            const notUsing = Array.isArray(rawNot) ? rawNot.filter((id: string) => validLoraIds!.has(id)) : rawNot;
+            const using = Array.isArray(rawUsing) ? rawUsing.filter((id: string) => validLoraIds!.has(id)) : rawUsing;
+            if (notUsing?.length !== rawNot?.length || using?.length !== rawUsing?.length) rulesChanged = true;
+            if (notUsing?.length === rawNot?.length && using?.length === rawUsing?.length) return r;
+            return { ...r, when: { ...when, notUsingLoras: notUsing, usingLoras: using } };
+          });
+          const idsChanged = filteredIds.length !== compatibleIds.length;
+          if (idsChanged || rulesChanged) {
+            const data: any = { updatedAt: new Date() };
+            if (idsChanged) data.compatibleLoraIds = filteredIds;
+            if (rulesChanged) data.quotaCostRules = normalizeQuotaCostRules(filteredRules);
+            await this.prisma.workflow.update({ where: { id: wf.id }, data });
+            if (idsChanged) console.log(`[DB] Purged ${compatibleIds.length - filteredIds.length} orphan LoRA id(s) from workflow ${wf.id}`);
+          }
+        }
+      } catch (err) {
+        console.error('[DB] Failed to purge orphan LoRA ids from workflows:', err);
+      }
+    }
 
     // Auto-compat: if new LoRAs were added, auto-assign to eligible workflows
     // Primary logic: same presetGroup (model family)

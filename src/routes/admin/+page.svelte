@@ -668,7 +668,22 @@
       showNotification('Workflow name and template path are required', 'error');
       return;
     }
-    
+
+    // Auto-purge ghost LoRAs: ids that no longer exist in loraPresets
+    // (rename/delete leaves orphan compatibleLoraIds that break generation)
+    const validIds = new Set((settings.loraPresets || []).map((p: any) => p.id));
+    const purgedIds = workflowCompatibleLoras.filter((id: string) => !validIds.has(id));
+    if (purgedIds.length) workflowCompatibleLoras = workflowCompatibleLoras.filter((id: string) => validIds.has(id));
+    const cleanedRules = workflowQuotaCostRules.map((r: any) => {
+      const w = r?.when || {};
+      const notUsing = Array.isArray(w.notUsingLoras) ? w.notUsingLoras.filter((id: string) => validIds.has(id)) : w.notUsingLoras;
+      const using = Array.isArray(w.usingLoras) ? w.usingLoras.filter((id: string) => validIds.has(id)) : w.usingLoras;
+      if (notUsing?.length === w.notUsingLoras?.length && using?.length === w.usingLoras?.length) return r;
+      return { ...r, when: { ...w, notUsingLoras: notUsing, usingLoras: using } };
+    });
+    if (JSON.stringify(cleanedRules) !== JSON.stringify(workflowQuotaCostRules)) workflowQuotaCostRules = cleanedRules;
+    if (purgedIds.length) showNotification(`Auto-removed ${purgedIds.length} orphan LoRA(s): ${purgedIds.slice(0,3).join(', ')}`, 'info');
+
     savingWorkflow = true;
     try {
       const payload = {
