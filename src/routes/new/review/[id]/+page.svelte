@@ -16,6 +16,7 @@
   import ReviewAdvancedSettings from "$lib/components/review/ReviewAdvancedSettings.svelte";
   import ReviewActionBar from "$lib/components/review/ReviewActionBar.svelte";
   import ReviewBusyModal from "$lib/components/review/ReviewBusyModal.svelte";
+  import ReviewEnhanceModal from "$lib/components/review/ReviewEnhanceModal.svelte";
 
   export let data: any;
   let entry = data.entry as any;
@@ -51,6 +52,61 @@
   let quotaLoading = true;
   let analyzing = false;
   let showAdvancedSettings = false;
+
+  // MiniMax H3 prompt enhancer — rewrites a simple prompt into the structured
+  // format the generation nodes expect, using the CUSTOM_VL endpoint. Runs
+  // UI-side only; never part of the job workflow.
+  let enhanceState: "idle" | "loading" | "done" | "error" = "idle";
+  let enhanceError = "";
+  let enhanceResult = "";
+
+  async function enhancePrompt() {
+    if (enhanceState === "loading" || !isEditable || !prompt.trim()) return;
+    enhanceState = "loading";
+    enhanceError = "";
+    enhanceResult = "";
+    try {
+      const res = await fetch(`/api/video/${entry.id}/enhance-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          workflowType: videoWorkflowType,
+          videoDuration,
+          locale: get(locale) === "zh" ? "zh" : "en",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success && data.enhancedPrompt) {
+        enhanceResult = data.enhancedPrompt;
+        enhanceState = "done";
+      } else if (data.errorCode === "enhance_unavailable") {
+        enhanceError = get(_)("review.enhance.errorUnavailable");
+        enhanceState = "error";
+      } else {
+        enhanceError = get(_)("review.enhance.errorMessage", {
+          values: { error: data.error || "unknown" },
+        });
+        enhanceState = "error";
+      }
+    } catch (err) {
+      enhanceError = get(_)("review.enhance.errorMessage", {
+        values: { error: String(err) },
+      });
+      enhanceState = "error";
+    }
+  }
+
+  function closeEnhanceModal() {
+    enhanceState = "idle";
+    enhanceError = "";
+    enhanceResult = "";
+  }
+
+  function useEnhancedPrompt() {
+    if (enhanceResult) prompt = enhanceResult;
+    closeEnhanceModal();
+  }
 
   // Workflow management - initialize from loaded data
   let workflows: Workflow[] = data.workflows || [];
@@ -122,6 +178,9 @@
   type IterationSteps = 4 | 6 | 10 | 15;
   type VideoDuration = 4 | 6 | 8 | 10;
   type VideoResolution = "480p" | "720p";
+  // Aspect ratio for ref2v output. 'video' follows the reference media's own
+  // aspect; the rest are fixed presets (MiniMax H3 wants ~0.45-2.2 ratio).
+  type Ref2vAspect = "video" | "16:9" | "4:3" | "square" | "3:4" | "9:16";
   let iterationSteps: IterationSteps =
     (entry.iteration_steps as IterationSteps) ||
     (savedSettings?.iterationSteps as IterationSteps) ||
@@ -134,6 +193,10 @@
     (entry.video_resolution as VideoResolution) ||
     (savedSettings?.videoResolution as VideoResolution) ||
     "480p";
+  let ref2vAspect: Ref2vAspect =
+    (entry.additional_options?.ref2v_aspect as Ref2vAspect) ||
+    (savedSettings?.ref2vAspect as Ref2vAspect) ||
+    "video";
   let motionScale: number | undefined =
     entry.additional_options?.motion_scale ?? savedSettings?.motionScale; // 0.5 to 2.0
   let freeLongBlendStrength: number | undefined =
@@ -651,6 +714,7 @@
     iterationSteps,
     videoDuration,
     videoResolution,
+    ref2vAspect,
     motionScale,
     freeLongBlendStrength,
     selectedWorkflowId,
@@ -734,6 +798,7 @@
     iterationSteps = 4;
     videoDuration = 4;
     videoResolution = "480p";
+    ref2vAspect = "video";
     motionScale = undefined;
     freeLongBlendStrength = undefined;
     resetLoraWeights();
@@ -833,6 +898,7 @@
           iterationSteps,
           videoDuration,
           videoResolution,
+          ref2vAspect: videoWorkflowType === "ref2v" ? ref2vAspect : undefined,
           motionScale,
           freeLongBlendStrength,
           promptRelayMode,
@@ -996,8 +1062,44 @@
   <!-- Prompt Input & Generate -->
   <div class="card bg-base-100 shadow-xl">
     <div class="card-body">
-      <h2 class="card-title">{$_("review.yourPrompt")}</h2>
+      <div class="flex items-center justify-between gap-3">
+        <h2 class="card-title">{$_("review.yourPrompt")}</h2>
+        {#if (videoWorkflowType === "ref2v" || isMiniMaxSelected) && isEditable && !promptRelayMode}
+          <button
+            class="btn btn-sm btn-outline btn-primary"
+            on:click={enhancePrompt}
+            disabled={enhanceState === "loading" || !prompt.trim()}
+          >
+            {#if enhanceState === "loading"}
+              <span class="loading loading-spinner loading-xs"></span>
+            {/if}
+            {$_("review.enhance.button")}
+          </button>
+        {/if}
+      </div>
       <p class="text-sm opacity-70 mb-2">{$_("review.promptHelp")}</p>
+
+      <!-- Ref2V only: the reference-to-video model understands a strict
+           structured prompt format. Plain text often yields unexpected
+           results, so strongly suggest the enhancer. -->
+      {#if videoWorkflowType === "ref2v" && isEditable}
+        <div class="alert alert-warning py-2 mb-3 text-sm">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="stroke-current shrink-0 h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+            />
+          </svg>
+          <span>{$_("review.enhance.ref2vHint")}</span>
+        </div>
+      {/if}
 
       <!-- Prompt Mode Toggle -->
       {#if !isMiniMaxSelected}
@@ -1057,10 +1159,12 @@
         {isMiniMaxSelected}
         {promptRelayMode}
         {canUseQuality}
+        {videoWorkflowType}
         bind:showAdvancedSettings
         bind:iterationSteps
         bind:videoDuration
         bind:videoResolution
+        bind:ref2vAspect
         bind:motionScale
         bind:freeLongBlendStrength
         {filteredLoraPresets}
@@ -1098,4 +1202,15 @@
   {busyModalMessage}
   {sponsorUrl}
   onClose={() => (showBusyModal = false)}
+/>
+
+<!-- MiniMax H3 Prompt Enhancer Modal -->
+<ReviewEnhanceModal
+  show={enhanceState === "loading" || enhanceState === "error" || enhanceState === "done"}
+  loading={enhanceState === "loading"}
+  error={enhanceError}
+  result={enhanceResult}
+  onUse={useEnhancedPrompt}
+  onCancel={closeEnhanceModal}
+  onRetry={enhancePrompt}
 />

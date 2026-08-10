@@ -200,6 +200,7 @@
     "title": "视频详情",
     "showOriginal": "显示原图",
     "showVideo": "显示视频",
+    "refVideo": "参考视频",
     "prompt": "提示词",
     "noPrompt": "未提供提示词",
     "relaySegments": "接力片段：",
@@ -324,7 +325,17 @@
       "allReferencesUsed": "所有参考已添加",
       "allReferencesUsedShort": "所有参考已标记",
       "addAllReferences": "添加所有参考",
-      "unreferencedHint": "有 {count} 个参考未标记 — 它们仍会影响输出。点击 + 显式引用它们。"
+      "unreferencedHint": "有 {count} 个参考未标记 — 它们仍会影响输出。点击 + 显式引用它们。",
+      "aspect": {
+        "title": "画面比例",
+        "help": "输出视频的宽高比。选择“视频”则跟随参考素材。",
+        "video": "跟随视频",
+        "16:9": "16:9",
+        "4:3": "4:3",
+        "square": "方形",
+        "3:4": "3:4",
+        "9:16": "9:16"
+      }
     },
     "tags": "标签",
     "addTag": "添加",
@@ -340,6 +351,20 @@
     "yourPrompt": "您的提示词",
     "promptHelp": "编辑或输入您的自定义提示词（支持中英文）。点击上方建议即可使用。",
     "promptPlaceholder": "描述您希望视频的样子...",
+    "enhance": {
+      "button": "✨ 增强提示词",
+      "generating": "正在增强提示词…",
+      "generatingHint": "AI 正在将您的提示词改写为 MiniMax H3 所需的结构化格式，最多可能需要一分钟。",
+      "errorTitle": "增强失败",
+      "errorUnavailable": "提示词增强暂时不可用，请稍后重试。",
+      "errorMessage": "增强失败：{error}",
+      "retry": "重试",
+      "regenerate": "重新生成",
+      "ref2vHint": "参考视频模式对提示词格式要求严格，强烈建议使用提示词增强功能——直接输入简单语句往往会产生不符合预期的结果。",
+      "previewTitle": "增强后的提示词",
+      "previewHint": "请预览下方增强后的提示词。使用后将替换您当前的提示词——<Picture N> / <Video 1> 标签会保留。",
+      "useButton": "使用增强提示词"
+    },
     "advancedSettings": "高级设置",
     "resetAll": "重置为默认值",
     "workflow": {

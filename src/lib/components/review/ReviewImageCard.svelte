@@ -23,33 +23,38 @@
 <div class="card bg-base-100 shadow-xl">
   <figure class="px-4 pt-4">
     {#if videoWorkflowType === "ref2v"}
-      <!-- Ref2V Mode: show ref video (if any) + ref images -->
-      {#if entry.additional_options?.ref_video_url}
-        <video
-          src={entry.additional_options.ref_video_url}
-          controls
-          muted
-          playsinline
-          class="rounded-lg max-h-72 w-full object-contain bg-base-200"
-        ></video>
-      {:else}
-        <div class="w-full rounded-lg bg-base-200 py-10 text-center text-sm opacity-70">
-          {entry.additional_options?.ref_image_urls?.length
-            ? $_("review.ref2v.noRefVideoWithImages")
-            : $_("review.ref2v.noRefVideo")}
-        </div>
-      {/if}
-      {#if entry.additional_options?.ref_image_urls?.length}
-        <div class="grid grid-cols-3 gap-2 w-full mt-3">
-          {#each entry.additional_options.ref_image_urls as refUrl, i}
-            <img
-              src={refUrl}
-              alt="ref image {i + 1}"
-              class="rounded-lg max-h-32 object-contain w-full bg-base-200"
-            />
-          {/each}
-        </div>
-      {/if}
+      <!-- Ref2V Mode: show ref video (if any) + ref images. The daisyUI
+           <figure> is display:flex (row), so both must live inside ONE
+           w-full shrink-0 wrapper — as sibling flex items they'd sit side
+           by side and overflow (overflow:hidden clips the row). -->
+      <div class="w-full shrink-0">
+        {#if entry.additional_options?.ref_video_url}
+          <video
+            src={entry.additional_options.ref_video_url}
+            controls
+            muted
+            playsinline
+            class="rounded-lg h-72 w-full object-contain bg-base-200"
+          ></video>
+        {:else}
+          <div class="w-full rounded-lg bg-base-200 py-10 text-center text-sm opacity-70">
+            {entry.additional_options?.ref_image_urls?.length
+              ? $_("review.ref2v.noRefVideoWithImages")
+              : $_("review.ref2v.noRefVideo")}
+          </div>
+        {/if}
+        {#if entry.additional_options?.ref_image_urls?.length}
+          <div class="flex gap-2 w-full mt-3">
+            {#each entry.additional_options.ref_image_urls as refUrl, i}
+              <img
+                src={refUrl}
+                alt="ref image {i + 1}"
+                class="rounded-lg h-24 min-w-0 flex-1 object-contain bg-base-200"
+              />
+            {/each}
+          </div>
+        {/if}
+      </div>
     {:else if entry.last_image_url}
       <!-- FL2V Mode: Show both images -->
       <div class="grid grid-cols-2 gap-2 w-full">

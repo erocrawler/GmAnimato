@@ -182,22 +182,57 @@
       <div class="card bg-base-100 shadow-xl">
         <figure class="bg-base-300">
           {#if showOriginal}
-            {#if video.last_image_url}
-              <!-- FL2V Mode: Show both first and last frames -->
-              <div class="grid grid-cols-2 gap-2 p-4 w-full">
-                <div>
-                  <p class="text-xs text-center mb-2 font-semibold">{$_('review.firstFrame')}</p>
-                  <img src={video.original_image_url} alt="First Frame" class="w-full rounded-lg object-contain" style="max-height: 580px" />
+            <!-- daisyUI <figure> is display:flex (row) — ALL Show Original
+                 content must live inside ONE w-full shrink-0 wrapper, or the
+                 siblings shrink and the ref images collapse to a few px. -->
+            <div class="w-full shrink-0">
+              {#if video.additional_options?.ref2v}
+                <!-- Ref2V Mode: Show ref video (if any) + ref images -->
+                <div class="w-full p-4 space-y-3">
+                  {#if video.additional_options.ref_video_url}
+                    <div>
+                      <p class="text-xs text-center mb-2 font-semibold">{$_('videoDetail.refVideo')}</p>
+                      <video
+                        src={video.additional_options.ref_video_url}
+                        controls
+                        muted
+                        playsinline
+                        class="w-full rounded-lg object-contain bg-base-200"
+                        style="max-height: 580px"
+                      ></video>
+                    </div>
+                  {/if}
+                  {#if video.additional_options.ref_image_urls?.length}
+                    <div class="grid grid-cols-3 gap-2">
+                      {#each video.additional_options.ref_image_urls as refUrl, i}
+                        <img
+                          src={refUrl}
+                          alt="ref image {i + 1}"
+                          class="w-full rounded-lg object-contain bg-base-200"
+                          style="max-height: 200px"
+                        />
+                      {/each}
+                    </div>
+                  {/if}
                 </div>
-                <div>
-                  <p class="text-xs text-center mb-2 font-semibold">{$_('review.lastFrame')}</p>
-                  <img src={video.last_image_url} alt="Last Frame" class="w-full rounded-lg object-contain" style="max-height: 580px" />
+              {/if}
+              {#if video.last_image_url}
+                <!-- FL2V Mode: Show both first and last frames -->
+                <div class="grid grid-cols-2 gap-2 p-4 w-full">
+                  <div>
+                    <p class="text-xs text-center mb-2 font-semibold">{$_('review.firstFrame')}</p>
+                    <img src={video.original_image_url} alt="First Frame" class="w-full rounded-lg object-contain" style="max-height: 580px" />
+                  </div>
+                  <div>
+                    <p class="text-xs text-center mb-2 font-semibold">{$_('review.lastFrame')}</p>
+                    <img src={video.last_image_url} alt="Last Frame" class="w-full rounded-lg object-contain" style="max-height: 580px" />
+                  </div>
                 </div>
-              </div>
-            {:else}
-              <!-- I2V Mode: Show single image -->
-              <img src={video.original_image_url} alt="Original" class="w-full max-h-[600px] object-contain" />
-            {/if}
+              {:else}
+                <!-- I2V Mode: Show single image -->
+                <img src={video.original_image_url} alt="Original" class="w-full max-h-[600px] object-contain" />
+              {/if}
+            </div>
           {:else if video.status === 'completed' && video.final_video_url}
             <!-- svelte-ignore a11y_media_has_caption -->
             <video src={video.final_video_url} controls class="w-full max-h-[600px]" autoplay loop></video>
