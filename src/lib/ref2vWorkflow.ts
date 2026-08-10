@@ -136,8 +136,8 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
       delete workflow.input.workflow[loadVideoNode];
     }
     if (encodeInputs) {
-      delete encodeInputs.ref_videos;
-      delete encodeInputs.ref_video_audios;
+      delete encodeInputs['ref_videos.ref_video_0'];
+      delete encodeInputs['ref_video_audios.ref_video_audio_0'];
     }
     if (Array.isArray(workflow.input.videos)) {
       workflow.input.videos = [];
@@ -148,20 +148,24 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
     }
   }
 
-  // Reference images are optional (0-5). Remove unused LoadImage nodes, their
-  // ref_images dict entries, and their input.images entries.
+  // Reference images are optional (0-5). Remove unused LoadImage nodes and
+  // their ref_images.* input keys (flat dotted names — the node's autogrow
+  // inputs are registered as 'ref_images.ref_image_N').
   if (refImageCount === 0) {
-    // No ref images at all — drop ref_images entirely
-    if (encodeInputs) delete encodeInputs.ref_images;
+    // No ref images at all — drop every ref_images.* key
+    if (encodeInputs) {
+      for (let i = 1; i <= MAX_REF_IMAGES; i++) {
+        delete encodeInputs[`ref_images.ref_image_${i - 1}`];
+      }
+    }
   } else {
     for (let i = refImageCount + 1; i <= MAX_REF_IMAGES; i++) {
       const nodeId = findNode(workflow, 'LoadImage', `Reference Image ${i}`);
       if (nodeId) {
         delete workflow.input.workflow[nodeId];
       }
-      if (encodeInputs?.ref_images) {
-        // Node input keys are 0-indexed (ref_image_0..ref_image_5).
-        delete encodeInputs.ref_images[`ref_image_${i - 1}`];
+      if (encodeInputs) {
+        delete encodeInputs[`ref_images.ref_image_${i - 1}`];
       }
     }
   }
