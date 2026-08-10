@@ -316,6 +316,7 @@
     "lastFrame": "最后一帧",
     "ref2v": {
       "noRefVideo": "没有参考视频 — 将以文本转视频方式生成",
+      "noRefVideoWithImages": "没有参考视频 — 将使用下方的参考图像",
       "referencesLabel": "参考元素：",
       "addReference": "在提示词中添加参考",
       "removeReference": "从提示词中移除 {ref}",

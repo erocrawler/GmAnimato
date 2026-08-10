@@ -317,6 +317,7 @@
     "lastFrame": "Last Frame",
     "ref2v": {
       "noRefVideo": "No reference video — this will run as a text-to-video job",
+      "noRefVideoWithImages": "No reference video — using the reference images below",
       "referencesLabel": "References:",
       "addReference": "Add reference to prompt",
       "removeReference": "Remove {ref} from prompt",
