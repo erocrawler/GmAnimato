@@ -2,31 +2,104 @@
   "input": {
     "images": [
       {
-        "name": "{first_image_name}",
-        "image": "{first_image_url}"
+        "name": "{ref_image_1_name}",
+        "image": "{ref_image_1_url}"
       },
       {
-        "name": "{last_image_name}",
-        "image": "{last_image_url}"
+        "name": "{ref_image_2_name}",
+        "image": "{ref_image_2_url}"
+      },
+      {
+        "name": "{ref_image_3_name}",
+        "image": "{ref_image_3_url}"
+      },
+      {
+        "name": "{ref_image_4_name}",
+        "image": "{ref_image_4_url}"
+      },
+      {
+        "name": "{ref_image_5_name}",
+        "image": "{ref_image_5_url}"
+      },
+      {
+        "name": "{ref_image_6_name}",
+        "image": "{ref_image_6_url}"
+      }
+    ],
+    "videos": [
+      {
+        "name": "{ref_video_name}",
+        "image": "{ref_video_url}"
       }
     ],
     "workflow": {
-      "114": {
+      "105:1": {
         "inputs": {
-          "image": "{first_image_name}"
+          "video": "{ref_video_name}",
+          "force_rate": 24,
+          "custom_width": 0,
+          "custom_height": 0,
+          "frame_load_cap": 0,
+          "skip_first_frames": 0,
+          "select_every_nth": 1
         },
-        "class_type": "LoadImage",
+        "class_type": "VHS_LoadVideo",
         "_meta": {
-          "title": "Load Image (First)"
+          "title": "Load Reference Video"
         }
       },
-      "121": {
+      "114": {
         "inputs": {
-          "image": "{last_image_name}"
+          "image": "{ref_image_1_name}"
         },
         "class_type": "LoadImage",
         "_meta": {
-          "title": "Load Image (Last)"
+          "title": "Load Reference Image 1"
+        }
+      },
+      "115": {
+        "inputs": {
+          "image": "{ref_image_2_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Reference Image 2"
+        }
+      },
+      "116": {
+        "inputs": {
+          "image": "{ref_image_3_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Reference Image 3"
+        }
+      },
+      "117": {
+        "inputs": {
+          "image": "{ref_image_4_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Reference Image 4"
+        }
+      },
+      "118": {
+        "inputs": {
+          "image": "{ref_image_5_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Reference Image 5"
+        }
+      },
+      "119": {
+        "inputs": {
+          "image": "{ref_image_6_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Reference Image 6"
         }
       },
       "122": {
@@ -143,7 +216,7 @@
       },
       "105:6": {
         "inputs": {
-          "unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+          "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
           "weight_dtype": "default"
         },
         "class_type": "UNETLoader",
@@ -188,18 +261,53 @@
             "105:11",
             0
           ],
-          "first_frame": [
-            "114",
+          "audio_vae": [
+            "105:24",
             0
           ],
-          "last_frame": [
-            "121",
-            0
-          ]
+          "ref_image_size": "match",
+          "ref_images": {
+            "ref_image_1": [
+              "114",
+              0
+            ],
+            "ref_image_2": [
+              "115",
+              0
+            ],
+            "ref_image_3": [
+              "116",
+              0
+            ],
+            "ref_image_4": [
+              "117",
+              0
+            ],
+            "ref_image_5": [
+              "118",
+              0
+            ],
+            "ref_image_6": [
+              "119",
+              0
+            ]
+          },
+          "ref_videos": {
+            "ref_video_1": [
+              "105:1",
+              0
+            ]
+          },
+          "ref_video_audios": {
+            "ref_video_audio_1": [
+              "105:1",
+              2
+            ]
+          }
         },
-        "class_type": "MiniMaxH3ImageToVideo",
+        "class_type": "MiniMaxH3ReferenceToVideo",
         "_meta": {
-          "title": "MiniMax H3 Image to Video"
+          "title": "MiniMax H3 Reference to Video"
         }
       },
       "105:107": {

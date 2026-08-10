@@ -28,7 +28,7 @@ interface MiniMaxWorkflowParams {
  * Unlike WAN templates, MiniMax H3 uses a completely different node stack:
  * - MiniMaxH3ImageToVideo encoder (first_frame + optional last_frame)
  * - RandomNoise -> BasicScheduler -> SamplerCustomAdvanced (res_multistep)
- * - Single UNETLoader (minimax_h3_fl2va_pruned_fp8_scaled.safetensors)
+ * - Single UNETLoader (minimax_h3_fl2va_pruned_int8_convrot.safetensors)
  * - Separate video + audio VAEs, with VAEDecodeAudio -> VHS_VideoCombine.audio
  * - No negative prompt, no motion scale / free-long / relay
  * - Optional sage attention (MiniMaxH3MemoryEfficientSageAttentionPatch) when
