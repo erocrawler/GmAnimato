@@ -58,9 +58,12 @@
     (typeof refVideoSource === 'string' &&
       (refVideoSource.startsWith('/') ||
         (typeof location !== 'undefined' && refVideoSource.startsWith(location.origin))));
-  // Slider range: never exceed the clip cap (10s); round max to a 0.1 step so
-  // the end thumb can actually reach the far edge.
-  $: sliderMax = Math.min(refVideoDuration || MAX_REF_VIDEO_SECONDS, MAX_REF_VIDEO_SECONDS);
+  // Slider range: span the FULL source duration when known, so the user can
+  // pick WHERE the (max 10s) clip comes from. Fall back to the clip cap when
+  // the duration is unknown (e.g. cross-origin URLs). The clip LENGTH is
+  // enforced in the drag handlers below (window slides within the source), so
+  // the UI can never select a range longer than MAX_REF_VIDEO_SECONDS.
+  $: sliderMax = refVideoDuration > 0 ? refVideoDuration : MAX_REF_VIDEO_SECONDS;
   // Up to 6 ref images (2 per row x 3 rows)
   let refImages: { file: File | null; preview: string; valid: boolean }[] = [];
   for (let i = 0; i < 6; i++) refImages.push({ file: null, preview: '', valid: false });
@@ -189,8 +192,17 @@
   // The submit callback passed to `use:enhance` is awaited BEFORE the fetch
   // (see SvelteKit forms.js), so async work here (ref2v client-side clipping)
   // completes before FormData is serialized. It must return the result-handler.
-  async function handleUploadEnhance({ formData }: any) {
+  async function handleUploadEnhance({ formData, cancel }: any) {
     submitting = true;
+    if (mode === 'ref2v' && clipError) {
+      // A previous clip attempt failed — don't silently drop the ref video
+      // and submit without it. Surface the error and cancel the submission.
+      submitting = false;
+      message = clipError;
+      messageType = 'error';
+      cancel?.();
+      return;
+    }
     if (mode === 'ref2v' && refVideoSource && !refVideoFile) {
       // Only clip when the source is a File or same-origin URL. Cross-origin
       // URLs can't be read by canvas — pass the URL through to the server.
@@ -314,7 +326,7 @@
     refVideoName = 'ref_video.webm';
     refVideoPreviewUrl = trimmed;
     try {
-      // Best-effort: probe duration so the clip slider has a sane range.
+      // Best-effort: probe duration so the clip slider spans the full source.
       const dur = await getVideoDuration(trimmed);
       refVideoDuration = dur;
       clipStart = 0;
@@ -328,15 +340,37 @@
     }
   }
 
+  // Drag handlers enforce the clip LENGTH cap in the UI: the selected window
+  // [clipStart, clipEnd] can never exceed MAX_REF_VIDEO_SECONDS. Dragging a
+  // thumb past the cap slides the OTHER thumb along, so the window keeps its
+  // max length and can move anywhere within the source (e.g. drag the end
+  // thumb to 15s of a 17s video -> window 5-15s, still a 10s clip), instead of
+  // allowing an arbitrarily long range that would only be capped later.
   function onClipStartInput(e: Event) {
     const v = Number((e.target as HTMLInputElement).value);
-    clipStart = Math.min(v, Math.max(0, clipEnd - 0.1));
+    let start = Math.max(0, Math.min(v, clipEnd - 0.1));
+    let end = clipEnd;
+    if (end - start > MAX_REF_VIDEO_SECONDS) end = start + MAX_REF_VIDEO_SECONDS;
+    if (end > sliderMax) {
+      end = sliderMax;
+      start = Math.max(0, end - MAX_REF_VIDEO_SECONDS);
+    }
+    clipStart = start;
+    clipEnd = end;
     clipActiveThumb = 'start';
   }
 
   function onClipEndInput(e: Event) {
     const v = Number((e.target as HTMLInputElement).value);
-    clipEnd = Math.max(v, Math.min(sliderMax, clipStart + 0.1));
+    let end = Math.min(sliderMax, Math.max(v, clipStart + 0.1));
+    let start = clipStart;
+    if (end - start > MAX_REF_VIDEO_SECONDS) start = end - MAX_REF_VIDEO_SECONDS;
+    if (start < 0) {
+      start = 0;
+      end = Math.min(sliderMax, start + MAX_REF_VIDEO_SECONDS);
+    }
+    clipStart = start;
+    clipEnd = end;
     clipActiveThumb = 'end';
   }
 

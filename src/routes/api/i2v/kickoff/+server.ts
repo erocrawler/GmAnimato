@@ -156,6 +156,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       resolution = videoResolution as VideoResolution;
     }
 
+    // Extract ref2v aspect ratio (video / 16:9 / 4:3 / square / 3:4 / 9:16)
+    const allowedAspects = ['video', '16:9', '4:3', 'square', '3:4', '9:16'] as const;
+    type Ref2vAspect = (typeof allowedAspects)[number];
+    let ref2vAspect: Ref2vAspect | undefined;
+    if (body?.ref2vAspect && allowedAspects.includes(body.ref2vAspect)) {
+      ref2vAspect = body.ref2vAspect as Ref2vAspect;
+    }
+
     // Extract prompt relay mode params
     const promptRelayMode: boolean = body?.promptRelayMode === true;
     let promptRelaySegments: { prompt: string; frames: number }[] | undefined;
@@ -272,6 +280,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const mergedAdditionalOptions: any = {
       ...(existing.additional_options || {}),
     };
+
+    if (ref2vAspect === undefined) {
+      delete mergedAdditionalOptions.ref2v_aspect;
+    } else {
+      mergedAdditionalOptions.ref2v_aspect = ref2vAspect;
+    }
     const mergedValidationMetadata: any = {
       ...(existing.validation_metadata || {}),
     };

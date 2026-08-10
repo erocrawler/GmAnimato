@@ -51,6 +51,7 @@ export type VideoEntry = {
     ref_video_name?: string;
     ref_image_urls?: string[];
     ref_image_names?: string[];
+    ref2v_aspect?: 'video' | '16:9' | '4:3' | 'square' | '3:4' | '9:16'; // ref2v output aspect
     // Add future options here without DB migration
   };
   lora_weights?: Record<string, number>; // LoRA weights for customization

@@ -145,11 +145,16 @@ export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promis
         ? (video.additional_options.ref_image_names as string[])
         : undefined,
       ref_image_urls: refImageUrls,
+      // The poster is a frame from the ref video (or the first ref image when
+      // there's no video) — it carries the output aspect and is probeable,
+      // which the mp4 itself is not. ref2vWorkflow uses it for 'video' aspect.
+      posterUrl: video.original_image_url ? toOriginalUrl(video.original_image_url) : undefined,
       input_prompt: video.prompt ?? 'A beautiful video',
       seed,
       callback_url: callbackUrl,
       videoDuration: video.video_duration as 4 | 6 | 8 | 10 | undefined,
       videoResolution: video.video_resolution as '480p' | '720p' | undefined,
+      ref2vAspect: video.additional_options?.ref2v_aspect as 'video' | '16:9' | '4:3' | 'square' | '3:4' | '9:16' | undefined,
       iterationSteps: video.iteration_steps as 10 | 12 | 15 | undefined,
       loraWeights,
       loraPresets: settings.loraPresets,

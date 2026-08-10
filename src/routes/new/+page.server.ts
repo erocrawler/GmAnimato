@@ -3,7 +3,7 @@ import { redirect } from '@sveltejs/kit';
 import { uploadBufferToS3 } from '$lib/s3';
 import { Buffer } from 'buffer';
 import { validateAndConvertImage } from '$lib/imageValidation';
-import { validateAndConvertVideo, extractVideoPoster } from '$lib/videoValidation';
+import { validateAndConvertVideo, extractVideoPoster, probeVideoDuration, MAX_REF_VIDEO_SECONDS } from '$lib/videoValidation';
 import { createVideoEntryForReview } from '$lib/videoEntryCreation';
 import { getVideosByUser, getWorkflows } from '$lib/db';
 
@@ -117,6 +117,17 @@ export const actions: Actions = {
       } else if (refVideoUrlInput) {
         if (!/^https?:\/\//i.test(refVideoUrlInput)) {
           return { error: 'ref video URL must be an http(s) URL' };
+        }
+        // Cross-origin URLs can't be clipped client-side, so the server must
+        // verify the duration here — never silently accept a ref longer than
+        // the clip cap (it would condition the job on far more footage than
+        // intended). Only reject when we can positively measure >10s; if the
+        // probe fails, keep the previous pass-through behavior.
+        const urlDuration = await probeVideoDuration(refVideoUrlInput);
+        if (urlDuration !== null && urlDuration > MAX_REF_VIDEO_SECONDS + 0.5) {
+          return {
+            error: `ref video is ${Math.round(urlDuration)}s — max ${MAX_REF_VIDEO_SECONDS}s. Please use a shorter clip or download it first.`,
+          };
         }
         refVideoUrl = refVideoUrlInput;
         refVideoName = 'ref_video.webm';

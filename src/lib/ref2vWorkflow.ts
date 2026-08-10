@@ -10,11 +10,19 @@ interface Ref2VWorkflowParams {
   ref_video_url: string;
   ref_image_names?: string[]; // up to 5 reference images
   ref_image_urls?: string[];
+  /** Poster frame (video.original_image_url). For video refs it is a frame
+   *  extracted from the ref video, so it carries the video's aspect ratio —
+   *  and it is reliably probeable, unlike the mp4 itself (probe-image-size
+   *  can't read video containers). Used when ref2vAspect is 'video'. */
+  posterUrl?: string;
   input_prompt: string;
   seed: number;
   callback_url?: string;
   videoDuration?: 4 | 6 | 8 | 10; // seconds; frames derived via ComfyMathExpression (24fps)
   videoResolution?: '480p' | '720p';
+  /** Output aspect ratio. 'video' follows the reference media (default); the
+   *  presets override it. MiniMax H3 supports roughly 0.45-2.2. */
+  ref2vAspect?: 'video' | '16:9' | '4:3' | 'square' | '3:4' | '9:16';
   iterationSteps?: 10 | 12 | 15; // sampler steps (MiniMax fast/balanced/quality)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
@@ -152,7 +160,8 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
         delete workflow.input.workflow[nodeId];
       }
       if (encodeInputs?.ref_images) {
-        delete encodeInputs.ref_images[`ref_image_${i}`];
+        // Node input keys are 0-indexed (ref_image_0..ref_image_5).
+        delete encodeInputs.ref_images[`ref_image_${i - 1}`];
       }
     }
   }
@@ -213,26 +222,55 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   }
 
   // Always generate at 480p for efficiency, then upscale to 720p if needed.
-  // Aspect follows the first reference image when available (video refs are
-  // adapted by the node itself); with no refs (pure t2v) use default landscape.
+  // Aspect follows the reference media. With ref2vAspect='video' (the UI
+  // default) the ref VIDEO drives the output — but probe-image-size can't read
+  // mp4, so use the poster frame (a frame extracted from the ref video, which
+  // carries the video's aspect) when available. Without a poster, fall back to
+  // the first ref image, then the video URL, then the default. Fixed presets
+  // override everything; legacy jobs with no ref2vAspect keep the old
+  // ref-image-first behavior.
   const resolution = params.videoResolution ?? '480p';
+  const aspectOverride: { w: number; h: number } | null =
+    params.ref2vAspect && params.ref2vAspect !== 'video'
+      ? {
+          '16:9': { w: 16, h: 9 },
+          '4:3': { w: 4, h: 3 },
+          square: { w: 1, h: 1 },
+          '3:4': { w: 3, h: 4 },
+          '9:16': { w: 9, h: 16 },
+        }[params.ref2vAspect] ?? null
+      : null;
   let gen480pWidth: number;
   let gen480pHeight: number;
   let originalImageWidth: number;
   let originalImageHeight: number;
 
   try {
-    const probeTarget = params.ref_image_urls?.[0] || (hasRefVideo ? params.ref_video_url : null);
-    if (!probeTarget) {
-      throw new Error('No reference media to probe (pure t2v)');
+    let probeWidth: number;
+    let probeHeight: number;
+    if (aspectOverride) {
+      // Fixed preset: use its ratio directly (pixel budget applied below).
+      probeWidth = aspectOverride.w;
+      probeHeight = aspectOverride.h;
+    } else {
+      const followsVideo = params.ref2vAspect === 'video';
+      const probeTarget =
+        (followsVideo && params.posterUrl)
+          ? params.posterUrl
+          : params.ref_image_urls?.[0] || (hasRefVideo ? params.ref_video_url : null);
+      if (!probeTarget) {
+        throw new Error('No reference media to probe (pure t2v)');
+      }
+      const dimensions = await probe(probeTarget);
+      probeWidth = dimensions.width;
+      probeHeight = dimensions.height;
     }
-    const dimensions = await probe(probeTarget);
-    originalImageWidth = dimensions.width;
-    originalImageHeight = dimensions.height;
+    originalImageWidth = probeWidth;
+    originalImageHeight = probeHeight;
 
     const { width, height } = calculateVideoDimensions(
-      dimensions.width,
-      dimensions.height,
+      probeWidth,
+      probeHeight,
       '480p',
       { roundToMultiple: 32, rounding: 'floor' }
     );

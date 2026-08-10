@@ -15,9 +15,11 @@
   export let promptRelayMode: boolean = false;
   export let canUseQuality: boolean = false;
   export let showAdvancedSettings: boolean = false;
+  export let videoWorkflowType: string = "";
   export let iterationSteps: number = 4;
   export let videoDuration: number = 4;
   export let videoResolution: string = "480p";
+  export let ref2vAspect: "video" | "16:9" | "4:3" | "square" | "3:4" | "9:16" = "video";
   export let motionScale: number | undefined = undefined;
   export let freeLongBlendStrength: number | undefined = undefined;
   export let filteredLoraPresets: LoraPreset[] = [];
@@ -353,6 +355,38 @@
             {/each}
           </div>
         {/if}
+      </div>
+
+      <div class="divider"></div>
+    {/if}
+
+    <!-- Ref2V Aspect Ratio -->
+    {#if videoWorkflowType === "ref2v"}
+      <div class="space-y-4 mb-6">
+        <div class="flex items-center justify-between">
+          <h3 class="font-semibold">{$_("review.ref2v.aspect.title")}</h3>
+          <span class="text-xs opacity-70"
+            >{$_("review.ref2v.aspect.help")}</span
+          >
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {#each (["video", "16:9", "4:3", "square", "3:4", "9:16"] as const) as value}
+            <label
+              class="btn btn-outline btn-sm justify-start gap-2"
+              class:btn-active={ref2vAspect === value}
+            >
+              <input
+                type="radio"
+                name="ref2v-aspect"
+                value={value}
+                checked={ref2vAspect === value}
+                on:change={() => (ref2vAspect = value)}
+                disabled={!isEditable}
+              />
+              <span>{$_(`review.ref2v.aspect.${value}`)}</span>
+            </label>
+          {/each}
+        </div>
       </div>
 
       <div class="divider"></div>
