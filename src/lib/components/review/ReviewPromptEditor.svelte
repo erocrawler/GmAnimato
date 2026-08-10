@@ -30,7 +30,9 @@
     const html = tokenizePrompt(prompt);
     const probe = document.createElement('div');
     probe.innerHTML = html;
-    if (el.innerHTML.replace(/\u200b/g, '') === probe.innerHTML) return;
+    // Compare with ZWSP stripped on BOTH sides: ZWSPs are caret anchors (after
+    // <br> and after trailing breaks) and must never trigger a rebuild.
+    if (el.innerHTML.replace(/\u200b/g, '') === probe.innerHTML.replace(/\u200b/g, '')) return;
     // Save caret position as character offset into the plain text
     const caretOffset = getEditorCaretOffset();
     el.innerHTML = html;
@@ -57,7 +59,7 @@
             : '';
           return `<span class="inline-flex items-center gap-1 badge badge-primary badge-sm font-normal px-1.5 py-0.5 align-middle" contenteditable="false" data-ref-token="${escapeHtml(part)}">${thumb}${icon}<span>${escapeHtml(part)}</span></span>`;
         }
-        return escapeHtml(part).replace(/\n/g, '<br>');
+        return escapeHtml(part).replace(/\n/g, '<br>\u200b');
       })
       .join("");
   }
@@ -100,30 +102,36 @@
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || !promptEditor) return -1;
     const range = sel.getRangeAt(0);
-    const startNode = range.startContainer;
-    const startOffset = range.startOffset;
-    let offset = 0;
-    let done = false;
+    return offsetInEditor(range.startContainer, range.startOffset);
+  }
 
-    const walk = (node: Node) => {
+  /** Character offset of (node, offset) within the editor's prompt text — the
+   *  same walk getEditorCaretOffset uses, parameterized over an arbitrary
+   *  node/offset (e.g. both ends of a non-collapsed selection). Returns -1
+   *  when the node isn't inside the editor. */
+  function offsetInEditor(node: Node, offset: number): number {
+    if (!promptEditor) return -1;
+    let pos = 0;
+    let done = false;
+    const walk = (n: Node) => {
       if (done) return;
-      if (node === startNode) {
-        if (node.nodeType === Node.TEXT_NODE) {
-          const t = (node.textContent || '').replace(/\u00a0/g, ' ').replace(/\u200b/g, '');
-          offset += Math.min(startOffset, t.length);
+      if (n === node) {
+        if (n.nodeType === Node.TEXT_NODE) {
+          const t = (n.textContent || '').replace(/\u00a0/g, ' ').replace(/\u200b/g, '');
+          pos += Math.min(offset, t.length);
         } else {
-          const children = Array.from(node.childNodes);
-          for (let i = 0; i < Math.min(startOffset, children.length); i++) {
-            domWalk(children[i], (t) => (offset += t.length));
+          const children = Array.from(n.childNodes);
+          for (let i = 0; i < Math.min(offset, children.length); i++) {
+            domWalk(children[i], (t) => (pos += t.length));
           }
         }
         done = true;
         return;
       }
-      domWalk(node, (t) => (offset += t.length));
+      domWalk(n, (t) => (pos += t.length));
     };
     promptEditor.childNodes.forEach(walk);
-    return done ? offset : -1;
+    return done ? pos : -1;
   }
 
   function restoreEditorCaret(offset: number) {
@@ -157,11 +165,35 @@
       const el = node as HTMLElement;
       const tag = el.tagName;
       if (tag === 'BR') {
-        if (remaining <= 1) {
+        if (remaining <= 0) {
           target = { node, off: 0, mode: 'before' };
           return true;
         }
         remaining -= 1;
+        if (remaining <= 0) {
+          // Consumed the newline: caret goes to the start of the next line.
+          // Anchor it inside the ZWSP text node that follows the <br> (it's a
+          // caret home so backspace deletes the <br>, not an adjacent badge).
+          // If the break is trailing, sit AFTER the ZWSP so Chromium doesn't
+          // normalize the caret back before the <br>.
+          const next = el.nextSibling;
+          if (next && next.nodeType === Node.TEXT_NODE && (next.textContent || '').replace(/\u200b/g, '') === '') {
+            let trailing = true;
+            for (let s = next.nextSibling; s; s = s.nextSibling) {
+              const meaningful =
+                s.nodeType === Node.TEXT_NODE
+                  ? (s.textContent || '').replace(/\u200b/g, '') !== ''
+                  : s.nodeType === Node.ELEMENT_NODE && (s as HTMLElement).tagName !== 'BR';
+              if (meaningful) { trailing = false; break; }
+            }
+            target = { node: next, off: trailing ? 1 : 0, mode: 'in' };
+          } else if (next && next.nodeType === Node.TEXT_NODE) {
+            target = { node: next, off: 0, mode: 'in' };
+          } else {
+            target = { node: el, off: 0, mode: 'after' };
+          }
+          return true;
+        }
         return false;
       }
       if (tag === 'IMG' || tag === 'SVG') return false;
@@ -214,16 +246,18 @@
     if (!composing) renderPromptEditor();
   }
 
-  /** Insert a single <br> at the caret with the caret placed AFTER it, then
-   *  re-sync the prompt. (execCommand insertHTML/insertLineBreak in this
-   *  Chromium misplace the caret or insert double breaks.)
+  /** Insert a single <br> at the caret, always followed by a zero-width-space
+   *  caret anchor, then re-sync the prompt.
    *
-   *  Chromium quirk: a caret placed after a *trailing* <br> is normalized back
-   *  before it, so the next keystroke lands on the previous line (requiring a
-   *  second Enter to "create" the new line). We anchor the caret with an
-   *  invisible zero-width space after a trailing break; the anchor is stripped
-   *  everywhere (domWalk / getEditorCaretOffset / renderPromptEditor) and gets
-   *  consumed naturally by the next keystroke. */
+   *  The ZWSP gives the caret a text home after the break:
+   *  - a caret directly after a *trailing* <br> is normalized back before it
+   *    by Chromium (requiring a second Enter), so we sit AFTER the anchor;
+   *  - a caret at a bare <br>/badge boundary makes Backspace delete the badge
+   *    instead of the break, so the anchor gives Backspace something to chew
+   *    through first.
+   *  The anchor is stripped everywhere (domWalk / getEditorCaretOffset /
+   *  renderPromptEditor comparison) and consumed naturally by the next
+   *  keystroke. */
   function insertLineBreakAtCaret() {
     if (!promptEditor) return;
     const sel = window.getSelection();
@@ -232,7 +266,8 @@
     range.deleteContents();
     const br = document.createElement('br');
     range.insertNode(br);
-    // Is the br trailing (nothing meaningful after it)? Only then anchor.
+    // Is the br trailing (nothing meaningful after it)? The caret then sits
+    // AFTER the anchor; otherwise BEFORE it (so Backspace removes the <br>).
     let trailing = true;
     for (let s = br.nextSibling; s; s = s.nextSibling) {
       const meaningful =
@@ -241,17 +276,10 @@
           : s.nodeType === Node.ELEMENT_NODE && (s as HTMLElement).tagName !== 'BR';
       if (meaningful) { trailing = false; break; }
     }
-    let anchor: Text | null = null;
-    if (trailing) {
-      anchor = document.createTextNode('\u200b');
-      br.parentNode?.insertBefore(anchor, br.nextSibling);
-    }
+    const anchor = document.createTextNode('\u200b');
+    br.parentNode?.insertBefore(anchor, br.nextSibling);
     const after = document.createRange();
-    if (anchor) {
-      after.setStart(anchor, 1); // after the zero-width space
-    } else {
-      after.setStartAfter(br);
-    }
+    after.setStart(anchor, trailing ? 1 : 0);
     after.collapse(true);
     sel.removeAllRanges();
     sel.addRange(after);
@@ -404,16 +432,39 @@
       onEditorInput();
     }}
     on:paste={(e) => {
-      // Normalize pasted text (strip HTML so tokens stay plain text,
-      // and convert newlines to <br> so the DOM stays text+br+badges)
+      // Paste as plain text at the caret. String-splice + re-render (the same
+      // proven path as insertRefToken) instead of the deprecated
+      // document.execCommand('insertText'), which — when the DOM selection is
+      // missing or stale (e.g. after an external prompt update) — inserts at
+      // the START of the editor instead of the caret. Falls back to the last
+      // tracked caret position when there is no live selection inside the
+      // editor.
       e.preventDefault();
       const text = e.clipboardData?.getData('text/plain') || '';
-      const lines = text.split('\n');
-      lines.forEach((line, i) => {
-        if (i > 0) insertLineBreakAtCaret();
-        if (line) document.execCommand('insertText', false, line);
-      });
-      onEditorInput();
+      if (!text || !isEditable) return;
+
+      // Resolve the insertion point: live selection inside the editor first
+      // (handles replacing a selected range), then the tracked caret, then the
+      // end of the prompt.
+      let start = -1;
+      let end = -1;
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && promptEditor?.contains(sel.getRangeAt(0).startContainer)) {
+        const range = sel.getRangeAt(0);
+        start = offsetInEditor(range.startContainer, range.startOffset);
+        end = range.collapsed ? start : offsetInEditor(range.endContainer, range.endOffset);
+      }
+      if (start < 0 || start > prompt.length) {
+        start = promptCursor >= 0 && promptCursor <= prompt.length ? promptCursor : prompt.length;
+        end = start;
+      }
+      if (end < start) end = start;
+
+      prompt = prompt.slice(0, start) + text + prompt.slice(end);
+      promptCursor = start + text.length;
+      renderPromptEditor();
+      promptEditor?.focus();
+      restoreEditorCaret(promptCursor);
     }}
     on:keydown={(e) => {
       // Enter must insert a single bare <br> (with the caret after it)
