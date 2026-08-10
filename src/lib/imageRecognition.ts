@@ -42,7 +42,19 @@ const CUSTOM_VL_MODAL_FALLBACK_TOKEN_ID = env.CUSTOM_VL_MODAL_FALLBACK_TOKEN_ID 
 const CUSTOM_VL_MODAL_FALLBACK_TOKEN_SECRET = env.CUSTOM_VL_MODAL_FALLBACK_TOKEN_SECRET || '';
 const CUSTOM_VL_TIMEOUT_MS = Number(env.CUSTOM_VL_TIMEOUT_MS || '60000');
 const CUSTOM_VL_MAX_TOKENS = Number(env.CUSTOM_VL_MAX_TOKENS || '1024');
+// Prompt enhancement emits a long structured prompt (subject definitions, shot
+// list, soundscape, music...), so it gets a dedicated, larger token budget.
+// The enhancer follows the official H3 prompt-writing guide's detail
+// expectations (per-shot composition/appearance/lighting/camera/sound, speaker
+// IDs, retention markers...), so the output is often 4-8K tokens; 4096 truncates
+// it mid-section. 8192 fits within a 16K context even with ~8.5K worst-case
+// image+text input; lower via env if the local context is tighter.
+const CUSTOM_VL_ENHANCE_MAX_TOKENS = Number(env.CUSTOM_VL_ENHANCE_MAX_TOKENS || '8192');
 const CUSTOM_VL_MAX_IMAGE_PIXELS = Number(env.CUSTOM_VL_MAX_IMAGE_PIXELS || '1000000');
+// Prompt enhancement sends up to 9 images (ref images + video screenshots); each
+// image consumes vision tokens in the VL context window. Keep them much smaller
+// than the general-purpose cap so the request fits in a ~3K-token context.
+const CUSTOM_VL_ENHANCE_MAX_IMAGE_PIXELS = Number(env.CUSTOM_VL_ENHANCE_MAX_IMAGE_PIXELS || '160000');
 const CUSTOM_VL_ENABLE_THINKING = env.CUSTOM_VL_ENABLE_THINKING === 'true';
 const CUSTOM_VL_ERROR_LOG = env.CUSTOM_VL_ERROR_LOG || path.join(process.cwd(), 'logs', 'custom-vl-errors.log');
 
@@ -148,7 +160,7 @@ async function shouldRouteToModalFallback(): Promise<boolean> {
   }
 }
 
-async function fetchImageAsResizedBase64(url: string): Promise<string> {
+async function fetchImageAsResizedBase64(url: string, maxPixels?: number): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
@@ -163,10 +175,11 @@ async function fetchImageAsResizedBase64(url: string): Promise<string> {
   const hasAlpha = Boolean(metadata.hasAlpha);
   const currentPixels = width * height;
 
+  const cap = maxPixels ?? CUSTOM_VL_MAX_IMAGE_PIXELS;
   const pipeline = sharp(inputBytes, { failOn: 'none' }).rotate();
 
-  if (currentPixels > CUSTOM_VL_MAX_IMAGE_PIXELS && width > 0 && height > 0) {
-    const scale = Math.sqrt(CUSTOM_VL_MAX_IMAGE_PIXELS / currentPixels);
+  if (currentPixels > cap && width > 0 && height > 0) {
+    const scale = Math.sqrt(cap / currentPixels);
     const targetWidth = Math.max(1, Math.floor(width * scale));
     const targetHeight = Math.max(1, Math.floor(height * scale));
 
@@ -186,10 +199,10 @@ async function fetchImageAsResizedBase64(url: string): Promise<string> {
   return `data:${contentType};base64,${base64}`;
 }
 
-async function toInferenceImageUrl(url: string): Promise<string> {
+async function toInferenceImageUrl(url: string, maxPixels?: number): Promise<string> {
   // Keep inference resilient: if preprocessing fails, fall back to original URL.
   try {
-    return await fetchImageAsResizedBase64(url);
+    return await fetchImageAsResizedBase64(url, maxPixels);
   } catch (error) {
     console.warn('[Custom VL] Failed to preprocess image, using source URL:', error);
     return url;
@@ -199,6 +212,23 @@ async function toInferenceImageUrl(url: string): Promise<string> {
 function repairIncompleteJson(jsonStr: string): string {
   let repaired = jsonStr;
   
+  // Escape raw control characters inside JSON strings. The enhanced prompt is
+  // inherently multi-line, and models often emit literal \n / \t / \r (or other
+  // control chars) inside the string value instead of escaped sequences, which
+  // JSON.parse rejects with "Bad control character in string literal". Only
+  // actual control chars match — already-escaped sequences like \\n (backslash
+  // + 'n') contain no control chars and are left untouched.
+  repaired = repaired.replace(/[\u0000-\u001F\u007F]/g, (ch) => {
+    switch (ch) {
+      case '\n': return '\\n';
+      case '\r': return '\\r';
+      case '\t': return '\\t';
+      case '\b': return '\\b';
+      case '\f': return '\\f';
+      default: return '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0');
+    }
+  });
+
   // Remove trailing commas that break JSON parsing (e.g., ["a", "b",])
   repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
   
@@ -211,7 +241,7 @@ function repairIncompleteJson(jsonStr: string): string {
   while ((match = missingArrayClose.exec(repaired)) !== null) {
     // Check if this looks like a field name (common field names in our response)
     const potentialField = match[2];
-    if (['suggested_prompts', 'tags', 'is_photo_realistic', 'is_nsfw', 'prompts'].includes(potentialField)) {
+    if (['suggested_prompts', 'tags', 'is_photo_realistic', 'is_nsfw', 'prompts', 'enhanced_prompt'].includes(potentialField)) {
       // Find position right before the field name quote
       const fixPosition = match.index + match[1].length + 2; // after the first quoted string and comma
       fixes.push({index: fixPosition, type: 'array_close'});
@@ -311,7 +341,8 @@ function extractContentFromPayload(payload: any): string | null {
 
 async function requestModalFallback(
   messages: CustomVlMessage[],
-  temperature: number
+  temperature: number,
+  maxTokens?: number
 ): Promise<string | null> {
   if (!hasModalFallbackConfig()) {
     return null;
@@ -330,7 +361,7 @@ async function requestModalFallback(
     const body: Record<string, unknown> = {
       messages,
       temperature,
-      max_tokens: CUSTOM_VL_MAX_TOKENS,
+      max_tokens: maxTokens ?? CUSTOM_VL_MAX_TOKENS,
       response_format: { type: 'json_object' },
     };
     if (!CUSTOM_VL_ENABLE_THINKING) {
@@ -359,7 +390,8 @@ async function requestModalFallback(
 
 async function requestCustomVl(
   messages: CustomVlMessage[],
-  temperature: number
+  temperature: number,
+  maxTokens?: number
 ): Promise<string | null> {
   const baseConfigReady = hasCustomVlConfig();
   const modalFallbackReady = hasModalFallbackConfig();
@@ -369,12 +401,12 @@ async function requestCustomVl(
   }
 
   if (!baseConfigReady && modalFallbackReady) {
-    return requestModalFallback(messages, temperature);
+    return requestModalFallback(messages, temperature, maxTokens);
   }
 
   if (await shouldRouteToModalFallback()) {
     try {
-      const modalText = await requestModalFallback(messages, temperature);
+      const modalText = await requestModalFallback(messages, temperature, maxTokens);
       if (modalText) {
         return modalText;
       }
@@ -406,7 +438,7 @@ async function requestCustomVl(
     const body: Record<string, unknown> = {
       messages,
       temperature,
-      max_tokens: CUSTOM_VL_MAX_TOKENS,
+      max_tokens: maxTokens ?? CUSTOM_VL_MAX_TOKENS,
       response_format: { type: 'json_object' },
     };
     if (authMode === 'bearer') {
@@ -435,7 +467,7 @@ async function requestCustomVl(
     if (modalFallbackReady) {
       console.warn('[Custom VL] Base endpoint failed, trying modal fallback:', error);
       try {
-        const modalText = await requestModalFallback(messages, temperature);
+        const modalText = await requestModalFallback(messages, temperature, maxTokens);
         if (modalText) {
           return modalText;
         }
@@ -517,6 +549,226 @@ export async function evaluatePromptProperties(
     is_photo_realistic: undefined,
     is_nsfw: undefined,
   };
+}
+
+export interface EnhanceMiniMaxPromptParams {
+  prompt: string;
+  /** 'ref2v' | 'fl2v' | 'i2v' — selects the output structure the MiniMax H3
+   *  generation nodes consume. */
+  workflowType: 'ref2v' | 'fl2v' | 'i2v';
+  /** Labeled reference images. Each entry binds an image to its prompt tag
+   *  (e.g. '<Picture 1>', '<Video 1> 截图 1/3') — the VL model cannot infer
+   *  the tag↔image correspondence from a bare URL, so every image MUST carry
+   *  a label that names the tag it corresponds to. */
+  labeledImages?: { label: string; url: string }[];
+  /** @deprecated Use labeledImages. Flat URL list sent without captions (the
+   *  model cannot tell which URL is which <Picture N> / <Video 1>). */
+  imageUrls?: string[];
+  /** Video duration in seconds — the enhanced prompt references it. */
+  durationSeconds?: number;
+  /** 'zh' | 'en' — the generated shot descriptions / dialogue should prefer
+   *  this language. */
+  locale?: string;
+  userId?: string;
+  videoId?: string;
+}
+
+/**
+ * Enhance a simple MiniMax H3 prompt into the structured prompt format the
+ * MiniMaxH3ImageToVideo / MiniMaxH3ReferenceToVideo nodes consume
+ * (integrated_multimodal_description with subject_definitions, shot list,
+ * soundscape and music sections). Uses the same CUSTOM_VL endpoint as the
+ * "Analyze with AI" flow; the reference images are sent for vision grounding.
+ *
+ * Returns the enhanced prompt text, or null when the VL service is
+ * unavailable / the model did not return a usable enhancement.
+ */
+export async function enhanceMiniMaxPrompt(
+  params: EnhanceMiniMaxPromptParams
+): Promise<string | null> {
+  if (!hasCustomVlConfig() && !hasModalFallbackConfig()) {
+    return null;
+  }
+
+  const lang = params.locale === 'zh' ? '中文' : 'English';
+  const duration = params.durationSeconds ?? 5;
+
+  // Build the EXACT list of references that exist in this job, so the model
+  // only writes tags for what was actually uploaded. It must never invent a
+  // <Picture N> or <Video 1> that isn't here — the generation node would try
+  // to bind a non-existent reference.
+  const availableRefTags: string[] = [];
+  let hasVideoRef = false;
+  for (const img of params.labeledImages ?? []) {
+    const picMatch = img.label.match(/^(<Picture\s*\d+>)/);
+    if (picMatch) availableRefTags.push(picMatch[1]);
+    if (/^<Video\s*1>/.test(img.label)) hasVideoRef = true;
+  }
+  if (hasVideoRef) availableRefTags.push('<Video 1>');
+  const availableRefsDesc =
+    availableRefTags.length > 0
+      ? availableRefTags.join(', ')
+      : '（无 — 纯文本转视频，没有任何参考图像或视频）';
+
+  // Reference-to-video structure: subject definitions map each <Picture N> to
+  // a <Subject N>, then summary / retention analysis / shot-by-shot description
+  // with dialogue tags and the audio sections. Kept terse — the prompt itself
+  // is large and must fit the VL context window alongside up to 9 images.
+  const ref2vSystemPrompt = `MiniMax H3 reference-to-video prompt architect. Rewrite the user's simple prompt into the model's required structured prompt in ${lang}, using EXACTLY these sections (each heading on its own line ending with ':').
+
+AVAILABLE REFERENCES (the ONLY tags that exist — never use others):
+${availableRefsDesc}
+
+subject_definitions:
+- Only declare sources from AVAILABLE REFERENCES. NEVER invent <Picture N>/<Video 1> not listed.
+- GROUP pictures by the actual subject: if two <Picture N> show the SAME character/object (compare the attached images — same person, same outfit/features), declare ONE <Subject N> for them and list both pictures as its sources: "<Picture 1>、<Picture 2> 共同作为 <Subject 1> 人物/物体外观来源，需保持其<关键视觉特征>。" Only introduce a new <Subject N> when the images show a DIFFERENT person/object.
+- If <Video 1> available and it shows the same subject as a picture, merge it too: "<Picture 1>、<Video 1> 共同作为 <Subject N> 外观来源..." — if it shows different subjects, give it its own <Subject N>.
+- "<Picture N> 作为 <Subject N> ..." format for each subject source (write in 中文).
+- Unused available tags: "<X> 不适用。"
+- Declare each <Subject N> role.
+
+summary:
+One paragraph in ${lang}. If refs exist, start with "[reference generation + audio reference] ".
+
+retention_analysis:
+Per <Subject N>: "<Subject N>（出现于 [Shot 1]）：fully_preserved - <特征>。" (list each picture/video that feeds it). Use the official marker set: fully_preserved 完全保留 / partially_preserved 部分保留（改动了个别特征）/ attribute_transfer 特征转移到另一主体 / weak_reference 仅风格或氛围的弱参考.
+
+detailed_description:
+Shot-by-shot script in ${lang}: scene setup, then "[Shot N] At MM:SS.mmm, <Subject N> ..." — the first shot is "[Shot 1]" with NO timestamp; later shots carry strictly increasing cut times ("[Shot 2] At 00:03.500"). Camera motion is written naturally in the sentence as type + amplitude + speed when meaningful (e.g. "镜头小幅度慢速推近" / "the camera pans right with large amplitude at fast speed"). Speakers get stable IDs across shots: (S1), (S2)..., compound (S1,S2) for group speech; the ID sits OUTSIDE <d>: "<Subject 1> (S1) 说：<d>[Chinese] 对话内容。</d>". Voiceover: "以画外音说道" and state the on-screen lips remain closed. Dialogue crossing a cut uses <scenetrans> at the junction and notes the audio continues across the cut; speech cut off by the video end uses <cutoff>. On-screen readable text (signs, banners, subtitles) goes in English double quotes, preserved verbatim. Only wrap ACTUAL spoken words a character says aloud in dialogue tags: "<d>[Chinese] 对话内容。</d>" or "<d>[English] dialogue.</d>". Sound effects (breaths, sighs, moans, footsteps, thuds) are NEVER dialogue — describe them as plain text ("<Subject 1> 发出急促的呼气声") and put ambient sounds in overall_soundscape.
+
+overall_soundscape:
+Ambient sound in ${lang}, 1-4 sentences in one paragraph. Dialogue/singing stays in detailed_description — do not repeat it here. "N/A" only for complete silence.
+
+non_diegetic_music:
+Music/score in ${lang}, 1-3 sentences: instrumentation, tempo, dynamics — no abstract mood words. "N/A" when there is no audience-only music.
+
+Rules:
+- Only tags the model sees: <Picture N>, <Video 1>, <Subject N>, <Audio N>. NEVER output screenshot labels like "<Video 1> 截图 N/M".
+- <d>[lang]...</d> means the character SPEAKS those exact words in that language (lip-sync + voice). Use it ONLY for real spoken sentences. Never wrap sounds/effects (breaths, gasps, moans, knocks) in <d> — write them as plain description and put them in overall_soundscape.
+- If only <Video 1> exists, write NO "<Picture N> 作为..." line.
+- Upload captions: '<Picture N>' for ref images, '<Video 1> 截图 N/M' for video frames — analysis only; video subjects source from <Video 1>.
+- Study attached images for appearance details (clothing, features) and use them. When pictures show the same subject, merge them — do NOT fabricate a separate <Subject N> per <Picture N>.
+- Make detailed_description as detailed and explicit as possible (composition, appearance, lighting, camera, sound per shot); dialogue-dense content prioritizes a complete spoken timeline.
+- Video is ${duration}s; match shot plan.
+- Output ONLY {"enhanced_prompt": "<full prompt text with real line breaks>"}.`;
+
+  // Image-to-video (fl2v / i2v) structure: integrated_multimodal_description
+  // with shot segments + audio sections. Kept terse to fit the VL context.
+  const i2vSystemPrompt = `MiniMax H3 image-to-video prompt architect. Rewrite the user's simple prompt into the required structured prompt in ${lang}, using EXACTLY these sections (each heading on its own line ending with ':').
+
+AVAILABLE REFERENCES (the ONLY tags that exist — never use others):
+${availableRefsDesc}
+
+integrated_multimodal_description:
+Shot-by-shot script in ${lang}: scene setup, then "[Shot N] At MM:SS.mmm, ..." — the first shot is "[Shot 1]" with NO timestamp; later shots carry strictly increasing cut times ("[Shot 2] At 00:03.500"). Camera motion is written naturally in the sentence as type + amplitude + speed when meaningful (e.g. "镜头小幅度慢速推近" / "the camera pans right with large amplitude at fast speed"). Speakers get stable IDs: (S1), (S2)..., compound (S1,S2) for group speech, ID outside <d>: "女子 (S1) 说：<d>[Chinese] 对话内容。</d>". Voiceover: "以画外音说道" and state the on-screen lips remain closed. Dialogue crossing a cut uses <scenetrans>; speech cut off by the video end uses <cutoff>. On-screen text goes in English double quotes, verbatim. Only wrap ACTUAL spoken words in dialogue tags: "<d>[Chinese] 对话内容。</d>" or "<d>[English] dialogue.</d>". Sounds (breaths, sighs, moans, footsteps) are plain description, never <d>. Only reference <Picture N> from AVAILABLE REFERENCES.
+
+overall_soundscape:
+Ambient sound in ${lang}, 1-4 sentences in one paragraph. Dialogue/singing stays in integrated_multimodal_description — do not repeat it here. "N/A" only for complete silence.
+
+non_diegetic_music:
+Music/score in ${lang}, 1-3 sentences: instrumentation, tempo, dynamics — no abstract mood words. "N/A" when there is no audience-only music.
+
+Rules:
+- Only reference tags from AVAILABLE REFERENCES. NEVER invent <Picture N>/<Video 1> not listed.
+- <d>[lang]...</d> means the character SPEAKS those words in that language (lip-sync + voice). Only for real spoken sentences; never wrap sounds/effects in <d> — put them as plain description / overall_soundscape.
+- Upload captions ('首帧'/'尾帧'/etc.) tell you which image is which.
+- Make integrated_multimodal_description as detailed and explicit as possible (composition, appearance, lighting, camera, sound per shot); dialogue-dense content prioritizes a complete spoken timeline.
+- Video is ${duration}s; match shot plan.
+- Output ONLY {"enhanced_prompt": "<full prompt text with real line breaks>"}.`;
+
+  const isRef2v = params.workflowType === 'ref2v';
+
+  try {
+    const messageContent: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
+      {
+        type: 'text',
+        text: `Simple prompt: "${params.prompt}"`,
+      },
+    ];
+
+    // Labeled images (preferred): alternate a caption naming the tag with the
+    // image itself, so the model knows exactly which upload is <Picture 1> vs
+    // <Video 1> screenshots. Fall back to the deprecated flat list when no
+    // labels are provided (still sent, just without binding info).
+    const labeled = params.labeledImages ?? [];
+    const plain = (params.imageUrls ?? []).filter(Boolean);
+    if (labeled.length > 0) {
+      for (const { label, url } of labeled) {
+        // Downscale aggressively: up to 9 images must fit the VL context window.
+        const processed = await toInferenceImageUrl(url, CUSTOM_VL_ENHANCE_MAX_IMAGE_PIXELS);
+        messageContent.push({ type: 'text', text: `Reference image for ${label}:` });
+        messageContent.push({ type: 'image_url', image_url: { url: processed } });
+      }
+    } else if (plain.length > 0) {
+      const processed = await Promise.all(
+        plain.map((u) => toInferenceImageUrl(u, CUSTOM_VL_ENHANCE_MAX_IMAGE_PIXELS))
+      );
+      for (const url of processed) {
+        messageContent.push({ type: 'image_url', image_url: { url } });
+      }
+    }
+
+    const text = await requestCustomVl(
+      [
+        {
+          role: 'system',
+          content: isRef2v ? ref2vSystemPrompt : i2vSystemPrompt,
+        },
+        {
+          role: 'user',
+          content: messageContent,
+        },
+      ],
+      0.7,
+      CUSTOM_VL_ENHANCE_MAX_TOKENS
+    );
+
+    if (!text) {
+      return null;
+    }
+
+    // Prefer the JSON envelope, but fall back to the raw text: models sometimes
+    // return the structured prompt bare (no {"enhanced_prompt": ...} wrapper)
+    // or with a parse-breaking envelope. The bare text is still a usable prompt.
+    const parsed = parseJsonWithRepair<{ enhanced_prompt?: string }>(text);
+    let enhanced = parsed?.enhanced_prompt?.trim() || stripThinkingContent(text).trim();
+    if (!enhanced) {
+      logCustomVlError('enhanceMiniMaxPrompt.invalidStructure', null, {
+        user_id: params.userId,
+        video_id: params.videoId,
+        workflowType: params.workflowType,
+      });
+      return null;
+    }
+    // Safety nets:
+    // 1. The generation model only sees <Video 1> (the video itself), never
+    //    individual screenshots — collapse any leaked screenshot labels.
+    enhanced = enhanced.replace(/<Video 1>\s*截图\s*\d+\s*\/\s*\d+/gi, '<Video 1>');
+    // 2. Any reference tag the job doesn't actually have is a hallucination —
+    //    the generation node would try to bind a non-existent reference. When
+    //    the job has a reference video, remap hallucinated <Picture N> to
+    //    <Video 1> (the model observed those subjects in the video screenshots,
+    //    so the video is the correct source). Otherwise strip the tag.
+    const hasVideo = availableRefTags.some((t) => /^<Video\s*1>$/i.test(t));
+    const refTagPattern = /<(?:Picture|Video)\s*\d+>/gi;
+    enhanced = enhanced.replace(refTagPattern, (tag) => {
+      if (availableRefTags.some((t) => t.toLowerCase() === tag.toLowerCase())) return tag;
+      return hasVideo ? '<Video 1>' : '';
+    });
+    // Collapse any leftover doubled whitespace from the removals.
+    enhanced = enhanced.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n');
+    return enhanced;
+  } catch (error) {
+    console.error('[Custom VL] enhanceMiniMaxPrompt request failed:', error);
+    logCustomVlError('enhanceMiniMaxPrompt.requestFailure', error, {
+      user_id: params.userId,
+      video_id: params.videoId,
+      workflowType: params.workflowType,
+    });
+    // Re-throw so the caller can surface the real error (e.g. context-size
+    // exceeded) in the UI instead of a generic "unavailable".
+    throw error;
+  }
 }
 
 async function annotateWithCustomVl(

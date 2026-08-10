@@ -4,6 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 export const MAX_REF_VIDEO_BYTES = 50 * 1024 * 1024; // 50 MB safety cap (client clips to ≤10s webm)
+// Ref2V clip cap. The client clips the ref video to ≤10s before uploading;
+// anything longer must be rejected (server-side), never silently accepted.
+export const MAX_REF_VIDEO_SECONDS = 10;
 export const ALLOWED_VIDEO_TYPES = new Set(['video/webm', 'video/mp4', 'video/quicktime', 'video/x-matroska']);
 // Downscale ref videos so the long edge is at most 854px (~480p 16:9). Ref videos
 // only condition the output (which is generated at 480p), so a smaller upload is
@@ -96,6 +99,20 @@ export async function validateAndConvertVideo(buffer: Buffer, mime: string): Pro
   }
   const ext = videoExtFromMime(mime);
 
+  // Reject videos longer than the ref2v clip cap. The client clips to ≤10s
+  // before uploading, but guard any path that bypasses that — a longer ref
+  // would condition the job on far more footage than the UI intended. A small
+  // grace (0.5s) absorbs ffprobe/MediaRecorder duration jitter on ~10s clips.
+  const duration = await probeVideoDurationFromBuffer(buffer, ext);
+  if (duration !== null && duration > MAX_REF_VIDEO_SECONDS + 0.5) {
+    return {
+      buffer,
+      ext: '',
+      wasConverted: false,
+      error: `ref video is ${Math.round(duration)}s — max ${MAX_REF_VIDEO_SECONDS}s`,
+    };
+  }
+
   try {
     const resized = await resizeVideoWithFfmpeg(buffer, ext);
     // Only treat as "converted" if the output is actually smaller/valid.
@@ -143,6 +160,103 @@ export async function extractVideoPoster(url: string, atSeconds = 0): Promise<Bu
   } catch (e) {
     console.warn('[Video] Poster extraction failed for', url, e);
     return null;
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** Probe a video's duration (seconds) with ffprobe. Returns null on failure. */
+export async function probeVideoDuration(url: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const proc = spawn('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      url,
+    ]);
+    let out = '';
+    proc.stdout.on('data', (c: Buffer) => (out += c.toString()));
+    proc.on('close', (code) => {
+      const dur = Number.parseFloat(out.trim());
+      resolve(code === 0 && Number.isFinite(dur) && dur > 0 ? dur : null);
+    });
+    proc.on('error', () => resolve(null));
+  });
+}
+
+/** Probe a video buffer's duration by writing it to a temp file and ffprobing. */
+async function probeVideoDurationFromBuffer(buffer: Buffer, ext: string): Promise<number | null> {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ref2v-probe-'));
+  const inPath = path.join(tmpDir, `probe.${ext || 'mp4'}`);
+  try {
+    await fs.writeFile(inPath, buffer);
+    return await probeVideoDuration(inPath);
+  } catch {
+    return null;
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Extract N evenly-spaced screenshot frames (JPEG) from a video URL using
+ * ffmpeg. Used by the MiniMax H3 prompt enhancer so the vision model can see
+ * what the reference video actually shows (subject appearance, motion, scene).
+ * Best-effort: returns whatever frames could be extracted (possibly fewer than
+ * requested, possibly none).
+ */
+export async function extractVideoScreenshots(
+  url: string,
+  count = 3,
+): Promise<Buffer[]> {
+  const frames: Buffer[] = [];
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ref2v-shots-'));
+  try {
+    // Sample at even intervals across the duration when known; otherwise use
+    // fixed offsets (0, 1, 3s...). Skip the very last frame (could be black).
+    const duration = await probeVideoDuration(url);
+    const timestamps: number[] = [];
+    if (duration && duration > 0.5) {
+      const span = Math.max(0, duration - 0.25);
+      for (let i = 0; i < count; i++) {
+        timestamps.push(span * (i / Math.max(1, count - 1)));
+      }
+    } else {
+      for (let i = 0; i < count; i++) timestamps.push(i);
+    }
+
+    for (let i = 0; i < timestamps.length; i++) {
+      const outPath = path.join(tmpDir, `shot_${i}.jpg`);
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const errChunks: Buffer[] = [];
+          const proc = spawn('ffmpeg', [
+            '-y',
+            '-ss', String(timestamps[i]),
+            '-i', url,
+            '-frames:v', '1',
+            '-vf', 'scale=480:-2',
+            '-f', 'image2',
+            '-q:v', '4',
+            outPath,
+          ]);
+          proc.stderr.on('data', (c: Buffer) => errChunks.push(c));
+          proc.on('close', (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`ffmpeg exited with code ${code}`));
+          });
+          proc.on('error', (err) => reject(err));
+        });
+        const buf = await fs.readFile(outPath);
+        if (buf.length > 0) frames.push(buf);
+      } catch (e) {
+        console.warn(`[Video] Screenshot ${i} extraction failed:`, e);
+      }
+    }
+    return frames;
+  } catch (e) {
+    console.warn('[Video] Screenshot extraction failed for', url, e);
+    return frames;
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
