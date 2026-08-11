@@ -151,7 +151,14 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
       workflow.input.node_weights[loadVideoNode] = 2.0; // VHS_LoadVideo - ref video decode
     }
     if (refVideoHasAudio === false && encodeInputs) {
-      delete encodeInputs.ref_video_audios;
+      // The template registers autogrow inputs as FLAT dotted keys
+      // ('ref_video_audios.ref_video_audio_0'), so deleting the parent
+      // 'ref_video_audios' object would leave the dangling key behind. Delete
+      // the exact dotted key(s) instead — otherwise the input stays wired to
+      // VHS_LoadVideo's AUDIO output, which doesn't exist for audio-less refs
+      // and makes VHS fail with "failed to load audio".
+      delete encodeInputs['ref_video_audios.ref_video_audio_0'];
+      delete encodeInputs['ref_video_audios'];
     }
   }
 
