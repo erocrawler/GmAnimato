@@ -49,6 +49,7 @@ export type VideoEntry = {
     ref2v?: boolean;
     ref_video_url?: string;
     ref_video_name?: string;
+    ref_video_has_audio?: boolean;
     ref_image_urls?: string[];
     ref_image_names?: string[];
     ref2v_aspect?: 'video' | '16:9' | '4:3' | 'square' | '3:4' | '9:16'; // ref2v output aspect

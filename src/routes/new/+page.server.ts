@@ -106,6 +106,7 @@ export const actions: Actions = {
       // can't be clipped client-side, so they're passed through as-is.
       let refVideoUrl = '';
       let refVideoName = '';
+      let refVideoHasAudio: boolean | undefined;
       if (refVideoFile && refVideoFile.size > 0) {
         const rawVideoBuffer = Buffer.from(await refVideoFile.arrayBuffer());
         const videoResult = await validateAndConvertVideo(rawVideoBuffer, refVideoFile.type);
@@ -114,6 +115,7 @@ export const actions: Actions = {
         }
         refVideoUrl = await uploadBufferToS3(videoResult.buffer, videoResult.ext || 'webm');
         refVideoName = refVideoFile.name || `ref_video.${videoResult.ext || 'webm'}`;
+        refVideoHasAudio = videoResult.hasAudio;
       } else if (refVideoUrlInput) {
         if (!/^https?:\/\//i.test(refVideoUrlInput)) {
           return { error: 'ref video URL must be an http(s) URL' };
@@ -130,7 +132,7 @@ export const actions: Actions = {
           };
         }
         refVideoUrl = refVideoUrlInput;
-        refVideoName = 'ref_video.webm';
+        refVideoName = 'ref_video.webm'; (fix: 付费计费显式化 + 无音频视频自动断开音频线)
       }
 
       // Process up to 6 ref images
@@ -186,6 +188,7 @@ export const actions: Actions = {
           ref2v: true,
           ref_video_url: refVideoUrl,
           ref_video_name: refVideoName,
+          ...(refVideoHasAudio !== undefined ? { ref_video_has_audio: refVideoHasAudio } : {}),
           ref_image_urls: refImageUrls,
           ref_image_names: refImageNames
         }

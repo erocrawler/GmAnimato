@@ -141,6 +141,7 @@ export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promis
     payload = await buildRef2VWorkflow({
       ref_video_name: video.additional_options?.ref_video_name ?? '',
       ref_video_url: refVideoUrl ?? '',
+      ref_video_has_audio: (video.additional_options as any)?.ref_video_has_audio as boolean | undefined,
       ref_image_names: Array.isArray(video.additional_options?.ref_image_names)
         ? (video.additional_options.ref_image_names as string[])
         : undefined,

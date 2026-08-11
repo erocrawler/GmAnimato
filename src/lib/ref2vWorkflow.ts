@@ -8,6 +8,7 @@ import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes 
 interface Ref2VWorkflowParams {
   ref_video_name: string;
   ref_video_url: string;
+  ref_video_has_audio?: boolean;
   ref_image_names?: string[]; // up to 5 reference images
   ref_image_urls?: string[];
   /** Poster frame (video.original_image_url). For video refs it is a frame
@@ -131,6 +132,9 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
 
   // Reference video is optional. When absent, strip the LoadVideo node,
   // the ref_videos/ref_video_audios inputs, and the videos upload entry.
+  // Also if the video has no audio track, drop ref_video_audios to avoid
+  // wiring an empty AUDIO passthrough into MiniMaxH3ReferenceToVideo.
+  const refVideoHasAudio = params.ref_video_has_audio;
   if (!hasRefVideo) {
     if (loadVideoNode) {
       delete workflow.input.workflow[loadVideoNode];
@@ -145,6 +149,9 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   } else {
     if (loadVideoNode) {
       workflow.input.node_weights[loadVideoNode] = 2.0; // VHS_LoadVideo - ref video decode
+    }
+    if (refVideoHasAudio === false && encodeInputs) {
+      delete encodeInputs.ref_video_audios;
     }
   }
 

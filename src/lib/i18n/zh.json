@@ -494,6 +494,8 @@
     "videoDeleted": "此视频已被删除。",
     "quotaRemaining": "配额：剩余 {count} 个积分",
     "quotaCost": "此视频消耗 {cost} 个积分",
+    "quotaCostAction": "消耗 {cost} 个积分",
+    "quotaCostHint": "本次消耗 {cost} 个积分 · 剩余 {remaining} / 共 {limit}",
     "quotaNoAccess": "无配额 — 赞助后解锁"
   },
   "users": {

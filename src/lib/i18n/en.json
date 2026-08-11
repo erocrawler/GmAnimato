@@ -495,6 +495,8 @@
     "videoDeleted": "This video has been deleted.",
     "quotaRemaining": "Quota: {count} credit{count,plural,=1{} other{s}} left",
     "quotaCost": "This video uses {cost} credit{cost,plural,=1{} other{s}}",
+    "quotaCostAction": "Costs {cost} credit{cost,plural,=1{} other{s}}",
+    "quotaCostHint": "This job uses {cost} credit{cost,plural,=1{} other{s}} · {remaining} left of {limit}",
     "quotaNoAccess": "No quota — sponsor to unlock"
   },
   "users": {

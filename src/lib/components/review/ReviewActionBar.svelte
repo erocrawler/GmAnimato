@@ -53,13 +53,18 @@
           class:badge-warning={quotaRemaining >= selectedWorkflowQuotaCost && quotaRemaining < 3}
           class:badge-success={quotaRemaining >= 3}
           title={selectedWorkflowQuotaCost > 1
-            ? $_("review.quotaCost", { values: { cost: selectedWorkflowQuotaCost } })
+            ? $_("review.quotaCostHint", { values: { cost: selectedWorkflowQuotaCost, remaining: quotaRemaining, limit: quotaLimit } })
             : undefined}
         >
           {$_("review.quotaRemaining", {
             values: { count: quotaRemaining },
           })}
         </div>
+        {#if selectedWorkflowQuotaCost > 1}
+          <span class="badge badge-warning badge-sm" title={$_("review.quotaCostHint", { values: { cost: selectedWorkflowQuotaCost, remaining: quotaRemaining, limit: quotaLimit } })}>
+            {$_("review.quotaCostAction", { values: { cost: selectedWorkflowQuotaCost } })}
+          </span>
+        {/if}
       {/if}
     {/if}
     {#if entry.status === "failed"}

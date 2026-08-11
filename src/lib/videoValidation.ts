@@ -17,6 +17,7 @@ export interface VideoProcessResult {
   buffer: Buffer;
   ext: string;
   wasConverted: boolean;
+  hasAudio?: boolean;
   error?: string;
 }
 
@@ -36,10 +37,32 @@ export function videoExtFromMime(mime: string): string {
   return 'webm';
 }
 
+/** Probe whether a container has an audio stream (best-effort via ffprobe). */
+async function hasAudioStream(inPath: string): Promise<boolean | null> {
+  try {
+    const out = await new Promise<string>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      const proc = spawn('ffprobe', [
+        '-v', 'error',
+        '-select_streams', 'a',
+        '-show_entries', 'stream=index',
+        '-of', 'csv=p=0',
+        inPath,
+      ]);
+      proc.stdout.on('data', (c: Buffer) => chunks.push(c));
+      proc.on('close', () => resolve(Buffer.concat(chunks).toString()));
+      proc.on('error', reject);
+    });
+    return out.trim().length > 0;
+  } catch {
+    return null;
+  }
+}
+
 /** Run ffmpeg to downscale a video buffer to MAX_VIDEO_LONG_EDGE (aspect-preserving, even dims),
- *  re-encoding to h264+aac mp4. Audio is preserved (the ref2v workflow uses the ref video's
- *  soundtrack via ref_video_audios). Returns the new buffer + 'mp4' ext. */
-async function resizeVideoWithFfmpeg(buffer: Buffer, inputExt: string): Promise<{ buffer: Buffer; ext: string }> {
+ *  re-encoding to h264+aac mp4. Audio is preserved when present (the ref2v workflow uses the ref video's
+ *  soundtrack via ref_video_audios). Returns the new buffer + 'mp4' ext and whether audio is present. */
+async function resizeVideoWithFfmpeg(buffer: Buffer, inputExt: string): Promise<{ buffer: Buffer; ext: string; hasAudio: boolean | null }> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ref2v-'));
   const inPath = path.join(tmpDir, `input.${inputExt}`);
   const outPath = path.join(tmpDir, 'output.mp4');
@@ -49,6 +72,7 @@ async function resizeVideoWithFfmpeg(buffer: Buffer, inputExt: string): Promise<
     // Cap the long edge at MAX_VIDEO_LONG_EDGE (landscape -> width, portrait -> height),
     // preserve aspect ratio via -2 (even dimensions), never upscale (min()).
     const scaleFilter = `scale='if(gt(iw,ih),min(${MAX_VIDEO_LONG_EDGE},iw),-2)':'if(gt(iw,ih),-2,min(${MAX_VIDEO_LONG_EDGE},ih))'`;
+    const hasAudio = await hasAudioStream(inPath);
     const args = [
       '-y',
       '-i', inPath,
@@ -57,11 +81,10 @@ async function resizeVideoWithFfmpeg(buffer: Buffer, inputExt: string): Promise<
       '-preset', 'veryfast',
       '-crf', '28',
       '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac',
-      '-b:a', '128k',
+      ...(hasAudio === false ? [] : ['-c:a', 'aac', '-b:a', '128k']),
       '-movflags', '+faststart',
       '-map', '0:v:0',
-      '-map', '0:a:0?',
+      ...(hasAudio === false ? [] : ['-map', '0:a:0?']),
       outPath,
     ];
 
@@ -77,7 +100,10 @@ async function resizeVideoWithFfmpeg(buffer: Buffer, inputExt: string): Promise<
     });
 
     const out = await fs.readFile(outPath);
-    return { buffer: out, ext: 'mp4' };
+    // Re-probe output when input had unknown audio presence to get accurate hasAudio.
+    let outHasAudio = hasAudio;
+    if (hasAudio === null) outHasAudio = await hasAudioStream(outPath);
+    return { buffer: out, ext: 'mp4', hasAudio: outHasAudio ?? hasAudio ?? false };
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -117,9 +143,10 @@ export async function validateAndConvertVideo(buffer: Buffer, mime: string): Pro
     const resized = await resizeVideoWithFfmpeg(buffer, ext);
     // Only treat as "converted" if the output is actually smaller/valid.
     if (resized.buffer.length > 0 && resized.buffer.length < buffer.length) {
-      return { buffer: resized.buffer, ext: resized.ext, wasConverted: true };
+      return { buffer: resized.buffer, ext: resized.ext, wasConverted: true, hasAudio: resized.hasAudio ?? undefined };
     }
-    return { buffer, ext, wasConverted: false };
+    // Even when we keep the original buffer (not smaller), expose hasAudio if we could probe it.
+    return { buffer, ext, wasConverted: false, hasAudio: resized.hasAudio ?? undefined };
   } catch (e) {
     console.warn('[Video] Ref video resize failed, using original:', e);
     return { buffer, ext, wasConverted: false };
