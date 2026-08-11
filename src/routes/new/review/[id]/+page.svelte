@@ -17,6 +17,7 @@
   import ReviewActionBar from "$lib/components/review/ReviewActionBar.svelte";
   import ReviewBusyModal from "$lib/components/review/ReviewBusyModal.svelte";
   import ReviewEnhanceModal from "$lib/components/review/ReviewEnhanceModal.svelte";
+  import ReviewRef2vPresets from "$lib/components/review/ReviewRef2vPresets.svelte";
 
   export let data: any;
   let entry = data.entry as any;
@@ -1130,6 +1131,14 @@
         {referencedTokens}
         {availableRefs}
       />
+
+      {#if videoWorkflowType === "ref2v" && isEditable && !promptRelayMode}
+        <ReviewRef2vPresets
+          {refItems}
+          {isEditable}
+          onSelect={(np) => (prompt = np)}
+        />
+      {/if}
 
       <!-- Prompt Relay Segments -->
       {#if promptRelayMode}

@@ -336,6 +336,21 @@
         "square": "Square",
         "3:4": "3:4",
         "9:16": "9:16"
+      },
+      "presets": {
+        "title": "Quick prompts",
+        "hint": "Click to insert — then ✨ Enhance",
+        "needsMore": "Add a reference video and image(s) above to use this",
+        "needImages": "need {count} img{count, plural, =1 {} other {s}}",
+        "needVideo": "need video",
+        "replacePerson": { "title": "Replace person", "desc": "Swap subject with Picture 1, keep motion" },
+        "faceSwap": { "title": "Face swap", "desc": "Keep body, swap face from Picture 1" },
+        "outfit": { "title": "Outfit change", "desc": "Change clothing to Picture 1" },
+        "bgReplace": { "title": "Background swap", "desc": "Keep person, replace background with Picture 1" },
+        "twoPeople": { "title": "Two people", "desc": "Place Picture 1 + Picture 2 into Video 1" },
+        "object": { "title": "Add prop", "desc": "Person in Video holds Picture 1" },
+        "style": { "title": "Style transfer", "desc": "Apply Picture 1 art style to Video 1" },
+        "addCompanion": { "title": "Add companion", "desc": "Add Picture 1 beside person in Video 1" }
       }
     },
     "tags": "Tags",

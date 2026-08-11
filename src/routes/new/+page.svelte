@@ -203,42 +203,68 @@
       cancel?.();
       return;
     }
-    // Fast-path: if user kept default trim (0..duration) we skip MediaRecorder entirely.
-    // MediaRecorder would re-encode on the main thread (and was dropping audio).
-    // Instead, submit the original File bytes directly; server-side validateAndConvertVideo
-    // (ffmpeg) will handle any needed downscale with audio preserved.
-    const defaultTrim = Math.abs(clipStart) <= 0.16 && (refVideoDuration <= 0 || clipEnd + 0.16 >= refVideoDuration);
-    const needsClip = mode === 'ref2v' && refVideoSource && !refVideoFile && !defaultTrim && canClipRefVideo;
-    if (needsClip) {
-      await applyClip();
-    } else if (mode === 'ref2v' && refVideoSource && !refVideoFile && defaultTrim) {
-      // Default trim: avoid canvas re-encode
-      if (refVideoSource instanceof File) {
-        refVideoFile = refVideoSource as File;
-        refVideoName = refVideoSource.name || refVideoName || 'ref_video.webm';
-        setFileInput(refVideoInput, refVideoFile);
-      } else if (typeof refVideoSource === 'string') {
-        // Reused video: no local file to send — carry the URL for server to proxy
-        formData.delete('ref_video');
-        formData.set('ref_video_url', refVideoSource);
-        // Ensure a poster exists for validation
-        if (!posterInput?.files?.[0]) {
-          try {
-            const poster = await extractPosterFrame(refVideoSource, 0);
-            setFileInput(posterInput, new File([poster], 'poster.png', { type: 'image/png' }));
-          } catch {}
+    const isRef2v = mode === 'ref2v' && refVideoSource;
+    const defaultTrim =
+      Math.abs(clipStart) <= 0.16 &&
+      (refVideoDuration <= 0 || clipEnd + 0.16 >= refVideoDuration);
+
+    if (isRef2v) {
+      const needsClip = !refVideoFile && !defaultTrim && canClipRefVideo;
+      if (needsClip) {
+        // Trim required → re-encode via canvas/MediaRecorder
+        await applyClip();
+      } else if (!refVideoFile) {
+        // No existing clipped file
+        if (refVideoSource instanceof File) {
+          // Default trim: skip canvas re-encode, submit original File directly.
+          // Server-side ffmpeg will downscale with audio preserved.
+          refVideoFile = refVideoSource as File;
+          refVideoName = refVideoSource.name || refVideoName || 'ref_video.webm';
+          setFileInput(refVideoInput, refVideoFile);
+          // Poster required for entries with video but no ref images — extract now
+          if (!posterInput?.files?.[0]) {
+            try {
+              const posterBlob = await extractPosterFrame(refVideoSource, clipStart);
+              const posterFile = new File([posterBlob], 'poster.png', { type: 'image/png' });
+              setFileInput(posterInput, posterFile);
+            } catch (e) {
+              console.warn('[Ref2V] Poster extraction for default trim failed:', e);
+            }
+          }
+        } else if (typeof refVideoSource === 'string') {
+          // Reused video URL (either /media/ default trim or cross-origin fallback)
+          formData.delete('ref_video');
+          formData.set('ref_video_url', refVideoSource);
+          if (!posterInput?.files?.[0]) {
+            try {
+              const posterBlob = await extractPosterFrame(refVideoSource, clipStart || 0);
+              const posterFile = new File([posterBlob], 'poster.png', { type: 'image/png' });
+              setFileInput(posterInput, posterFile);
+            } catch (e) {
+              console.warn('[Ref2V] Poster extraction for URL failed:', e);
+            }
+          }
         }
       }
-    } else if (mode === 'ref2v' && refVideoSource && !refVideoFile && typeof refVideoSource === 'string') {
-      // Cross-origin URL that can't be clipped — pass through to server (HEAD's fallback)
-      formData.set('ref_video_url', refVideoSource);
-    }      }
     }
+
+    // Sync hidden file inputs into the FormData that SvelteKit already built
     if (refVideoFile) {
       formData.set('ref_video', refVideoFile);
-    } else if (!(mode === 'ref2v' && typeof refVideoSource === 'string' && defaultTrim && !refVideoFile)) {
+      formData.delete('ref_video_url');
+    } else if (isRef2v && typeof refVideoSource === 'string') {
+      // URL reuse path — keep URL, no binary
       formData.delete('ref_video');
+      formData.set('ref_video_url', refVideoSource);
+    } else if (mode === 'ref2v' && !refVideoSource) {
+      // Pure text-to-video with optional images
+      formData.delete('ref_video');
+      formData.delete('ref_video_url');
+    } else if (mode !== 'ref2v') {
+      formData.delete('ref_video');
+      formData.delete('ref_video_url');
     }
+
     if (posterInput?.files?.[0]) {
       formData.set('poster_image', posterInput.files[0]);
     } else {

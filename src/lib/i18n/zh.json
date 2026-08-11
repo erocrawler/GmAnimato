@@ -335,6 +335,21 @@
         "square": "方形",
         "3:4": "3:4",
         "9:16": "9:16"
+      },
+      "presets": {
+        "title": "快捷提示词",
+        "hint": "点击插入 — 然后 ✨ 增强",
+        "needsMore": "请先在上方添加参考视频和图像",
+        "needImages": "需 {count} 张图",
+        "needVideo": "需视频",
+        "replacePerson": { "title": "替换人物", "desc": "用图片1替换视频中的人，保留动作" },
+        "faceSwap": { "title": "换脸", "desc": "保留身体，用图片1替换脸部" },
+        "outfit": { "title": "更换服装", "desc": "换成图片1中的服装" },
+        "bgReplace": { "title": "替换背景", "desc": "保留人物，替换为图片1背景" },
+        "twoPeople": { "title": "双人同框", "desc": "将图片1+图片2放入视频1" },
+        "object": { "title": "添加道具", "desc": "让视频人物手持图片1物体" },
+        "style": { "title": "风格迁移", "desc": "将视频转换为图片1风格" },
+        "addCompanion": { "title": "添加同伴", "desc": "在视频人物旁添加图片1中的人" }
       }
     },
     "tags": "标签",
