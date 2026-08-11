@@ -184,7 +184,7 @@ export async function validateAndConvertVideo(buffer: Buffer, mime: string): Pro
  * provided instead of an uploaded file (client can't extract a frame from a
  * cross-origin URL). Best-effort: returns null on any failure.
  */
-export async function extractVideoPoster(url: string, atSeconds = 0): Promise<Buffer | null> {
+export async function extractVideoPoster(url: string, atSeconds = 0.1): Promise<Buffer | null> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ref2v-poster-'));
   const outPath = path.join(tmpDir, 'poster.png');
   try {

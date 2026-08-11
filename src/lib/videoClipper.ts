@@ -273,19 +273,93 @@ export async function extractPosterFrame(source: File | string, atSec = 0): Prom
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D context unavailable');
 
-    await new Promise<void>((resolve) => {
+    // Nudge away from 0 to avoid black first-frame on some encoders
+    const safeAt = Math.min(
+      Math.max(0.05, atSec || 0.1),
+      Math.max(0, (video.duration || 1) - 0.05)
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => reject(new Error('seek timeout')), 5000);
       const onSeeked = () => {
+        window.clearTimeout(timeout);
         video.removeEventListener('seeked', onSeeked);
+        video.removeEventListener('error', onError);
         resolve();
       };
+      const onError = () => {
+        window.clearTimeout(timeout);
+        video.removeEventListener('seeked', onSeeked);
+        video.removeEventListener('error', onError);
+        reject(new Error('seek failed'));
+      };
       video.addEventListener('seeked', onSeeked);
-      video.currentTime = Math.min(atSec, Math.max(0, (video.duration || 0) - 0.05));
+      video.addEventListener('error', onError);
+      if (Math.abs(video.currentTime - safeAt) < 0.01) {
+        // Already at target — still need seeked to fire for some browsers, so nudge
+        video.currentTime = safeAt + 0.001;
+      } else {
+        video.currentTime = safeAt;
+      }
     });
+
+    // Wait for frame to be actually renderable — seeked fires before decode in Chrome
+    if (typeof (video as any).requestVideoFrameCallback === 'function') {
+      await new Promise<void>((resolve) => {
+        (video as any).requestVideoFrameCallback(() => resolve());
+      });
+    } else {
+      // Double rAF to ensure paint
+      await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    }
+
+    // Extra pause to let decoder fill current frame
+    if (video.readyState < 2) {
+      await new Promise<void>((r) => {
+        const onCanPlay = () => {
+          video.removeEventListener('canplay', onCanPlay);
+          r();
+        };
+        video.addEventListener('canplay', onCanPlay);
+        setTimeout(r, 200);
+      });
+    }
 
     ctx.drawImage(video, 0, 0, width, height);
 
+    // Heuristic: detect empty black frame (first bytes often all zero on failure)
+    // If all pixels transparent/black, retry at slightly later time
+    try {
+      const imgData = ctx.getImageData(0, 0, Math.min(16, width), Math.min(16, height));
+      const isBlank = imgData.data.every((v, i) => (i % 4 === 3 ? true : v < 8));
+      if (isBlank && safeAt < (video.duration || 10) - 0.5) {
+        const retryAt = Math.min(safeAt + 0.3, (video.duration || 10) - 0.1);
+        await new Promise<void>((resolve) => {
+          const onSeeked = () => {
+            video.removeEventListener('seeked', onSeeked);
+            resolve();
+          };
+          video.addEventListener('seeked', onSeeked);
+          video.currentTime = retryAt;
+        });
+        if (typeof (video as any).requestVideoFrameCallback === 'function') {
+          await new Promise<void>((resolve) => {
+            (video as any).requestVideoFrameCallback(() => resolve());
+          });
+        } else {
+          await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+        }
+        ctx.drawImage(video, 0, 0, width, height);
+      }
+    } catch {
+      // getImageData can throw if canvas tainted (cross-origin) — ignore and keep first draw
+    }
+
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
     if (!blob) throw new Error('Failed to extract poster frame');
+    if (blob.size < 500) {
+      console.warn('[Poster] Suspiciously small poster blob', blob.size);
+    }
     return blob;
   } finally {
     video.removeAttribute('src');

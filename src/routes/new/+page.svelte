@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { _ } from 'svelte-i18n';
   import { onMount } from 'svelte';
-  import { clipVideoToWebm, extractPosterFrame, getVideoDuration } from '$lib/videoClipper';
+  import { clipVideoToWebm, getVideoDuration } from '$lib/videoClipper';
   import type { LoraPreset } from '$lib/loraPresets';
 
   type Mode = 'i2v' | 'fl2v' | 'ref2v';
@@ -217,33 +217,16 @@
         // No existing clipped file
         if (refVideoSource instanceof File) {
           // Default trim: skip canvas re-encode, submit original File directly.
-          // Server-side ffmpeg will downscale with audio preserved.
+          // Server-side ffmpeg will downscale with audio preserved and also
+          // generate the poster frame (extractVideoPoster) — no client-side
+          // poster extraction needed.
           refVideoFile = refVideoSource as File;
           refVideoName = refVideoSource.name || refVideoName || 'ref_video.webm';
           setFileInput(refVideoInput, refVideoFile);
-          // Poster required for entries with video but no ref images — extract now
-          if (!posterInput?.files?.[0]) {
-            try {
-              const posterBlob = await extractPosterFrame(refVideoSource, clipStart);
-              const posterFile = new File([posterBlob], 'poster.png', { type: 'image/png' });
-              setFileInput(posterInput, posterFile);
-            } catch (e) {
-              console.warn('[Ref2V] Poster extraction for default trim failed:', e);
-            }
-          }
         } else if (typeof refVideoSource === 'string') {
           // Reused video URL (either /media/ default trim or cross-origin fallback)
           formData.delete('ref_video');
           formData.set('ref_video_url', refVideoSource);
-          if (!posterInput?.files?.[0]) {
-            try {
-              const posterBlob = await extractPosterFrame(refVideoSource, clipStart || 0);
-              const posterFile = new File([posterBlob], 'poster.png', { type: 'image/png' });
-              setFileInput(posterInput, posterFile);
-            } catch (e) {
-              console.warn('[Ref2V] Poster extraction for URL failed:', e);
-            }
-          }
         }
       }
     }
@@ -449,15 +432,8 @@
         URL.revokeObjectURL(refVideoPreviewUrl);
       }
       refVideoPreviewUrl = URL.createObjectURL(refVideoFile);
-
-      // Extract a poster frame for the entry thumbnail (original_image_url is
-      // required by the DB). The worker can also use it as a preview.
-      try {
-        const poster = await extractPosterFrame(refVideoSource, clipStart);
-        setFileInput(posterInput, new File([poster], 'poster.png', { type: 'image/png' }));
-      } catch (posterErr) {
-        console.warn('[Ref2V] Poster extraction failed:', posterErr);
-      }
+      // Poster frame is generated server-side (extractVideoPoster on the
+      // uploaded S3 URL) — no client-side extraction needed here.
     } catch (err) {
       clipError = String(err);
     } finally {
