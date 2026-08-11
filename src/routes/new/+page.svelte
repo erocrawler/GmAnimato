@@ -255,6 +255,13 @@
         formData.delete(`ref_image_${i + 1}`);
       }
     }
+    // Carry the ref video duration so the review page can offer "follow video
+    // duration" and the worker can match the output length to the source.
+    if (isRef2v && refVideoDuration > 0) {
+      formData.set("ref_video_duration", String(refVideoDuration));
+    } else {
+      formData.delete("ref_video_duration");
+    }
     return async ({ result }: any) => {
       submitting = false;
       if (result.type === 'success' && result.data) {

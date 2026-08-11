@@ -129,12 +129,26 @@
   // Selected workflow + capability flags (MiniMax H3 uses a different node stack)
   $: selectedWorkflow =
     filteredWorkflows.find((w) => w.id === selectedWorkflowId) || null;
+
+  // Ref video duration (seconds) captured at upload time — used to resolve the
+  // actual output duration when "follow video duration" is enabled.
+  $: refVideoDurationSec =
+    Number(entry.additional_options?.ref_video_duration) || 0;
+  // Effective output duration: when ref2v follow-duration is on and we know the
+  // ref length, use it (clamped to the allowed max); otherwise the manual picker.
+  $: effectiveVideoDuration =
+    videoWorkflowType === "ref2v" &&
+    ref2vFollowDuration &&
+    refVideoDurationSec > 0
+      ? Math.min(10, Math.max(1, Math.round(refVideoDurationSec)))
+      : videoDuration;
+
   // Effective credit cost for the CURRENT selections (workflow base + rules like
   // "2x if duration >= 8s" or "2x if no speed-up LoRA"). Shared calculator with
   // the kickoff route so the UI always matches what will be charged.
   $: selectedWorkflowQuotaCost = selectedWorkflow
     ? computeWorkflowQuotaCost(selectedWorkflow, {
-        videoDuration,
+        videoDuration: effectiveVideoDuration,
         videoResolution,
         loraWeights,
       })
@@ -198,6 +212,11 @@
     (entry.additional_options?.ref2v_aspect as Ref2vAspect) ||
     (savedSettings?.ref2vAspect as Ref2vAspect) ||
     "video";
+  // When enabled, the output video duration follows the reference video's own
+  // length (stored at upload time) instead of the fixed 4/6/8/10 presets.
+  let ref2vFollowDuration: boolean =
+    entry.additional_options?.ref2v_follow_duration === true ||
+    savedSettings?.ref2vFollowDuration === true;
   let motionScale: number | undefined =
     entry.additional_options?.motion_scale ?? savedSettings?.motionScale; // 0.5 to 2.0
   let freeLongBlendStrength: number | undefined =
@@ -716,6 +735,7 @@
     videoDuration,
     videoResolution,
     ref2vAspect,
+    ref2vFollowDuration,
     motionScale,
     freeLongBlendStrength,
     selectedWorkflowId,
@@ -800,6 +820,7 @@
     videoDuration = 4;
     videoResolution = "480p";
     ref2vAspect = "video";
+    ref2vFollowDuration = false;
     motionScale = undefined;
     freeLongBlendStrength = undefined;
     resetLoraWeights();
@@ -897,9 +918,11 @@
           workflowId: selectedWorkflowId,
           loraWeights: filteredLoraWeights,
           iterationSteps,
-          videoDuration,
+          videoDuration: effectiveVideoDuration,
           videoResolution,
           ref2vAspect: videoWorkflowType === "ref2v" ? ref2vAspect : undefined,
+          ref2vFollowDuration:
+            videoWorkflowType === "ref2v" ? ref2vFollowDuration : undefined,
           motionScale,
           freeLongBlendStrength,
           promptRelayMode,
@@ -1136,6 +1159,7 @@
         <ReviewRef2vPresets
           {refItems}
           {isEditable}
+          videoDuration={effectiveVideoDuration}
           onSelect={(np) => (prompt = np)}
         />
       {/if}
@@ -1174,6 +1198,8 @@
         bind:videoDuration
         bind:videoResolution
         bind:ref2vAspect
+        bind:ref2vFollowDuration
+        {refVideoDurationSec}
         bind:motionScale
         bind:freeLongBlendStrength
         {filteredLoraPresets}

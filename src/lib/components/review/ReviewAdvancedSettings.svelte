@@ -20,6 +20,8 @@
   export let videoDuration: number = 4;
   export let videoResolution: string = "480p";
   export let ref2vAspect: "video" | "16:9" | "4:3" | "square" | "3:4" | "9:16" = "video";
+  export let ref2vFollowDuration: boolean = false;
+  export let refVideoDurationSec: number = 0;
   export let motionScale: number | undefined = undefined;
   export let freeLongBlendStrength: number | undefined = undefined;
   export let filteredLoraPresets: LoraPreset[] = [];
@@ -131,9 +133,33 @@
     return $_("review.duration.framesCount", { values: { n: frames } });
   }
 
+  // Sentinel value for the "follow reference video duration" option. Must not
+  // collide with the numeric presets (4/6/8/10).
+  const FOLLOW_DURATION = 0 as const;
+
+  type DurationOption = {
+    value: VideoDuration | typeof FOLLOW_DURATION;
+    label: string;
+    description: string;
+    requiresPaid: boolean;
+  };
+
   // Duration options — 10s for advanced users (WAN: relay mode only; MiniMax: standard mode)
-  // 8s is a MiniMax H3 premium-only option
-  $: durationOptions = [
+  // 8s is a MiniMax H3 premium-only option. For ref2v with a known reference
+  // length, a "Follow video duration" radio is prepended (value FOLLOW_DURATION).
+  $: durationOptions = ((): DurationOption[] => [
+    ...(videoWorkflowType === "ref2v" && refVideoDurationSec > 0
+      ? [
+          {
+            value: FOLLOW_DURATION,
+            label: $_("review.ref2v.followDuration.shortTitle"),
+            description: $_("review.ref2v.followDuration.helpKnown", {
+              values: { s: refVideoDurationSec.toFixed(1) },
+            }),
+            requiresPaid: false,
+          },
+        ]
+      : []),
     {
       value: 4 as VideoDuration,
       label: $_("review.duration.short"),
@@ -172,29 +198,21 @@
           },
         ]
       : []),
-  ];
+  ])();
 
-  // Duration slider — tick marks across all possible values; some are disabled
-  // per model/tier (8s MiniMax premium only, 10s premium & relay/WAN gated)
-  const DURATION_TICKS = [4, 6, 8, 10] as const;
-  $: currentDurationOption = durationOptions.find((o) => o.value === videoDuration);
-  // Precompute tick state reactively — template cannot see deps inside
-  // function calls, so disabled/opacity/badge must come from a tracked variable.
-  $: durationTicks = DURATION_TICKS.map((tick) => {
-    const option = durationOptions.find((o) => o.value === tick);
-    return {
-      value: tick,
-      allowed: !!option,
-      premium: option?.requiresPaid === true,
-    };
-  });
+  // Effective selected value for display: FOLLOW_DURATION when follow is on.
+  $: selectedDurationValue = ref2vFollowDuration ? FOLLOW_DURATION : videoDuration;
+  $: currentDurationOption = durationOptions.find(
+    (o) => o.value === selectedDurationValue,
+  );
 
   function setVideoDuration(value: number) {
-    // Snap to nearest allowed duration (ties prefer the lower value)
-    const snap = durationOptions.reduce((best, o) =>
-      Math.abs(o.value - value) < Math.abs(best.value - value) ? o : best,
-    );
-    videoDuration = snap.value as VideoDuration;
+    if (value === FOLLOW_DURATION) {
+      ref2vFollowDuration = true;
+      return;
+    }
+    ref2vFollowDuration = false;
+    videoDuration = value as VideoDuration;
   }
 
   // If the selected step isn't available for the current model/tier, snap to default
@@ -296,65 +314,27 @@
             >{$_("review.duration.help")}</span
           >
         </div>
-        {#if canUseQuality}
-          <input
-            type="range"
-            min={4}
-            max={10}
-            step={2}
-            bind:value={videoDuration}
-            on:input={(e) => setVideoDuration(+e.currentTarget.value)}
-            disabled={!isEditable}
-            class="range range-primary range-sm w-full"
-          />
-          <div class="flex justify-between px-1 text-xs">
-            {#each durationTicks as tick}
-              <button
-                type="button"
-                class="flex flex-col items-center gap-0.5 select-none"
-                class:opacity-40={!tick.allowed}
-                class:font-bold={videoDuration === tick.value}
-                class:text-primary={videoDuration === tick.value}
-                on:click={() => setVideoDuration(tick.value)}
-                disabled={!isEditable || !tick.allowed}
-              >
-                <span>{tick.value}s</span>
-                {#if tick.premium}
-                  <span class="badge badge-xs badge-warning"
-                    >{$_("review.paidOnly")}</span
-                  >
-                {/if}
-              </button>
-            {/each}
-          </div>
-          {#if currentDurationOption}
-            <p class="text-sm opacity-70">
-              {currentDurationOption.label} — {currentDurationOption.description}
-            </p>
-          {/if}
-        {:else}
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {#each durationOptions as option}
-              <label
-                class="btn btn-outline flex items-center gap-3 justify-start"
-                class:btn-active={videoDuration === option.value}
-              >
-                <input
-                  type="radio"
-                  name="video-duration"
-                  value={option.value}
-                  checked={videoDuration === option.value}
-                  on:change={() => (videoDuration = option.value)}
-                  disabled={!isEditable}
-                />
-                <div>
-                  <div class="font-semibold">{option.label}</div>
-                  <div class="text-xs opacity-70">{option.description}</div>
-                </div>
-              </label>
-            {/each}
-          </div>
-        {/if}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {#each durationOptions as option}
+            <label
+              class="btn btn-outline flex items-center gap-3 justify-start"
+              class:btn-active={selectedDurationValue === option.value}
+            >
+              <input
+                type="radio"
+                name="video-duration"
+                value={option.value}
+                checked={selectedDurationValue === option.value}
+                on:change={() => setVideoDuration(option.value as number)}
+                disabled={!isEditable}
+              />
+              <div>
+                <div class="font-semibold">{option.label}</div>
+                <div class="text-xs opacity-70">{option.description}</div>
+              </div>
+            </label>
+          {/each}
+        </div>
       </div>
 
       <div class="divider"></div>

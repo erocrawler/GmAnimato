@@ -82,11 +82,16 @@ export const POST: RequestHandler = async ({ params, request }) => {
       try {
         const newJob = await submitNewRunPodJob(runpodConfig, video, origin);
         
-        // Update video with new job ID, set as remote job, and status
+        // Update video with new job ID, set as remote job, and status.
+        // Clear stale timing fields from the previous attempt — otherwise the
+        // status-poll timeout would measure from the OLD dequeued_at and mark
+        // the fresh job failed after ~30min even while it's still running.
         const updated = await updateVideo(id, { 
           status: 'in_queue',
           job_id: newJob.id,
-          is_local_job: false
+          is_local_job: false,
+          dequeued_at: undefined,
+          processing_started_at: undefined
         });
         if (!updated) {
           throw new Error('Failed to update video status in database after job submission');
@@ -122,11 +127,14 @@ export const POST: RequestHandler = async ({ params, request }) => {
           
           const newJob = await submitNewRunPodJob(runpodConfig, video, origin);
           
-          // Update video with new job ID, status, and ensure it's marked as remote
+          // Update video with new job ID, status, and ensure it's marked as remote.
+          // Clear stale timing fields (see above).
           const updated = await updateVideo(id, { 
             status: 'in_queue',
             job_id: newJob.id,
-            is_local_job: false
+            is_local_job: false,
+            dequeued_at: undefined,
+            processing_started_at: undefined
           });
           if (!updated) {
             throw new Error('Failed to update video status in database after job submission');
@@ -185,8 +193,13 @@ export const POST: RequestHandler = async ({ params, request }) => {
       // Job is failed, proceed with retry
       await retryRunPodJob(runpodConfig, video.job_id);
       
-      // Update video status back to in_queue
-      const updated = await updateVideo(id, { status: 'in_queue' });
+      // Update video status back to in_queue. Clear stale timing fields from
+      // the previous attempt so the status-poll timeout restarts fresh.
+      const updated = await updateVideo(id, { 
+        status: 'in_queue',
+        dequeued_at: undefined,
+        processing_started_at: undefined
+      });
       if (!updated) {
         throw new Error('Failed to update video status in database after retry');
       }

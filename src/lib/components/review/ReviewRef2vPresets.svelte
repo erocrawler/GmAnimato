@@ -7,6 +7,8 @@
 
   export let refItems: { kind: "video" | "image"; token: string; url: string; label: string }[] = [];
   export let isEditable: boolean = true;
+  /** Output video duration in seconds — used to place cut times in detailed_description. */
+  export let videoDuration: number = 4;
   export let onSelect: (newPrompt: string) => void = () => {};
 
   $: hasVideo = refItems.some((r) => r.kind === "video");
@@ -26,7 +28,7 @@
     descKey: string;
     needsVideo: boolean;
     minPics: number;
-    build: (opts: { hasVideo: boolean; picCount: number }) => string;
+    build: (opts: { hasVideo: boolean; picCount: number; duration: number }) => string;
   }
 
   const presets: Preset[] = [
@@ -37,28 +39,36 @@
       descKey: "review.ref2v.presets.replacePerson.desc",
       needsVideo: true,
       minPics: 1,
-      build: ({ hasVideo, picCount }) => {
+      build: ({ hasVideo, picCount, duration }) => {
         const v = hasVideo;
+        // Split the shot plan so cut times fall within the requested duration.
+        const dur = Math.max(1, Math.round(duration) || 4);
+        const cut1 = Math.max(1, Math.round(dur * 0.4));
+        const cut2 = Math.max(cut1 + 1, Math.round(dur * 0.7));
+        const fmt = (s: number) =>
+          `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}.000`;
         return `subject_definitions:
-${S(1)} is the person whose appearance comes from ${P(1)} and whose motion, body actions and spatial trajectory come from ${v ? V : P(1)}.
+${S(1)} is the person whose appearance, face, hairstyle, clothing and body proportions come from ${P(1)} and whose motion, body actions and spatial trajectory come from ${v ? V : P(1)}.
 ${S(2)} is the environment, camera path and lighting from ${v ? V : P(1)}.
 ${v ? `${V} is the source video for the target video edit.` : `${P(1)} is the first frame of [Shot 1].`}
 ${picCount >= 2 ? `${P(2)} 不适用。` : ""}
 
 summary:
-[reference generation + video editing] The target video is an edited version of ${v ? V : P(1)}. ${S(1)} replaces the original person while preserving motion and scene from ${v ? V : P(1)}.
+[reference generation + video editing] The target video is an edited version of ${v ? V : P(1)}. ${S(1)} replaces the original person in ${v ? V : P(1)} while preserving the motion, actions, camera movement and environment of ${v ? V : P(1)}.
 
 retention_analysis:
-${S(1)} (appears in [Shot 1]): attribute_transfer - appearance from ${P(1)} transferred onto ${v ? V : "the source"} person with full body proportions, clothing, face, hairstyle and skin tone preserved from ${P(1)}.
-${S(2)} (appears in [Shot 1]): fully_preserved - environment, camera movement, lighting and timing preserved.
+${S(1)} (appears in [Shot 1], [Shot 2], [Shot 3]): attribute_transfer - the appearance from ${P(1)} is transferred onto the person from ${v ? V : P(1)}, with full body proportions, clothing, face, hairstyle and skin tone preserved from ${P(1)}.
+${S(2)} (appears in [Shot 1], [Shot 2], [Shot 3]): fully_preserved - environment, camera movement, lighting and timing preserved.
 ${v ? `${V} (motion and environment): fully_preserved - camera cuts, pacing and background kept.` : ""}
 
 detailed_description:
-The target video is in a live-action, cinematic style with natural lighting.
-[Shot 1] A medium shot frames ${S(1)} centered in the scene, whose appearance comes from ${P(1)} with detailed facial features, hairstyle and outfit retained. The camera remains locked to ${v ? V : P(1)}'s original camera path and tracks ${S(1)} as they perform the same actions from ${v ? V : P(1)} — walking, turning and gestures — with realistic contact, occlusion and scale. ${S(2)}, the background and lighting from ${v ? V : P(1)}, stays fully preserved with consistent perspective.
+The target video is in a live-action, cinematic style with natural lighting and a realistic color palette. ${S(1)} is centered in the scene, with the detailed facial features, hairstyle and outfit from ${P(1)} shown clearly at every appearance.
+[Shot 1] A medium shot frames ${S(1)} standing in the scene, whose appearance comes from ${P(1)} with detailed facial features, hairstyle and outfit retained. The camera remains locked to ${v ? V : P(1)}'s original camera path and tracks ${S(1)} as they perform the same actions from ${v ? V : P(1)} — walking, turning and gestures — with realistic contact, occlusion and scale. ${S(2)}, the background and lighting from ${v ? V : P(1)}, stays fully preserved with consistent perspective. ${S(1)}'s hands and feet make natural contact with the environment exactly as in the source, and their silhouette, height and gait match the original subject so the replacement is seamless.
+[Shot 2] At ${fmt(cut1)}, the shot transitions to a close-up of ${S(1)}'s face, showing the hairstyle, eye color, skin tone and expression from ${P(1)}. The camera pushes in with small amplitude at slow speed, following ${S(1)}'s head movement from ${v ? V : P(1)}. ${S(2)} remains visible as a softly blurred background, preserving the original scene's depth and color grade.
+[Shot 3] At ${fmt(cut2)}, the shot cuts back to a medium-wide view of ${S(1)} completing the final action from ${v ? V : P(1)}. The camera holds ${v ? V : P(1)}'s ending framing as ${S(1)} exits the frame or settles into the final pose, with ${S(2)} fully preserved and the original lighting intact.
 
 overall_soundscape:
-Natural environment tone from the original scene continues. Light footsteps, fabric movement and subtle room ambience.
+Natural environment tone from the original scene continues throughout. Light footsteps, fabric movement and subtle room ambience match the source ${v ? V : "recording"}.
 
 non_diegetic_music:
 N/A`;
@@ -297,7 +307,7 @@ N/A`
 
   function handleSelect(p: Preset) {
     if (isDisabled(p)) return;
-    const built = p.build({ hasVideo, picCount });
+    const built = p.build({ hasVideo, picCount, duration: videoDuration });
     onSelect(built);
     closeDropdown();
   }

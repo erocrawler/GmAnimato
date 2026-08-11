@@ -142,8 +142,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     type VideoDuration = (typeof allowedDurations)[number];
     let videoDuration: VideoDuration | undefined;
 
-    if (Number.isFinite(parsedDuration) && allowedDurations.includes(parsedDuration as VideoDuration)) {
-      videoDuration = parsedDuration as VideoDuration;
+    // "Follow video duration" for ref2v: the client already resolved the output
+    // duration to the ref video's length (clamped 1..10). Accept any integer in
+    // that range instead of only the fixed presets, so short refs (e.g. 5s)
+    // produce matching-length output.
+    const ref2vFollowDuration: boolean = body?.ref2vFollowDuration === true;
+    const isRef2vMode = existing.additional_options?.ref2v === true;
+
+    if (Number.isFinite(parsedDuration) && parsedDuration >= 1 && parsedDuration <= 10) {
+      if (allowedDurations.includes(parsedDuration as VideoDuration)) {
+        videoDuration = parsedDuration as VideoDuration;
+      } else if (ref2vFollowDuration && isRef2vMode) {
+        videoDuration = Math.max(1, Math.min(10, Math.round(parsedDuration))) as VideoDuration;
+      }
     }
 
     // Extract video resolution (480p or 720p)
@@ -285,6 +296,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       delete mergedAdditionalOptions.ref2v_aspect;
     } else {
       mergedAdditionalOptions.ref2v_aspect = ref2vAspect;
+    }
+    if (isRef2vMode) {
+      mergedAdditionalOptions.ref2v_follow_duration = ref2vFollowDuration;
+    } else {
+      delete mergedAdditionalOptions.ref2v_follow_duration;
     }
     const mergedValidationMetadata: any = {
       ...(existing.validation_metadata || {}),

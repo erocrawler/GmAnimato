@@ -125,8 +125,12 @@ export const GET: RequestHandler = async ({ params }) => {
             status: mappedStatus,
             ...(finalVideoUrl && { final_video_url: finalVideoUrl })
           };
-          // Set dequeued_at when transitioning to processing
-          if (mappedStatus === 'processing' && video.status !== 'processing' && !video.dequeued_at) {
+          // Refresh dequeued_at on EVERY transition into processing (not just
+          // when the field is missing). A fresh IN_PROGRESS report means the
+          // job genuinely started now — whether it's the first run or a retry.
+          // Keeping the old timestamp would make the timeout measure from the
+          // previous attempt and mark a running retry as failed.
+          if (mappedStatus === 'processing' && video.status !== 'processing') {
             updateData.dequeued_at = new Date().toISOString();
           }
           await updateVideo(video.id, updateData);

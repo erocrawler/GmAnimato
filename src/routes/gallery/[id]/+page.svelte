@@ -185,6 +185,9 @@
                       <img src={video.last_image_url} alt="Last Frame" class="w-full rounded-lg object-contain" style="max-height: 580px" />
                     </div>
                   </div>
+                {:else if video.additional_options?.ref2v}
+                  <!-- Ref2V: the poster (original_image_url) duplicates the first
+                       ref image already shown in the grid above — skip it. -->
                 {:else}
                   <!-- I2V Mode: Show single image -->
                   <img src={video.original_image_url} alt="Original" class="w-full max-h-[600px] object-contain" />
@@ -210,6 +213,9 @@
                   <img src={video.last_image_url} alt="Last Frame" class="w-full rounded-lg object-contain" style="max-height: 580px" />
                 </div>
               </div>
+            {:else if video.additional_options?.ref2v}
+              <!-- Ref2V not-yet-completed: poster duplicates ref image 1 shown
+                   in the grid above — skip it (fall through to placeholder). -->
             {:else}
               <!-- I2V Mode: Show single image -->
               <img src={video.original_image_url} alt="Original" class="w-full max-h-[600px] object-contain" />

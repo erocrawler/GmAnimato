@@ -153,7 +153,7 @@ export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promis
       input_prompt: video.prompt ?? 'A beautiful video',
       seed,
       callback_url: callbackUrl,
-      videoDuration: video.video_duration as 4 | 6 | 8 | 10 | undefined,
+      videoDuration: video.video_duration as number | undefined,
       videoResolution: video.video_resolution as '480p' | '720p' | undefined,
       ref2vAspect: video.additional_options?.ref2v_aspect as 'video' | '16:9' | '4:3' | 'square' | '3:4' | '9:16' | undefined,
       iterationSteps: video.iteration_steps as 10 | 12 | 15 | undefined,

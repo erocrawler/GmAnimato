@@ -4,6 +4,7 @@ import probe from 'probe-image-size';
 import type { Workflow } from './IDatabase';
 import type { LoraPreset } from './loraPresets';
 import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes } from './workflowUtils';
+import { probeVideoDimensions } from './videoValidation';
 
 interface Ref2VWorkflowParams {
   ref_video_name: string;
@@ -19,7 +20,9 @@ interface Ref2VWorkflowParams {
   input_prompt: string;
   seed: number;
   callback_url?: string;
-  videoDuration?: 4 | 6 | 8 | 10; // seconds; frames derived via ComfyMathExpression (24fps)
+  // Output duration in seconds. 4/6/8/10 are the standard presets; "follow
+  // video duration" may pass any integer 1..10 matched to the ref video.
+  videoDuration?: number;
   videoResolution?: '480p' | '720p';
   /** Output aspect ratio. 'video' follows the reference media (default); the
    *  presets override it. MiniMax H3 supports roughly 0.45-2.2. */
@@ -241,12 +244,11 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
 
   // Always generate at 480p for efficiency, then upscale to 720p if needed.
   // Aspect follows the reference media. With ref2vAspect='video' (the UI
-  // default) the ref VIDEO drives the output — but probe-image-size can't read
-  // mp4, so use the poster frame (a frame extracted from the ref video, which
-  // carries the video's aspect) when available. Without a poster, fall back to
-  // the first ref image, then the video URL, then the default. Fixed presets
-  // override everything; legacy jobs with no ref2vAspect keep the old
-  // ref-image-first behavior.
+  // default) the ref VIDEO's own dimensions drive the output (probed via
+  // ffprobe, which handles mp4/webm that probe-image-size cannot read), with
+  // the poster frame / first ref image as fallback. Without a video, the first
+  // ref image drives it. Fixed presets override everything; legacy jobs with
+  // no ref2vAspect keep the old ref-image-first behavior.
   const resolution = params.videoResolution ?? '480p';
   const aspectOverride: { w: number; h: number } | null =
     params.ref2vAspect && params.ref2vAspect !== 'video'
@@ -272,16 +274,33 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
       probeHeight = aspectOverride.h;
     } else {
       const followsVideo = params.ref2vAspect === 'video';
-      const probeTarget =
-        (followsVideo && params.posterUrl)
-          ? params.posterUrl
-          : params.ref_image_urls?.[0] || (hasRefVideo ? params.ref_video_url : null);
-      if (!probeTarget) {
-        throw new Error('No reference media to probe (pure t2v)');
+      if (followsVideo && hasRefVideo) {
+        // 'video' aspect: follow the ACTUAL ref video's aspect ratio. Use
+        // ffprobe directly (mp4/webm containers that probe-image-size cannot
+        // read). Fall back to the poster frame / first ref image / video URL
+        // if ffprobe fails.
+        const videoDims = await probeVideoDimensions(params.ref_video_url);
+        if (videoDims) {
+          probeWidth = videoDims.width;
+          probeHeight = videoDims.height;
+        } else {
+          const probeTarget = params.posterUrl || params.ref_image_urls?.[0] || params.ref_video_url;
+          if (!probeTarget) {
+            throw new Error('No reference media to probe (pure t2v)');
+          }
+          const dimensions = await probe(probeTarget);
+          probeWidth = dimensions.width;
+          probeHeight = dimensions.height;
+        }
+      } else {
+        const probeTarget = params.ref_image_urls?.[0] || (hasRefVideo ? params.ref_video_url : null);
+        if (!probeTarget) {
+          throw new Error('No reference media to probe (pure t2v)');
+        }
+        const dimensions = await probe(probeTarget);
+        probeWidth = dimensions.width;
+        probeHeight = dimensions.height;
       }
-      const dimensions = await probe(probeTarget);
-      probeWidth = dimensions.width;
-      probeHeight = dimensions.height;
     }
     originalImageWidth = probeWidth;
     originalImageHeight = probeHeight;

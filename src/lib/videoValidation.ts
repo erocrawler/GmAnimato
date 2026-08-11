@@ -236,6 +236,34 @@ export async function probeVideoDuration(url: string): Promise<number | null> {
   });
 }
 
+/** Probe a video's display dimensions (width/height) with ffprobe.
+ *  Returns null on failure. Uses ffprobe directly, so it works for mp4/webm
+ *  containers that probe-image-size cannot read. */
+export async function probeVideoDimensions(url: string): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const proc = spawn('ffprobe', [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=width,height',
+      '-of', 'csv=p=0',
+      url,
+    ]);
+    let out = '';
+    proc.stdout.on('data', (c: Buffer) => (out += c.toString()));
+    proc.on('close', (code) => {
+      const parts = out.trim().split(',');
+      const width = Number.parseInt(parts[0], 10);
+      const height = Number.parseInt(parts[1], 10);
+      resolve(
+        code === 0 && Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+          ? { width, height }
+          : null
+      );
+    });
+    proc.on('error', () => resolve(null));
+  });
+}
+
 /** Probe a video buffer's duration by writing it to a temp file and ffprobing. */
 async function probeVideoDurationFromBuffer(buffer: Buffer, ext: string): Promise<number | null> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ref2v-probe-'));

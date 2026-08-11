@@ -227,6 +227,14 @@ export const actions: Actions = {
       }
       // Still no poster and no ref video? Pure text-to-video ref2v — leave empty, no hard error.
 
+      // Client-carried ref video duration (seconds) so the review page can
+      // offer "follow video duration" and the worker can match the output.
+      const refVideoDurationInput = Number(form.get('ref_video_duration')?.toString());
+      const refVideoDuration =
+        Number.isFinite(refVideoDurationInput) && refVideoDurationInput > 0
+          ? refVideoDurationInput
+          : undefined;
+
       const result = await createVideoEntryForReview({
         userId: locals.user.id,
         mode: 'ref2v',
@@ -236,6 +244,7 @@ export const actions: Actions = {
           ref_video_url: refVideoUrl,
           ref_video_name: refVideoName,
           ...(refVideoHasAudio !== undefined ? { ref_video_has_audio: refVideoHasAudio } : {}),
+          ...(refVideoDuration !== undefined ? { ref_video_duration: refVideoDuration } : {}),
           ref_image_urls: refImageUrls,
           ref_image_names: refImageNames
         }

@@ -338,6 +338,12 @@
         "3:4": "3:4",
         "9:16": "9:16"
       },
+      "followDuration": {
+        "title": "Follow reference video duration",
+        "shortTitle": "Follow video ({s}s)",
+        "helpKnown": "Match the reference video length ({s}s) instead of the fixed presets.",
+        "helpUnknown": "Output duration follows the reference video when its length is known."
+      },
       "presets": {
         "title": "Quick prompts",
         "hint": "Click to insert — then ✨ Enhance",
