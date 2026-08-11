@@ -117,120 +117,39 @@ export const actions: Actions = {
         refVideoName = refVideoFile.name || `ref_video.${videoResult.ext || 'webm'}`;
         refVideoHasAudio = videoResult.hasAudio;
       } else if (refVideoUrlInput) {
-        if (!/^https?:\/\//i.test(refVideoUrlInput)) {
+        // Reused video without local re-encode (default trim) or cross-origin URL.
+        // Keep HEAD's duration cap check, plus theirs' media-proxy / external fetch.
+        const isMediaProxy = refVideoUrlInput.startsWith('/media/');
+        const isHttpUrl = /^https?:\/\//i.test(refVideoUrlInput);
+        if (!isHttpUrl && !isMediaProxy) {
           return { error: 'ref video URL must be an http(s) URL' };
         }
-        // Cross-origin URLs can't be clipped client-side, so the server must
-        // verify the duration here — never silently accept a ref longer than
-        // the clip cap (it would condition the job on far more footage than
-        // intended). Only reject when we can positively measure >10s; if the
-        // probe fails, keep the previous pass-through behavior.
-        const urlDuration = await probeVideoDuration(refVideoUrlInput);
-        if (urlDuration !== null && urlDuration > MAX_REF_VIDEO_SECONDS + 0.5) {
-          return {
-            error: `ref video is ${Math.round(urlDuration)}s — max ${MAX_REF_VIDEO_SECONDS}s. Please use a shorter clip or download it first.`,
-          };
+        if (isHttpUrl) {
+          const urlDuration = await probeVideoDuration(refVideoUrlInput);
+          if (urlDuration !== null && urlDuration > MAX_REF_VIDEO_SECONDS + 0.5) {
+            return {
+              error: `ref video is ${Math.round(urlDuration)}s — max ${MAX_REF_VIDEO_SECONDS}s. Please use a shorter clip or download it first.`,
+            };
+          }
         }
-        refVideoUrl = refVideoUrlInput;
-        refVideoName = 'ref_video.webm'; (fix: 付费计费显式化 + 无音频视频自动断开音频线)
-      }
-
-      // Process up to 6 ref images
-      const refImageUrls: string[] = [];
-      const refImageNames: string[] = [];
-      for (let i = 1; i <= MAX_REF_IMAGES; i++) {
-        const imgFile = form.get(`ref_image_${i}`) as File | null;
-        if (!imgFile || imgFile.size === 0) continue;
-
-        let imgBuffer: Buffer<ArrayBufferLike> = Buffer.from(await imgFile.arrayBuffer());
-        const imgResult = await validateAndConvertImage(imgBuffer);
-        if (imgResult.error) {
-          return { error: `Ref image ${i}: ${imgResult.error}` };
+        if (isMediaProxy) {
+          refVideoUrl = refVideoUrlInput;
+          refVideoName = 'ref_video.webm';
+        } else if (isHttpUrl) {
+          try {
+            const resp = await fetch(refVideoUrlInput);
+            if (!resp.ok) throw new Error(`fetch ref_video_url failed: ${resp.status}`);
+            const buf = Buffer.from(await resp.arrayBuffer());
+            const ct = resp.headers.get('content-type') || 'video/webm';
+            const videoResult2 = await validateAndConvertVideo(buf, ct);
+            if (videoResult2.error) return { error: videoResult2.error };
+            refVideoUrl = await uploadBufferToS3(videoResult2.buffer, videoResult2.ext || 'webm');
+            refVideoName = `ref_video.${videoResult2.ext || 'webm'}`;
+            refVideoHasAudio = videoResult2.hasAudio;
+          } catch (e) {
+            return { error: `ref_video_url fetch failed: ${String(e)}` };
+          }
+        } else {
+          refVideoUrl = refVideoUrlInput;
+          refVideoName = 'ref_video.webm';
         }
-        imgBuffer = imgResult.buffer;
-        const imgExt = imgResult.ext || undefined;
-        const url = await uploadBufferToS3(imgBuffer, imgExt);
-        refImageUrls.push(url);
-        refImageNames.push(imgFile.name || `ref_image_${i}.${imgExt || 'png'}`);
-      }
-
-      // Poster frame: the client clips the ref video client-side and can send a
-      // poster PNG to use as the entry thumbnail (original_image_url is
-      // required). Fall back to the first ref image; for a URL-sourced video
-      // (no client frame possible) extract a frame server-side with ffmpeg.
-      const posterFile = form.get('poster_image') as File | null;
-      let posterUrl = '';
-      if (posterFile && posterFile.size > 0) {
-        let posterBuffer: Buffer<ArrayBufferLike> = Buffer.from(await posterFile.arrayBuffer());
-        const posterResult = await validateAndConvertImage(posterBuffer);
-        if (posterResult.error) {
-          return { error: `Poster: ${posterResult.error}` };
-        }
-        posterBuffer = posterResult.buffer;
-        posterUrl = await uploadBufferToS3(posterBuffer, posterResult.ext || 'png');
-      } else if (refImageUrls.length > 0) {
-        posterUrl = refImageUrls[0];
-      } else if (refVideoUrl && refVideoFile && refVideoFile.size > 0) {
-        return { error: 'poster_image required when a ref video is provided' };
-      } else if (refVideoUrl) {
-        // URL-sourced video: grab a frame server-side (best-effort).
-        const posterFrame = await extractVideoPoster(refVideoUrl);
-        if (posterFrame) {
-          posterUrl = await uploadBufferToS3(posterFrame, 'png');
-        }
-      }
-
-      const result = await createVideoEntryForReview({
-        userId: locals.user.id,
-        mode: 'ref2v',
-        originalImageUrl: posterUrl,
-        additionalOptions: {
-          ref2v: true,
-          ref_video_url: refVideoUrl,
-          ref_video_name: refVideoName,
-          ...(refVideoHasAudio !== undefined ? { ref_video_has_audio: refVideoHasAudio } : {}),
-          ref_image_urls: refImageUrls,
-          ref_image_names: refImageNames
-        }
-      });
-
-      if (!result.success) {
-        return { error: result.error };
-      }
-
-      return { success: true, entry: result.entry };
-    } else {
-      // Handle I2V mode with single image
-      const file = form.get('image') as File | null;
-
-      if (!file) return { error: 'no file' };
-
-      const arrayBuffer = await file.arrayBuffer();
-      let buffer: Buffer<ArrayBufferLike> = Buffer.from(arrayBuffer);
-
-      const validationResult = await validateAndConvertImage(buffer);
-      if (validationResult.error) {
-        return { error: validationResult.error };
-      }
-      buffer = validationResult.buffer;
-      const ext = validationResult.ext || undefined;
-
-      // Upload to S3; helper returns a public URL
-      const s3Url = await uploadBufferToS3(buffer, ext);
-
-      // Create review entry for the uploaded image
-      const result = await createVideoEntryForReview({
-        userId: locals.user.id,
-        mode: 'i2v',
-        originalImageUrl: s3Url
-      });
-
-      if (!result.success) {
-        return { error: result.error };
-      }
-
-      return { success: true, entry: result.entry };
-    }
-  }
-};
-
