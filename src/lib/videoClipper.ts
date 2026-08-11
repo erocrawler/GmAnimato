@@ -103,7 +103,7 @@ export async function clipVideoToWebm(
       const probeDur = await getVideoDuration(source);
       const safeStart = Math.max(0, Math.min(startSec, probeDur));
       const safeEnd = Math.max(safeStart, Math.min(endSec, safeStart + maxDurationSec));
-      if (isFullClip(safeStart, safeEnd, probeDur) && probeDur <= maxDurationSec + 0.15) {
+      if (isFullClip(safeStart, safeEnd, probeDur) && probeDur <= maxDurationSec + 0.05) {
         return { blob: source, mimeType: source.type || 'video/mp4' };
       }
     } catch {
@@ -117,7 +117,7 @@ export async function clipVideoToWebm(
       v.load();
       const safeStart = Math.max(0, Math.min(startSec, dur));
       const safeEnd = Math.max(safeStart, Math.min(endSec, safeStart + maxDurationSec));
-      if (isFullClip(safeStart, safeEnd, dur) && dur <= maxDurationSec + 0.15) {
+      if (isFullClip(safeStart, safeEnd, dur) && dur <= maxDurationSec + 0.05) {
         const res = await fetch(source);
         if (res.ok) {
           const blob = await res.blob();
@@ -139,7 +139,7 @@ export async function clipVideoToWebm(
     const safeStart = Math.max(0, Math.min(startSec, duration));
     const safeEnd = Math.max(safeStart, Math.min(endSec, safeStart + maxDurationSec));
 
-    if (isFullClip(safeStart, safeEnd, duration) && duration <= maxDurationSec + 0.15 && source instanceof File) {
+    if (isFullClip(safeStart, safeEnd, duration) && duration <= maxDurationSec + 0.05 && source instanceof File) {
       return { blob: source, mimeType: source.type || 'video/mp4' };
     }
 
@@ -188,12 +188,14 @@ export async function clipVideoToWebm(
     return new Promise((resolve, reject) => {
       let recorderStarted = false;
       let finished = false;
-      let stopTimer = 0;
+      let rvcbId = 0;
 
       const finish = (err?: unknown) => {
         if (finished) return;
         finished = true;
-        if (stopTimer) window.clearInterval(stopTimer);
+        if (rvcbId && (video as any).cancelVideoFrameCallback) {
+          try { (video as any).cancelVideoFrameCallback(rvcbId); } catch {}
+        }
         video.pause();
         video.removeAttribute('src');
         video.load();
@@ -225,19 +227,30 @@ export async function clipVideoToWebm(
         video.play().catch(() => {});
       };
 
-      stopTimer = window.setInterval(() => {
+      // Use requestVideoFrameCallback for frame-accurate stop (falls back to
+      // requestAnimationFrame). setInterval(50) had ±50ms jitter causing 10.1s
+      // clips instead of exact 10.0s.
+      const hasRVFC = typeof (video as any).requestVideoFrameCallback === 'function';
+      const checkStop = () => {
+        if (finished) return;
         if (video.currentTime >= safeEnd) {
           if (recorder.state !== 'inactive') recorder.stop();
           else onStop();
-        } else {
-          drawFrame();
+          return;
         }
-      }, 50);
+        drawFrame();
+        if (hasRVFC) {
+          rvcbId = (video as any).requestVideoFrameCallback(checkStop);
+        } else {
+          requestAnimationFrame(checkStop);
+        }
+      };
 
       if (video.currentTime >= safeStart && !recorderStarted) {
         recorderStarted = true;
         recorder.start(200);
         drawFrame();
+        checkStop(); // start the frame-accurate stop loop
       }
 
       video.addEventListener('seeked', onSeeked);
@@ -246,6 +259,7 @@ export async function clipVideoToWebm(
           recorderStarted = true;
           recorder.start(200);
           drawFrame();
+          checkStop(); // start the frame-accurate stop loop
         }
       };
 

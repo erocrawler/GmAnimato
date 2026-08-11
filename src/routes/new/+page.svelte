@@ -255,10 +255,13 @@
         formData.delete(`ref_image_${i + 1}`);
       }
     }
-    // Carry the ref video duration so the review page can offer "follow video
-    // duration" and the worker can match the output length to the source.
+    // Carry the CLIPPED ref video duration so the review page can offer "follow
+    // video duration" and the worker can match the output length to the source.
+    // Use clipEnd - clipStart (not the original file duration) so a 20s video
+    // clipped to 10s reports 10s, not 20s.
     if (isRef2v && refVideoDuration > 0) {
-      formData.set("ref_video_duration", String(refVideoDuration));
+      const clippedDuration = Math.min(clipEnd, refVideoDuration) - clipStart;
+      formData.set("ref_video_duration", String(Math.min(MAX_REF_VIDEO_SECONDS, clippedDuration)));
     } else {
       formData.delete("ref_video_duration");
     }
