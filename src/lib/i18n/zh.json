@@ -340,7 +340,7 @@
       "followDuration": {
         "title": "跟随参考视频时长",
         "shortTitle": "跟随视频（{s}秒）",
-        "helpKnown": "匹配参考视频长度（{s}秒），忽略固定档位。",
+        "helpKnown": "输出时长将匹配参考视频长度（{s}秒）。",
         "helpUnknown": "已知参考视频时长后，输出将跟随其长度。"
       },
       "presets": {

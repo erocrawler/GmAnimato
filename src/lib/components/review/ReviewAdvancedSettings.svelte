@@ -152,7 +152,9 @@
       ? [
           {
             value: FOLLOW_DURATION,
-            label: $_("review.ref2v.followDuration.shortTitle"),
+            label: $_("review.ref2v.followDuration.shortTitle", {
+              values: { s: refVideoDurationSec.toFixed(1) },
+            }),
             description: $_("review.ref2v.followDuration.helpKnown", {
               values: { s: refVideoDurationSec.toFixed(1) },
             }),

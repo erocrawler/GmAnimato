@@ -341,7 +341,7 @@
       "followDuration": {
         "title": "Follow reference video duration",
         "shortTitle": "Follow video ({s}s)",
-        "helpKnown": "Match the reference video length ({s}s) instead of the fixed presets.",
+        "helpKnown": "Output length will match the reference video ({s}s).",
         "helpUnknown": "Output duration follows the reference video when its length is known."
       },
       "presets": {
