@@ -38,7 +38,7 @@ export function videoExtFromMime(mime: string): string {
 }
 
 /** Probe whether a container has an audio stream (best-effort via ffprobe). */
-async function hasAudioStream(inPath: string): Promise<boolean | null> {
+export async function hasAudioStream(inPath: string): Promise<boolean | null> {
   try {
     const out = await new Promise<string>((resolve, reject) => {
       const chunks: Buffer[] = [];
@@ -52,6 +52,31 @@ async function hasAudioStream(inPath: string): Promise<boolean | null> {
       proc.stdout.on('data', (c: Buffer) => chunks.push(c));
       proc.on('close', () => resolve(Buffer.concat(chunks).toString()));
       proc.on('error', reject);
+    });
+    return out.trim().length > 0;
+  } catch {
+    return null;
+  }
+}
+
+/** Lightweight hasAudio probe from an in-memory buffer (no tmp file, no ffmpeg). */
+export async function hasAudioFromBuffer(buffer: Buffer): Promise<boolean | null> {
+  try {
+    const out = await new Promise<string>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      const proc = spawn('ffprobe', [
+        '-v', 'error',
+        '-select_streams', 'a',
+        '-show_entries', 'stream=index',
+        '-of', 'csv=p=0',
+        'pipe:0',
+      ]);
+      proc.stdout.on('data', (c: Buffer) => chunks.push(c));
+      proc.on('close', () => resolve(Buffer.concat(chunks).toString()));
+      proc.on('error', reject);
+      proc.stdin.on('error', () => {});
+      proc.stdin.write(buffer);
+      proc.stdin.end();
     });
     return out.trim().length > 0;
   } catch {

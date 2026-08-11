@@ -13,11 +13,9 @@
  *   same-origin, so reused videos work.
  * - WebM (VP8/Opus) is chosen because VHS `LoadVideo` (already installed in the
  *   worker) decodes it, and `uploadBufferToS3` supports the `video/webm` type.
- * - Main-thread jank: the previous implementation used `setInterval(50)` drawing
- *   on a main-thread 2D canvas. Now we fast-path when no trim is needed (no
- *   re-encode at all), and when trimming we use `requestVideoFrameCallback` +
- *   OffscreenCanvas when available, plus we merge the audio track so sound is
- *   preserved.
+ * - When trimming is required we use `requestVideoFrameCallback` (frame-aligned)
+ *   with `requestAnimationFrame` fallback instead of `setInterval`, plus we
+ *   merge the audio track so sound is preserved.
  */
 
 const MIME_CANDIDATES = [
@@ -96,22 +94,18 @@ export async function clipVideoToWebm(
   maxDurationSec = 10,
 ): Promise<ClipResult> {
   // Fast-path: if source is File and no trim needed, return original directly.
-  // This is the common case when user uploads a ≤10s video and leaves sliders
-  // at 0..duration and keeps default audio => no canvas/MediaRecorder needed.
   if (source instanceof File) {
     try {
       const probeDur = await getVideoDuration(source);
       const safeStartProbe = Math.max(0, Math.min(startSec, probeDur));
       const safeEndProbe = Math.max(safeStartProbe, Math.min(endSec, safeStartProbe + maxDurationSec));
       if (isFullClip(safeStartProbe, safeEndProbe, probeDur) && probeDur <= maxDurationSec + 0.15) {
-        // Return original file as-is (no re-encode, preserves audio & quality).
         return { blob: source, mimeType: source.type || 'video/webm' };
       }
     } catch {
       // probe failed -> fall through to normal path
     }
   } else if (typeof source === 'string') {
-    // For reused URL, probe via video element first; if full clip we can fetch original blob instead of re-encoding.
     try {
       const v = await loadVideoElement(source);
       const dur = v.duration;
@@ -120,7 +114,6 @@ export async function clipVideoToWebm(
       const safeStart = Math.max(0, Math.min(startSec, dur));
       const safeEnd = Math.max(safeStart, Math.min(endSec, safeStart + maxDurationSec));
       if (isFullClip(safeStart, safeEnd, dur) && dur <= maxDurationSec + 0.15) {
-        // Fetch original bytes (same-origin /media proxy) to avoid canvas re-encode.
         const res = await fetch(source);
         if (res.ok) {
           const blob = await res.blob();
@@ -142,55 +135,25 @@ export async function clipVideoToWebm(
     const safeStart = Math.max(0, Math.min(startSec, duration));
     const safeEnd = Math.max(safeStart, Math.min(endSec, safeStart + maxDurationSec));
 
-    // Second fast-path check after load (covers string source without fetch)
     if (isFullClip(safeStart, safeEnd, duration) && duration <= maxDurationSec + 0.15 && source instanceof File) {
       return { blob: source, mimeType: source.type || 'video/webm' };
     }
 
-    // Draw into a canvas sized to the video's natural dimensions (rounded to
-    // even numbers to keep VP8/VP9 encoders happy).
     const width = Math.max(2, Math.floor(video.videoWidth / 2) * 2);
     const height = Math.max(2, Math.floor(video.videoHeight / 2) * 2);
 
-    // Prefer OffscreenCanvas when available to reduce main-thread cost.
-    let canvas: HTMLCanvasElement | OffscreenCanvas;
-    let ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
-    let useOffscreen = false;
-    if (typeof OffscreenCanvas !== 'undefined' && 'transferControlToOffscreen' in document.createElement('canvas')) {
-      try {
-        const tmp = document.createElement('canvas');
-        tmp.width = width;
-        tmp.height = height;
-        // Use OffscreenCanvas via transferControlToOffscreen when supported (Chrome/Edge).
-        // Fallback to normal canvas if transfer fails.
-        const off = (tmp as any).transferControlToOffscreen?.();
-        if (off) {
-          canvas = off;
-          ctx = (canvas as OffscreenCanvas).getContext('2d' as any);
-          useOffscreen = !!ctx;
-        }
-      } catch {
-        useOffscreen = false;
-      }
-    }
-    if (!useOffscreen) {
-      const c = document.createElement('canvas');
-      c.width = width;
-      c.height = height;
-      canvas = c;
-      ctx = c.getContext('2d');
-    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D context unavailable');
 
-    // captureStream: prefer OffscreenCanvas captureStream if using offscreen, otherwise canvas.
-    const canvasStream: MediaStream = (canvas as any).captureStream
-      ? (canvas as any).captureStream(24)
-      : (canvas as HTMLCanvasElement).captureStream(24);
+    const canvasStream = canvas.captureStream(24);
 
-    // Try to preserve audio by merging audio track from video element.
+    // Preserve audio by merging audio track from video element.
     let audioTracks: MediaStreamTrack[] = [];
     try {
-      const vs: MediaStream | undefined = (video as any).captureStream?.(24) ?? (video as any).mozCaptureStream?.();
+      const vs: MediaStream | undefined = (video as any).captureStream?.(24);
       if (vs) audioTracks = vs.getAudioTracks();
     } catch {
       // ignore
@@ -216,7 +179,7 @@ export async function clipVideoToWebm(
     });
 
     const drawFrame = () => {
-      (ctx as any).drawImage(video, 0, 0, width, height);
+      ctx.drawImage(video, 0, 0, width, height);
     };
 
     return new Promise((resolve, reject) => {
@@ -230,7 +193,6 @@ export async function clipVideoToWebm(
         if (rvcbId && (video as any).cancelVideoFrameCallback) {
           try { (video as any).cancelVideoFrameCallback(rvcbId); } catch {}
         }
-        // stop tracks to release
         try { combinedStream.getTracks().forEach((t) => t.stop()); } catch {}
         video.pause();
         video.removeAttribute('src');
@@ -243,7 +205,6 @@ export async function clipVideoToWebm(
         }
       };
 
-      // Safety: if playback stalls, give up after (clipLen+5)s
       const hangTimeout = window.setTimeout(() => {
         if (recorder.state !== 'inactive') {
           try { recorder.stop(); } catch { /* ignore */ }
@@ -268,7 +229,6 @@ export async function clipVideoToWebm(
         }
       };
 
-      // Use requestVideoFrameCallback when available (more accurate, less jank)
       const hasRVFC = typeof (video as any).requestVideoFrameCallback === 'function';
       const loopRVFC = () => {
         if (finished) return;
@@ -294,7 +254,6 @@ export async function clipVideoToWebm(
       const onSeeked = () => {
         video.removeEventListener('seeked', onSeeked);
         video.play().catch(() => {});
-        // start drawing loop
         if (hasRVFC) {
           rvcbId = (video as any).requestVideoFrameCallback(loopRVFC);
         } else {
@@ -307,13 +266,11 @@ export async function clipVideoToWebm(
         startRecorderIfNeeded();
       };
 
-      // Trigger start
       if (video.currentTime >= safeStart && !recorderStarted) {
         recorderStarted = true;
         recorder.start(200);
         drawFrame();
       }
-      // Seek if needed
       if (Math.abs(video.currentTime - safeStart) > 0.01) {
         video.currentTime = safeStart;
       } else {
