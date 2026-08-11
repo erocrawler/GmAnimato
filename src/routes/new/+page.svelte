@@ -69,7 +69,6 @@
   for (let i = 0; i < 6; i++) refImages.push({ file: null, preview: '', valid: false });
   let refImageInputs: (HTMLInputElement | undefined)[] = [];
   let refVideoInput: HTMLInputElement;
-  let posterInput: HTMLInputElement;
   const MAX_REF_VIDEO_SECONDS = 10;
 
   function setFileInput(inputEl: HTMLInputElement | undefined, file: File | null) {
@@ -248,11 +247,6 @@
       formData.delete('ref_video_url');
     }
 
-    if (posterInput?.files?.[0]) {
-      formData.set('poster_image', posterInput.files[0]);
-    } else {
-      formData.delete('poster_image');
-    }
     for (let i = 0; i < 6; i++) {
       const f = refImages[i].file;
       if (f) {
@@ -346,19 +340,63 @@
   async function useVideoUrl(url: string) {
     const trimmed = (url || '').trim();
     if (!trimmed) return;
-    // Accept proxied (/media/...) or absolute http(s) URLs
-    if (!/^(\/|https?:\/\/)/i.test(trimmed)) {
+    clipError = '';
+
+    // Absolute URLs pointing at our own /media/ proxy (e.g. pasted from the
+    // production site: https://animato.gmgard.moe/media/wan/xxx.mp4) are
+    // normalized to the relative /media/... form. The browser then loads them
+    // same-origin (no CORS), the client can clip them, and the server treats
+    // them as media-proxy URLs — probing audio via S3_ENDPOINT instead of
+    // fetching the app domain (which returns 403 without a session).
+    const mediaMatch = trimmed.match(/^https?:\/\/[^/]+\/(media\/.+)$/i);
+    const input = mediaMatch ? `/${mediaMatch[1]}` : trimmed;
+
+    let resolvedSource: string = input;
+    let resolvedName = 'ref_video.webm';
+
+    // Page URLs / video IDs are resolved to the actual file URL via the
+    // server (access-checked, returns a proxied /media/... URL):
+    //   https://host/videos/<id>  /videos/<id>  /gallery/<id>  /<id>  https://host/<id>
+    const isPageOrId =
+      /\/videos\/[a-z0-9]{10,}(?:[?#]|$)/i.test(input) ||
+      /\/gallery\/[a-z0-9]{10,}(?:[?#]|$)/i.test(input) ||
+      /^\/?[a-z0-9]{20,}$/i.test(input) ||
+      /^https?:\/\/[^/]+\/[a-z0-9]{20,}(?:[?#]|$)/i.test(input);
+    if (isPageOrId) {
+      try {
+        const res = await fetch('/api/video/resolve-ref', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: trimmed }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success || !data.url) {
+          if (data.error && /not ready|not completed/i.test(String(data.error))) {
+            clipError = $_('newVideo.mode.ref2v.errors.urlNotReady');
+          } else {
+            clipError = data.error || $_('newVideo.mode.ref2v.errors.invalidUrl');
+          }
+          return;
+        }
+        resolvedSource = data.url;
+        resolvedName = data.name || 'ref_video.webm';
+      } catch (e) {
+        clipError = String(e);
+        return;
+      }
+    } else if (!/^(\/|https?:\/\/)/i.test(input)) {
+      // Direct media URLs: /media/... or http(s) video URLs
       clipError = $_('newVideo.mode.ref2v.errors.invalidUrl');
       return;
     }
-    clipError = '';
+
     resetRefVideo();
-    refVideoSource = trimmed;
-    refVideoName = 'ref_video.webm';
-    refVideoPreviewUrl = trimmed;
+    refVideoSource = resolvedSource;
+    refVideoName = resolvedName;
+    refVideoPreviewUrl = resolvedSource;
     try {
       // Best-effort: probe duration so the clip slider spans the full source.
-      const dur = await getVideoDuration(trimmed);
+      const dur = await getVideoDuration(resolvedSource);
       refVideoDuration = dur;
       clipStart = 0;
       clipEnd = Math.min(MAX_REF_VIDEO_SECONDS, dur);
@@ -853,7 +891,6 @@
               class="file-input file-input-bordered file-input-primary w-full"
             />
             <input id="ref_video" name="ref_video" type="file" accept="video/*" class="hidden" bind:this={refVideoInput} />
-            <input id="poster_image" name="poster_image" type="file" accept="image/*" class="hidden" bind:this={posterInput} />
           </div>
 
           <!-- Or paste a video URL (from your videos or the gallery) -->

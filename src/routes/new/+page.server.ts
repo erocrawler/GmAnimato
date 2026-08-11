@@ -13,6 +13,7 @@ import {
 } from '$lib/videoValidation';
 import { createVideoEntryForReview } from '$lib/videoEntryCreation';
 import { getVideosByUser, getWorkflows } from '$lib/db';
+import { toOriginalUrl } from '$lib/serverImageUrl';
 
 const MAX_REF_IMAGES = 6;
 
@@ -125,13 +126,21 @@ export const actions: Actions = {
         refVideoHasAudio = videoResult.hasAudio;
       } else if (refVideoUrlInput) {
         // Reused video without local re-encode (default trim) or cross-origin URL.
-        const isMediaProxy = refVideoUrlInput.startsWith('/media/');
-        const isHttpUrl = /^https?:\/\//i.test(refVideoUrlInput);
+        // Normalize an absolute URL that points at our own /media/ proxy
+        // (e.g. https://animato.gmgard.moe/media/wan/xxx.mp4) to the relative
+        // /media/... form. The app's /media/ route requires a session and
+        // would 403; the S3 object behind it is publicly readable, so probing
+        // the S3 URL directly works from any host.
+        const absMediaMatch = refVideoUrlInput.match(/^https?:\/\/[^/]+\/(media\/.+)$/i);
+        const normalizedInput = absMediaMatch ? `/${absMediaMatch[1]}` : refVideoUrlInput;
+
+        const isMediaProxy = normalizedInput.startsWith('/media/');
+        const isHttpUrl = /^https?:\/\//i.test(normalizedInput);
         if (!isHttpUrl && !isMediaProxy) {
           return { error: 'ref video URL must be an http(s) URL' };
         }
         if (isHttpUrl) {
-          const urlDuration = await probeVideoDuration(refVideoUrlInput);
+          const urlDuration = await probeVideoDuration(normalizedInput);
           if (urlDuration !== null && urlDuration > MAX_REF_VIDEO_SECONDS + 0.5) {
             return {
               error: `ref video is ${Math.round(urlDuration)}s — max ${MAX_REF_VIDEO_SECONDS}s. Please use a shorter clip or download it first.`
@@ -141,13 +150,13 @@ export const actions: Actions = {
         if (isMediaProxy) {
           // /media/ reuse: keep the proxied URL as-is to avoid re-upload, but
           // probe hasAudio so we know whether to keep the audio line in the workflow.
-          refVideoUrl = refVideoUrlInput;
+          refVideoUrl = normalizedInput;
           refVideoName = 'ref_video.webm';
           try {
             // Resolve /media/ to S3 URL for server-side probing (same logic as src/routes/media/[...path]/+server.ts)
             const s3Endpoint = env.S3_ENDPOINT;
-            const mediaPath = refVideoUrlInput.slice('/media/'.length);
-            const s3Url = s3Endpoint ? `${s3Endpoint}/${mediaPath}` : refVideoUrlInput;
+            const mediaPath = normalizedInput.slice('/media/'.length);
+            const s3Url = s3Endpoint ? `${s3Endpoint}/${mediaPath}` : normalizedInput;
             const mediaResp = await fetch(s3Url);
             if (mediaResp.ok) {
               const ab = await mediaResp.arrayBuffer();
@@ -160,7 +169,7 @@ export const actions: Actions = {
           }
         } else if (isHttpUrl) {
           try {
-            const resp = await fetch(refVideoUrlInput);
+            const resp = await fetch(normalizedInput);
             if (!resp.ok) throw new Error(`fetch ref_video_url failed: ${resp.status}`);
             const buf = Buffer.from(await resp.arrayBuffer());
             const ct = resp.headers.get('content-type') || 'video/webm';
@@ -173,7 +182,7 @@ export const actions: Actions = {
             return { error: `ref_video_url fetch failed: ${String(e)}` };
           }
         } else {
-          refVideoUrl = refVideoUrlInput;
+          refVideoUrl = normalizedInput;
           refVideoName = 'ref_video.webm';
         }
       }
@@ -197,25 +206,18 @@ export const actions: Actions = {
         refImageNames.push(imgFile.name || `ref_image_${i}.${imgExt || 'png'}`);
       }
 
-      // Poster frame: client usually sends a PNG extracted from the clipped video.
-      // Fallbacks: first ref image, or server-side ffmpeg extraction from the ref video URL (both File and URL paths).
-      const posterFile = form.get('poster_image') as File | null;
+      // Poster/thumbnail: prefer the first ref image (it carries the intended
+      // look and a probeable aspect); fall back to a server-side ffmpeg frame
+      // extracted from the ref video when no ref images were provided.
       let posterUrl = '';
-      if (posterFile && posterFile.size > 0) {
-        let posterBuffer: Buffer<ArrayBufferLike> = Buffer.from(await posterFile.arrayBuffer());
-        const posterResult = await validateAndConvertImage(posterBuffer);
-        if (posterResult.error) {
-          return { error: `Poster: ${posterResult.error}` };
-        }
-        posterBuffer = posterResult.buffer;
-        posterUrl = await uploadBufferToS3(posterBuffer, posterResult.ext || 'png');
-      } else if (refImageUrls.length > 0) {
+      if (refImageUrls.length > 0) {
         posterUrl = refImageUrls[0];
       }
-      // If still missing and we have a ref video (File uploaded to S3 or URL), try to extract a frame server-side.
       if (!posterUrl && refVideoUrl) {
         try {
-          const posterFrame = await extractVideoPoster(refVideoUrl);
+          // ffmpeg needs an absolute, fetchable URL — convert the proxied
+          // /media/... path to the S3 endpoint URL (same as jobWorkflow).
+          const posterFrame = await extractVideoPoster(toOriginalUrl(refVideoUrl));
           if (posterFrame) {
             posterUrl = await uploadBufferToS3(posterFrame, 'png');
           }
@@ -223,8 +225,7 @@ export const actions: Actions = {
           console.warn('[Ref2V] Server poster extraction failed for', refVideoUrl, e);
         }
       }
-      // Still no poster and no ref images at all? Allow pure-text-to-video ref2v (empty poster) — don't hard-error here.
-      // The original hard error "poster_image required when a ref video is provided" broke the default-trim path where client poster extraction can fail.
+      // Still no poster and no ref video? Pure text-to-video ref2v — leave empty, no hard error.
 
       const result = await createVideoEntryForReview({
         userId: locals.user.id,

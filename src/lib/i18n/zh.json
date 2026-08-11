@@ -277,8 +277,8 @@
         "videoLabel": "参考视频（可选）",
         "videoHint": "最长 {max} 秒 — 可在下方裁剪",
         "urlLabel": "或粘贴视频链接：",
-        "urlHint": "来自我的视频或画廊",
-        "urlPlaceholder": "https://... 或 /media/...",
+        "urlHint": "可粘贴视频页面链接、视频 ID 或 /media/... 直链",
+        "urlPlaceholder": "例如 /videos/cmsnjid... 或 https://.../videos/cmsnjid...",
         "urlUse": "使用",
         "clipRange": "裁剪范围（开始 — 结束）",
         "clipStart": "开始 (秒)",
@@ -294,7 +294,8 @@
         "errors": {
           "notVideo": "所选文件不是视频。",
           "tooLarge": "视频过大（裁剪前最大 50 MB）。",
-          "invalidUrl": "请输入有效的视频链接（http(s) 或 /media/...）。"
+          "invalidUrl": "请输入有效的视频链接、视频页面链接或视频 ID。",
+          "urlNotReady": "该视频尚不可复用——需要已完成且可下载。"
         }
       }
     },

@@ -278,8 +278,8 @@
         "videoLabel": "Reference Video (optional)",
         "videoHint": "Max {max}s — clip it below",
         "urlLabel": "Or paste a video URL:",
-        "urlHint": "From your videos or the gallery",
-        "urlPlaceholder": "https://... or /media/...",
+        "urlHint": "Paste a video link, page URL, or ID — from your videos or the gallery",
+        "urlPlaceholder": "e.g. /videos/cmsnjid... or https://.../videos/cmsnjid...",
         "urlUse": "Use",
         "clipRange": "Clip range (start — end)",
         "clipStart": "Start (s)",
@@ -295,7 +295,8 @@
         "errors": {
           "notVideo": "Selected file is not a video.",
           "tooLarge": "Video is too large (max 50 MB before clipping).",
-          "invalidUrl": "Please enter a valid video URL (http(s) or /media/...)."
+          "invalidUrl": "Please enter a valid video URL, video page link, or video ID.",
+          "urlNotReady": "That video isn't ready to reuse yet — it must be completed and downloadable."
         }
       }
     },
