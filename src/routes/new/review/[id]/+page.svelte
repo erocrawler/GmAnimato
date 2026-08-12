@@ -890,6 +890,32 @@
 
     try {
       const t = get(_);
+
+      // Defensive: never submit an empty prompt — especially for ref2v, where
+      // the structured prompt is the whole generation driver. If the editor's
+      // `prompt` got wiped (browser-specific contenteditable issue), try to
+      // recover from the DOM first; otherwise block the submission.
+      const effectivePrompt = (prompt || "").trim();
+      if (!effectivePrompt && videoWorkflowType === "ref2v") {
+        // Attempt recovery from the editor DOM before giving up.
+        const editorEl = document.querySelector(
+          '#prompt[contenteditable="true"]',
+        );
+        if (editorEl && editorEl.textContent?.trim()) {
+          const recovered = (editorEl as HTMLElement).textContent
+            ?.replace(/\u200b/g, "")
+            .trim();
+          if (recovered) {
+            prompt = recovered;
+          }
+        }
+        if (!(prompt || "").trim()) {
+          busy = false;
+          message = t("review.errors.emptyPrompt");
+          return;
+        }
+      }
+
       // Check health before proceeding
       const healthRes = await fetch("/api/health");
       if (healthRes.ok) {
@@ -961,6 +987,8 @@
           showBusyModal = true;
           limitType = "system";
           busyModalMessage = t("review.serverBusy.highDemand");
+        } else if (j.errorCode === "empty_prompt") {
+          message = t("review.errors.emptyPrompt");
         } else {
           message = t("review.failedToSubmit", {
             values: { error: j.error || "unknown" },

@@ -492,6 +492,9 @@
     "jobResubmitted": "Job resubmitted — processing.",
     "failedToSubmit": "Failed to submit: {error}",
     "failedToRetry": "Failed to retry: {error}",
+    "errors": {
+      "emptyPrompt": "The prompt is empty. Please write a prompt before generating — your text may not have saved correctly, try typing again."
+    },
     "deleteConfirm": "Are you sure you want to delete this video?",
     "serverBusy": {
       "title": "Server is Busy! 🐢",

@@ -125,6 +125,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const tags = body?.tags;
     const workflowIdFromRequest = body?.workflowId;
     const loraWeights = body?.loraWeights;
+
+    // Defensive: ref2v jobs require a non-empty prompt — the structured prompt
+    // is the whole generation driver. Reject empty submissions here so a
+    // browser-side contenteditable wipe can't silently queue a useless job.
+    if (existing.additional_options?.ref2v === true) {
+      const p = typeof prompt === 'string' ? prompt.trim() : '';
+      if (!p) {
+        return new Response(
+          JSON.stringify({ error: 'ref2v requires a non-empty prompt', errorCode: 'empty_prompt' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
     const iterationStepsRaw = body?.iterationSteps;
     const parsedSteps = Number(iterationStepsRaw);
     const allowedSteps = [4, 6, 10, 12, 15] as const;

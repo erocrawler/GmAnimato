@@ -33,6 +33,20 @@
     // Compare with ZWSP stripped on BOTH sides: ZWSPs are caret anchors (after
     // <br> and after trailing breaks) and must never trigger a rebuild.
     if (el.innerHTML.replace(/\u200b/g, '') === probe.innerHTML.replace(/\u200b/g, '')) return;
+
+    // Safety net: if the prompt is empty/whitespace but the editor still has
+    // meaningful content, the `prompt` variable is stale — e.g. a racing
+    // external update (Svelte 5 bind + parent re-render) or a transient empty
+    // read. Re-derive it from the DOM instead of wiping the user's work.
+    const domText = (el.textContent || '').replace(/\u200b/g, '').trim();
+    if (!prompt.trim() && domText) {
+      const fresh = editorToPrompt();
+      if (fresh.trim()) {
+        prompt = fresh;
+        return;
+      }
+    }
+
     // Save caret position as character offset into the plain text
     const caretOffset = getEditorCaretOffset();
     el.innerHTML = html;

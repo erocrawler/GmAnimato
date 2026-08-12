@@ -491,6 +491,9 @@
     "jobResubmitted": "任务已重新提交 — 处理中。",
     "failedToSubmit": "提交失败：{error}",
     "failedToRetry": "重试失败：{error}",
+    "errors": {
+      "emptyPrompt": "提示词为空。请填写提示词后再生成——您的文字可能未正确保存，请重新输入。"
+    },
     "deleteConfirm": "确定要删除此视频吗？",
     "serverBusy": {
       "title": "服务器繁忙！🐢",
