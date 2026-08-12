@@ -328,12 +328,16 @@ export class JsonFileDatabase implements IDatabase {
     return localJobs[0];
   }
 
-  async claimLocalJob(): Promise<VideoEntry | null> {
+  async claimLocalJob(userId?: string): Promise<VideoEntry | null> {
     // For JSON file database, we use a simple approach
     // Note: This is not truly atomic and is only suitable for single-worker scenarios
     // For production with multiple workers, use PostgreSQL
     const rows = await this.readAll();
-    const localJobs = rows.filter(v => v.is_local_job === true && v.status === 'in_queue');
+    const localJobs = rows.filter(v =>
+      v.is_local_job === true &&
+      v.status === 'in_queue' &&
+      (!userId || v.user_id === userId)
+    );
     
     if (localJobs.length === 0) return null;
     

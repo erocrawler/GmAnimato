@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic, Workflow, SponsorClaim } from './IDatabase';
 import { DEFAULT_LORA_PRESETS, normalizeLoraPresets } from './loraPresets';
 import { normalizeQuotaCostRules } from './quotaCost';
@@ -506,19 +506,24 @@ export class PostgresDatabase implements IDatabase {
     return video ? this.mapToVideoEntry(video) : null;
   }
 
-  async claimLocalJob(): Promise<VideoEntry | null> {
+  async claimLocalJob(userId?: string): Promise<VideoEntry | null> {
     // Use a transaction to atomically find and update a job
     // This prevents race conditions where two workers claim the same job
     try {
       const video = await this.prisma.$transaction(async (tx) => {
+        // Optionally scope the claim to a specific user's jobs
+        const where = userId
+          ? Prisma.sql`WHERE is_local_job = true AND status = 'in_queue' AND user_id = ${userId}`
+          : Prisma.sql`WHERE is_local_job = true AND status = 'in_queue'`;
+
         // Find the oldest job in queue with FOR UPDATE lock
-        const job = await tx.$queryRaw<Array<{id: string}>>`
+        const job = await tx.$queryRaw<Array<{id: string}>>(Prisma.sql`
           SELECT id FROM videos 
-          WHERE is_local_job = true AND status = 'in_queue'
+          ${where}
           ORDER BY created_at ASC
           LIMIT 1
           FOR UPDATE SKIP LOCKED
-        `;
+        `);
 
         if (!job || job.length === 0) {
           return null;

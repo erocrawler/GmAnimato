@@ -13,6 +13,7 @@
  * Environment Variables:
  *   API_BASE_URL - Base URL of the API (default: http://localhost:5173)
  *   WORKER_TASK_SECRET - Worker secret for authentication (required)
+ *   WORKER_USER_ID - Optional: only claim jobs belonging to this user
  *   WORKER_POLL_INTERVAL - Poll interval in ms (default: 2000)
  *   WORKER_PROCESSING_TIME - Processing time in ms (default: 8000)
  */
@@ -23,6 +24,7 @@ config();
 
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5173';
 const WORKER_TASK_SECRET = process.env.WORKER_TASK_SECRET;
+const WORKER_USER_ID = process.env.WORKER_USER_ID || '';
 const POLL_INTERVAL = parseInt(process.env.WORKER_POLL_INTERVAL || '2000');
 const PROCESSING_TIME = parseInt(process.env.WORKER_PROCESSING_TIME || '8000');
 
@@ -39,6 +41,7 @@ async function claimLocalJob() {
       method: 'GET',
       headers: {
         'x-worker-secret': WORKER_TASK_SECRET,
+        ...(WORKER_USER_ID ? { 'x-worker-user-id': WORKER_USER_ID } : {}),
         'Content-Type': 'application/json',
       },
     });

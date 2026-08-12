@@ -213,7 +213,7 @@ export interface IDatabase {
   isVideoLikedByUser(videoId: string, userId: string): Promise<boolean>;
   getDailyQuotaUsage(userId: string, date: Date): Promise<number>;
   getOldestLocalJob(): Promise<VideoEntry | null>;
-  claimLocalJob(): Promise<VideoEntry | null>; // Atomically claim a job for processing
+  claimLocalJob(userId?: string): Promise<VideoEntry | null>; // Atomically claim a job for processing (optionally scoped to a user)
   getLocalJobStats(): Promise<{ inQueue: number; processing: number; completed: number; failed: number }>;
   getOldestMigrationCandidate(settings: AdminSettings): Promise<VideoEntry | null>; // Find oldest eligible job for RunPod migration
   claimJobForMigration(settings: AdminSettings): Promise<VideoEntry | null>; // Atomically claim and mark job for migration

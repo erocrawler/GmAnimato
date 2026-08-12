@@ -33,9 +33,14 @@ export const GET: RequestHandler = async ({ request }) => {
       );
     }
 
+    // Optionally scope the claim to a specific user's jobs.
+    // The user can be passed via the 'x-worker-user-id' header or a 'userId' query param.
+    const { searchParams } = new URL(request.url);
+    const requestedUserId = request.headers.get('x-worker-user-id') ?? searchParams.get('userId') ?? undefined;
+
     // Atomically claim the oldest local job in the queue
     // This prevents race conditions where two workers claim the same job
-    const job = await claimLocalJob();
+    const job = await claimLocalJob(requestedUserId);
     
     if (!job) {
       return new Response(
@@ -45,7 +50,7 @@ export const GET: RequestHandler = async ({ request }) => {
     }
     claimedJob = job;
     
-    console.log(`[Worker] Assigned task ${job.id} to worker (status automatically set to processing)`);
+    console.log(`[Worker] Assigned task ${job.id} to worker (status automatically set to processing)${requestedUserId ? ` [user: ${requestedUserId}]` : ''}`);
     
     // Build the workflow for this job
     const settings = await getAdminSettings();
