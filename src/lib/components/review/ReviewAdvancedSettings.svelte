@@ -217,14 +217,29 @@
     videoDuration = value as VideoDuration;
   }
 
-  // If the selected step isn't available for the current model/tier, snap to default
-  $: if (!stepOptions.some((o) => o.value === iterationSteps)) iterationSteps = defaultIterationSteps as IterationSteps;
+  // If the selected step isn't available for the current model/tier, snap to default.
+  // IMPORTANT: guard on `selectedWorkflowId` — same init-window race as duration.
+  // At first render the workflow isn't resolved, so isMiniMaxSelected is momentarily
+  // false and stepOptions are the WAN ones; a MiniMax 12/15-step entry would be
+  // wrongly snapped to 4, then re-snapped to the WAN-default 4→10 after resolution.
+  $: if (
+    selectedWorkflowId &&
+    !stepOptions.some((o) => o.value === iterationSteps)
+  )
+    iterationSteps = defaultIterationSteps as IterationSteps;
   $: if (!canUseQuality && iterationSteps === (isMiniMaxSelected ? 12 : 6)) iterationSteps = isMiniMaxSelected ? 10 : 4;
   $: if (!canUseQuality && isMiniMaxSelected && iterationSteps === 15) iterationSteps = 10;
 
   $: if (!canUseQuality && videoResolution === "720p") videoResolution = "480p";
 
+  // WAN (non-MiniMax) doesn't support 8s/10s outside relay mode — snap to 6.
+  // IMPORTANT: guard on `selectedWorkflowId` — at first render the workflow
+  // isn't resolved yet (it's set in onMount), so isMiniMaxSelected is
+  // momentarily false. Without this guard, a MiniMax job with 10s would be
+  // wrongly snapped to 6s during the init window and stay corrupted even after
+  // the real workflow loads (DB says 10, UI shows 6).
   $: if (
+    selectedWorkflowId &&
     !isMiniMaxSelected &&
     (videoDuration === 8 || (videoDuration === 10 && !promptRelayMode))
   )

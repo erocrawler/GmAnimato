@@ -371,7 +371,11 @@
 
   // When workflow changes, load the saved lora settings for that workflow
   // Always read fresh from localStorage — never use a stale snapshot
+  // Gated on isEditable: for read-only entries (in_queue/processing/completed) the
+  // stored entry.lora_weights are the source of truth — do NOT overwrite them with
+  // localStorage prefs (and do NOT pollute localStorage with the entry's weights).
   $: if (
+    isEditable &&
     selectedWorkflowId &&
     filteredLoraPresets &&
     Array.isArray(filteredLoraPresets) &&
