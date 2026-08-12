@@ -150,7 +150,7 @@ export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promis
       // there's no video) — it carries the output aspect and is probeable,
       // which the mp4 itself is not. ref2vWorkflow uses it for 'video' aspect.
       posterUrl: video.original_image_url ? toOriginalUrl(video.original_image_url) : undefined,
-      input_prompt: video.prompt ?? 'A beautiful video',
+      input_prompt: video.prompt ?? '',
       seed,
       callback_url: callbackUrl,
       videoDuration: video.video_duration as number | undefined,

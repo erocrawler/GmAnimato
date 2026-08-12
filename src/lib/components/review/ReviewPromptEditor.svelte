@@ -252,8 +252,36 @@
     sel.addRange(range);
   }
 
+  const MAX_PROMPT_CHARS = 10000; // matches DB VarChar(10000)
+
   function onEditorInput() {
-    prompt = editorToPrompt();
+    let next = editorToPrompt();
+    // Anti-wipe guard: if the DOM walk returns empty BUT the visible DOM still
+    // has content, the walk hit a transient state (renderPromptEditor sets
+    // el.innerHTML, and an input event can fire in that window; or a
+    // caret/selection edge case) — NOT the user deleting everything (a real
+    // clear leaves the DOM empty too). Re-sync from the last known-good prompt
+    // instead of letting the empty read wipe the user's essay.
+    const domHasContent =
+      !!promptEditor &&
+      (promptEditor.textContent || "").replace(/\u200b/g, "").trim() !== "";
+    if (next.trim() === "" && domHasContent && !composing) {
+      renderPromptEditor();
+      return;
+    }
+    // Hard cap at the DB column limit: pasting/typing past MAX_PROMPT_CHARS
+    // would make the server 500 on write. Trim to the limit (never silently
+    // drop the whole prompt — the user's text is preserved up to the cap).
+    if (next.length > MAX_PROMPT_CHARS) {
+      next = next.slice(0, MAX_PROMPT_CHARS);
+      prompt = next;
+      promptCursor = getEditorCaretOffset();
+      renderPromptEditor();
+      promptEditor?.focus();
+      restoreEditorCaret(prompt.length);
+      return;
+    }
+    prompt = next;
     promptCursor = getEditorCaretOffset();
     // Live-render: if the user typed a token, turn it into a badge. Skipped
     // during IME composition — re-rendering would break the composition.
@@ -490,4 +518,14 @@
       }
     }}
   ></div>
+
+  <div class="flex justify-end mt-1">
+    <span
+      class="text-xs"
+      class:opacity-40={prompt.length < MAX_PROMPT_CHARS}
+      class:text-warning={prompt.length >= MAX_PROMPT_CHARS}
+    >
+      {prompt.length}/{MAX_PROMPT_CHARS}
+    </span>
+  </div>
 </div>

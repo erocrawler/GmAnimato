@@ -103,6 +103,15 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
     throw new Error(`Ref2V workflow template validation failed:\n${validationErrors.join('\n')}`);
   }
 
+  // The structured prompt is the whole generation driver for ref2v. Fail the
+  // job loudly instead of silently generating from a placeholder — an empty
+  // prompt here means something upstream lost the user's text (e.g. the
+  // browser contenteditable wipe). This protects legacy/queued jobs that never
+  // passed the kickoff empty-prompt guard.
+  if (!(params.input_prompt || '').trim()) {
+    throw new Error('ref2v requires a non-empty prompt (empty_prompt)');
+  }
+
   // Add callback_url to input if provided
   if (params.callback_url) {
     workflow.input.callback_url = params.callback_url;

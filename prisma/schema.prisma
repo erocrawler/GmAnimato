@@ -44,7 +44,7 @@ model Video {
   workflowId          String?     @map("workflow_id")
   originalImageUrl    String      @map("original_image_url") @db.VarChar(500)
   lastImageUrl        String?     @map("last_image_url") @db.VarChar(500)
-  prompt              String?     @db.VarChar(2000)
+  prompt              String?     @db.VarChar(10000)
   tags                String?     @db.VarChar(1000)
   suggestedPrompts    String?     @map("suggested_prompts") @db.VarChar(2000)
   isPhotoRealistic    Boolean?    @map("is_photo_realistic")

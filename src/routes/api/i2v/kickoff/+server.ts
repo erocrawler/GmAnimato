@@ -138,6 +138,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         );
       }
     }
+
+    // The DB prompt column is VarChar(10000). Reject over-long prompts with a
+    // clear error BEFORE the DB write — otherwise Postgres rejects the update
+    // (P2000) and the whole submission 500s, which can strand the job or lose
+    // the user's text on the frontend.
+    if (typeof prompt === 'string' && prompt.length > 10000) {
+      return new Response(
+        JSON.stringify({
+          error: `Prompt is too long (${prompt.length}/10000 characters). Please shorten it.`,
+          errorCode: 'prompt_too_long',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
     const iterationStepsRaw = body?.iterationSteps;
     const parsedSteps = Number(iterationStepsRaw);
     const allowedSteps = [4, 6, 10, 12, 15] as const;

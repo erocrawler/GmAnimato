@@ -1,7 +1,9 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { updateVideo, getVideoById } from '$lib/db';
-import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
 
+/**
+ * Publish/unpublish toggle for a video detail page.
+ */
 export const POST: RequestHandler = async ({ request, locals }) => {
   try {
     // Check authentication
@@ -14,8 +16,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
     const body = await request.json();
     const id = body?.id as string | undefined;
-    const prompt = body?.prompt as string | undefined;
-    const tags = body?.tags as string[] | undefined;
     const is_published = body?.is_published as boolean | undefined;
     if (!id) return new Response(JSON.stringify({ error: 'missing id' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
@@ -30,15 +30,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       });
     }
 
-    // Validate field lengths
-    const validationErrors = validateVideoEntry({ prompt, tags });
-    if (validationErrors.length > 0) {
-      return new Response(
-        JSON.stringify({ error: formatValidationErrors(validationErrors) }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
     // Prevent publishing NSFW photo-realistic content to gallery
     if (is_published && existing.is_nsfw === true && existing.is_photo_realistic === true) {
       return new Response(
@@ -47,7 +38,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       );
     }
 
-    const updated = await updateVideo(id, { prompt, tags, is_published });
+    const updated = await updateVideo(id, { is_published });
     return new Response(JSON.stringify({ success: true, updated }), { headers: { 'Content-Type': 'application/json' } });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });

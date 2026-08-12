@@ -989,6 +989,8 @@
           busyModalMessage = t("review.serverBusy.highDemand");
         } else if (j.errorCode === "empty_prompt") {
           message = t("review.errors.emptyPrompt");
+        } else if (j.errorCode === "prompt_too_long") {
+          message = j.error || t("review.errors.promptTooLong");
         } else {
           message = t("review.failedToSubmit", {
             values: { error: j.error || "unknown" },

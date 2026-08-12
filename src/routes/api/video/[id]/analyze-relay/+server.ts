@@ -64,15 +64,21 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
       );
     }
 
-    // Persist the generated segments immediately so they survive a page reload
-    await updateVideo(id, {
-      prompt: result.globalPrompt,
+    // Persist the generated segments immediately so they survive a page reload.
+    // Only overwrite the prompt with a NON-EMPTY globalPrompt — never let a
+    // blank AI response wipe a prompt the user already wrote.
+    const globalPrompt = (result.globalPrompt || '').trim();
+    const patch: any = {
       additional_options: {
         ...(video.additional_options || {}),
         prompt_relay_mode: true,
         prompt_relay_segments: result.segments,
       },
-    });
+    };
+    if (globalPrompt) {
+      patch.prompt = globalPrompt;
+    }
+    await updateVideo(id, patch);
 
     return new Response(
       JSON.stringify({ success: true, globalPrompt: result.globalPrompt, segments: result.segments }),
