@@ -4,6 +4,7 @@ import { env } from '$env/dynamic/private';
 import { getRunPodConfig, mapRunPodStatus, extractVideoUrl, PROCESSING_TIMEOUT_MS } from '$lib/runpod';
 import { getJobStatus } from '$lib/local-queue';
 import { toProxiedUrl } from '$lib/serverImageUrl';
+import { extractRef2VPosterFromResult } from '$lib/ref2vPoster';
 
 export const GET: RequestHandler = async ({ params }) => {
   try {
@@ -133,6 +134,16 @@ export const GET: RequestHandler = async ({ params }) => {
           if (mappedStatus === 'processing' && video.status !== 'processing') {
             updateData.dequeued_at = new Date().toISOString();
           }
+
+          // Ref2V: refresh the entry poster with the first frame of the
+          // generated result once the job completes (best-effort, covers the
+          // case where the webhook was never delivered). Folded into the same
+          // single update below.
+          if (mappedStatus === 'completed' && finalVideoUrl) {
+            const posterUrl = await extractRef2VPosterFromResult(video, finalVideoUrl);
+            if (posterUrl) updateData.original_image_url = posterUrl;
+          }
+
           await updateVideo(video.id, updateData);
         }
 

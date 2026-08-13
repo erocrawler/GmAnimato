@@ -3,6 +3,7 @@ import { updateVideo, getVideoById } from '$lib/db';
 import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
 import { uploadBufferToS3 } from '$lib/s3';
 import { toProxiedUrl } from '$lib/serverImageUrl';
+import { extractRef2VPosterFromResult } from '$lib/ref2vPoster';
 
 export const POST: RequestHandler = async ({ request, params }) => {
   try {
@@ -127,9 +128,19 @@ export const POST: RequestHandler = async ({ request, params }) => {
       patch.processing_time_ms = endTime - startTime;
     }
 
+    // Ref2V: once the generation completes, refresh the entry poster with the
+    // first frame of the generated result video (the upload-time poster shows
+    // the reference media). Best-effort — null on failure is simply skipped,
+    // and the poster is folded into the SAME single update below.
+    if (finalStatus === 'completed' && patch.final_video_url) {
+      const posterUrl = await extractRef2VPosterFromResult(existing, patch.final_video_url);
+      if (posterUrl) patch.original_image_url = posterUrl;
+    }
+
     // Validate field lengths before updating
     const validationErrors = validateVideoEntry({
       final_video_url: patch.final_video_url,
+      original_image_url: patch.original_image_url,
     });
 
     if (validationErrors.length > 0) {
