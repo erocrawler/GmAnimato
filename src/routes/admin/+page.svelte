@@ -640,6 +640,7 @@
         id: `rule-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         label: '',
         multiplier: 2,
+        additive: undefined,
         when: {},
       },
     ];
@@ -657,7 +658,7 @@
       i === index ? { ...r, when: { ...(r.when || {}), ...patch } } : r
     );
   }
-  function toggleLoraInRule(ruleIndex: number, field: 'notUsingLoras' | 'usingLoras', loraId: string) {
+  function toggleLoraInRule(ruleIndex: number, field: 'usingLoras', loraId: string) {
     const list = (workflowQuotaCostRules[ruleIndex]?.when?.[field] as string[]) || [];
     const next = list.includes(loraId) ? list.filter(id => id !== loraId) : [...list, loraId];
     updateQuotaCostRuleWhen(ruleIndex, { [field]: next });
@@ -676,10 +677,9 @@
     if (purgedIds.length) workflowCompatibleLoras = workflowCompatibleLoras.filter((id: string) => validIds.has(id));
     const cleanedRules = workflowQuotaCostRules.map((r: any) => {
       const w = r?.when || {};
-      const notUsing = Array.isArray(w.notUsingLoras) ? w.notUsingLoras.filter((id: string) => validIds.has(id)) : w.notUsingLoras;
       const using = Array.isArray(w.usingLoras) ? w.usingLoras.filter((id: string) => validIds.has(id)) : w.usingLoras;
-      if (notUsing?.length === w.notUsingLoras?.length && using?.length === w.usingLoras?.length) return r;
-      return { ...r, when: { ...w, notUsingLoras: notUsing, usingLoras: using } };
+      if (using?.length === w.usingLoras?.length) return r;
+      return { ...r, when: { ...w, usingLoras: using } };
     });
     if (JSON.stringify(cleanedRules) !== JSON.stringify(workflowQuotaCostRules)) workflowQuotaCostRules = cleanedRules;
     if (purgedIds.length) showNotification(`Auto-removed ${purgedIds.length} orphan LoRA(s): ${purgedIds.slice(0,3).join(', ')}`, 'info');
@@ -1978,7 +1978,7 @@
           <span class="text-sm font-semibold">Quota Cost Rules</span>
           <button class="btn btn-xs btn-outline" onclick={addQuotaCostRule}>+ Add rule</button>
         </div>
-        <p class="text-xs opacity-50 mb-2">Multipliers stack on the base cost. e.g. "2x if duration ≥ 8s" or "2x if NOT using a speed-up LoRA".</p>
+        <p class="text-xs opacity-50 mb-2">Multipliers (×) scale the base cost, additive (+/−) adds or subtracts a flat credit, multipliers &lt;1× (e.g. 0.5×) also discount. e.g. "2× if duration ≥ 8s" or "+1 if using a ref video" or "-1 when speed-up LoRA used".</p>
         {#if workflowQuotaCostRules.length === 0}
           <p class="text-xs opacity-40">No rules — cost is always {workflowQuotaCost} credit{workflowQuotaCost > 1 ? 's' : ''}/video.</p>
         {:else}
@@ -1986,8 +1986,10 @@
             {#each workflowQuotaCostRules as rule, ri (rule.id)}
               <div class="border border-base-300 rounded-lg p-3 space-y-2">
                 <div class="flex items-center gap-2">
-                  <input type="number" min={1} step={1} bind:value={rule.multiplier} class="input input-bordered input-xs w-20" title="Multiplier" />
+                  <input type="number" min={0.1} step={0.1} bind:value={rule.multiplier} placeholder="1" class="input input-bordered input-xs w-20" title="Multiplier (×) — &lt;1 is a discount" />
                   <span class="text-xs">×</span>
+                  <input type="number" step={1} bind:value={rule.additive} placeholder="+0" class="input input-bordered input-xs w-20" title="Additive credits (+/−) — negative is a discount" />
+                  <span class="text-xs">+/−</span>
                   <input type="text" placeholder="Label (optional)" bind:value={rule.label} class="input input-bordered input-xs flex-1" />
                   <button class="btn btn-xs btn-error btn-ghost" onclick={() => removeQuotaCostRule(ri)}>✕</button>
                 </div>
@@ -1997,6 +1999,7 @@
                     <select class="select select-bordered select-xs" value={rule.when.minDuration ?? ''}
                       onchange={(e) => updateQuotaCostRuleWhen(ri, { minDuration: e.currentTarget.value === '' ? undefined : +e.currentTarget.value })}>
                       <option value="">(any)</option>
+                      <option value="6">6s</option>
                       <option value="8">8s</option>
                       <option value="10">10s</option>
                     </select>
@@ -2011,24 +2014,13 @@
                     </select>
                   </label>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <div class="opacity-60 mb-1">Applies when NONE of these LoRAs used:</div>
-                    <div class="flex flex-wrap gap-1">
-                      {#each (settings.loraPresets || []) as lora}
-                        <button class="badge badge-xs badge-ghost cursor-pointer" class:badge-primary={(rule.when.notUsingLoras || []).includes(lora.id)}
-                          onclick={() => toggleLoraInRule(ri, 'notUsingLoras', lora.id)}>{lora.label}</button>
-                      {/each}
-                    </div>
-                  </div>
-                  <div>
-                    <div class="opacity-60 mb-1">Applies when ANY of these LoRAs used:</div>
-                    <div class="flex flex-wrap gap-1">
-                      {#each (settings.loraPresets || []) as lora}
-                        <button class="badge badge-xs badge-ghost cursor-pointer" class:badge-secondary={(rule.when.usingLoras || []).includes(lora.id)}
-                          onclick={() => toggleLoraInRule(ri, 'usingLoras', lora.id)}>{lora.label}</button>
-                      {/each}
-                    </div>
+                <div>
+                  <div class="opacity-60 mb-1">Applies when ANY of these LoRAs used:</div>
+                  <div class="flex flex-wrap gap-1">
+                    {#each (settings.loraPresets || []) as lora}
+                      <button class="badge badge-xs badge-ghost cursor-pointer" class:badge-secondary={(rule.when.usingLoras || []).includes(lora.id)}
+                        onclick={() => toggleLoraInRule(ri, 'usingLoras', lora.id)}>{lora.label}</button>
+                    {/each}
                   </div>
                 </div>
               </div>

@@ -147,17 +147,25 @@
   // Duration options — 10s for advanced users (WAN: relay mode only; MiniMax: standard mode)
   // 8s is a MiniMax H3 premium-only option. For ref2v with a known reference
   // length, a "Follow video duration" radio is prepended (value FOLLOW_DURATION).
+  // Free tier caps output at 6s, so the follow option reflects the capped value.
+  $: followMaxSec = canUseQuality ? 10 : 6;
+  $: followDurationSec = Math.min(followMaxSec, refVideoDurationSec);
+  $: followDurationCapped = refVideoDurationSec > followMaxSec;
   $: durationOptions = ((): DurationOption[] => [
     ...(videoWorkflowType === "ref2v" && refVideoDurationSec > 0
       ? [
           {
             value: FOLLOW_DURATION,
             label: $_("review.ref2v.followDuration.shortTitle", {
-              values: { s: refVideoDurationSec.toFixed(1) },
+              values: { s: followDurationSec.toFixed(1) },
             }),
-            description: $_("review.ref2v.followDuration.helpKnown", {
-              values: { s: refVideoDurationSec.toFixed(1) },
-            }),
+            description: followDurationCapped
+              ? $_("review.ref2v.followDuration.helpCapped", {
+                  values: { s: followMaxSec },
+                })
+              : $_("review.ref2v.followDuration.helpKnown", {
+                  values: { s: followDurationSec.toFixed(1) },
+                }),
             requiresPaid: false,
           },
         ]
@@ -202,8 +210,13 @@
       : []),
   ])();
 
-  // Effective selected value for display: FOLLOW_DURATION when follow is on.
-  $: selectedDurationValue = ref2vFollowDuration ? FOLLOW_DURATION : videoDuration;
+  // Effective selected value for display: FOLLOW_DURATION when follow is on
+  // (and there's a video to follow — the pref can be remembered from an earlier
+  // job that had a ref video, but the current entry may have none).
+  $: selectedDurationValue =
+    ref2vFollowDuration && refVideoDurationSec > 0
+      ? FOLLOW_DURATION
+      : videoDuration;
   $: currentDurationOption = durationOptions.find(
     (o) => o.value === selectedDurationValue,
   );
@@ -231,6 +244,18 @@
   $: if (!canUseQuality && isMiniMaxSelected && iterationSteps === 15) iterationSteps = 10;
 
   $: if (!canUseQuality && videoResolution === "720p") videoResolution = "480p";
+
+  // Free tier: 8s/10s are advanced features. MiniMax keeps 8s/10s in its
+  // option list for paid users, so a free user's stored 8s/10s (e.g. from a
+  // premium period) would otherwise leave no duration radio selected — snap
+  // it down to 6s so a radio is always checked.
+  $: if (!canUseQuality && videoDuration > 6) videoDuration = 6;
+
+  // Follow-duration is meaningless without a ref video (the pref is remembered
+  // globally and may outlive the entry that set it). Snap it off so it never
+  // leaves the duration radios in an empty state or sends a stale
+  // ref2v_follow_duration flag to kickoff.
+  $: if (ref2vFollowDuration && refVideoDurationSec <= 0) ref2vFollowDuration = false;
 
   // WAN (non-MiniMax) doesn't support 8s/10s outside relay mode — snap to 6.
   // IMPORTANT: guard on `selectedWorkflowId` — at first render the workflow

@@ -342,6 +342,7 @@
         "title": "Follow reference video duration",
         "shortTitle": "Follow video ({s}s)",
         "helpKnown": "Output length will match the reference video ({s}s).",
+        "helpCapped": "Your plan caps output at {s}s — the reference is longer, so output is capped.",
         "helpUnknown": "Output duration follows the reference video when its length is known."
       },
       "presets": {

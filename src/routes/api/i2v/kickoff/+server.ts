@@ -244,6 +244,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     // Get admin settings for thresholds
     const settings = await getAdminSettings();
 
+    // Advanced-features entitlement — 720p, premium iteration steps, and the 6s
+    // duration cap all key off this single flag.
+    const roles = locals.user?.roles || [];
+    const hasAdvancedFeatures = roles.some(roleName =>
+      settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
+    );
+
     // Resolve workflow to use
     let workflow = null;
     if (workflowIdFromRequest) {
@@ -289,6 +296,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
       });
+    }
+
+    // Cap output duration at 6s for the free tier (8s/10s are advanced features).
+    // ref2v "follow video duration" on a long ref is clamped rather than
+    // rejected; relay mode is capped separately via the frame-count check below.
+    if (videoDuration !== undefined && videoDuration > 6 && !promptRelayMode && !hasAdvancedFeatures) {
+      videoDuration = 6;
     }
 
     // Filter LoRA weights to only compatible ones for the selected workflow
@@ -404,59 +418,26 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
-    // Get user roles for feature enforcement
-    const roles = locals.user?.roles || [];
-
     // Enforce role requirement for 720p resolution
-    if (resolution === '720p') {
-      // Check if any of user's roles has allowAdvancedFeatures enabled
-      const hasAdvancedFeatures = roles.some(roleName => 
-        settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
-      );
-
-      if (!hasAdvancedFeatures) {
-        return new Response(JSON.stringify({ 
-          error: '720p resolution is available to users with advanced features only.' 
-        }), { 
-          status: 403, 
-          headers: { 'Content-Type': 'application/json' } 
-        });
-      }
+    if (resolution === '720p' && !hasAdvancedFeatures) {
+      return new Response(JSON.stringify({ 
+        error: '720p resolution is available to users with advanced features only.' 
+      }), { 
+        status: 403, 
+        headers: { 'Content-Type': 'application/json' } 
+      });
     }
 
     // Enforce role requirement for premium iteration steps (6 for WAN, 12/15 for MiniMax)
     const isMiniMax = isMiniMaxWorkflow(workflow);
     const isPremiumStep = isMiniMax ? (iterationSteps === 12 || iterationSteps === 15) : iterationSteps === 6;
-    if (isPremiumStep) {
-      // Check if any of user's roles has allowAdvancedFeatures enabled
-      const hasAdvancedFeatures = roles.some(roleName => 
-        settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
-      );
-
-      if (!hasAdvancedFeatures) {
-        return new Response(JSON.stringify({ 
-          error: `${iterationSteps} iteration steps is available to users with advanced features only.` 
-        }), { 
-          status: 403, 
-          headers: { 'Content-Type': 'application/json' } 
-        });
-      }
-    }
-
-    // Enforce role requirement for durations over 6s (8s/10s are advanced features;
-    // relay mode is covered by the relay frame-count validation below)
-    if (videoDuration !== undefined && videoDuration > 6 && !promptRelayMode) {
-      const hasAdvancedFeatures = roles.some(roleName =>
-        settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
-      );
-      if (!hasAdvancedFeatures) {
-        return new Response(JSON.stringify({
-          error: 'Durations over 6 seconds are available to users with advanced features only.'
-        }), {
-          status: 403,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
+    if (isPremiumStep && !hasAdvancedFeatures) {
+      return new Response(JSON.stringify({ 
+        error: `${iterationSteps} iteration steps is available to users with advanced features only.` 
+      }), { 
+        status: 403, 
+        headers: { 'Content-Type': 'application/json' } 
+      });
     }
 
     // Validate relay segment frame total: must be 4n+1, at least 81, within tier limit
@@ -470,9 +451,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      const hasAdvancedFeatures = roles.some((roleName: string) =>
-        settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
-      );
       const maxAllowedFrames = hasAdvancedFeatures ? 177 : 121;
       if (totalSegmentFrames > maxAllowedFrames) {
         return new Response(JSON.stringify({

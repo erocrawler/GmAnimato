@@ -957,13 +957,11 @@ export class PostgresDatabase implements IDatabase {
           let rulesChanged = false;
           const filteredRules = rules.map((r: any) => {
             const when = r?.when || {};
-            const rawNot = when.notUsingLoras as string[] | undefined;
             const rawUsing = when.usingLoras as string[] | undefined;
-            const notUsing = Array.isArray(rawNot) ? rawNot.filter((id: string) => validLoraIds!.has(id)) : rawNot;
             const using = Array.isArray(rawUsing) ? rawUsing.filter((id: string) => validLoraIds!.has(id)) : rawUsing;
-            if (notUsing?.length !== rawNot?.length || using?.length !== rawUsing?.length) rulesChanged = true;
-            if (notUsing?.length === rawNot?.length && using?.length === rawUsing?.length) return r;
-            return { ...r, when: { ...when, notUsingLoras: notUsing, usingLoras: using } };
+            if (using?.length === rawUsing?.length) return r;
+            rulesChanged = true;
+            return { ...r, when: { ...when, usingLoras: using } };
           });
           const idsChanged = filteredIds.length !== compatibleIds.length;
           if (idsChanged || rulesChanged) {

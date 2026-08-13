@@ -135,12 +135,16 @@
   $: refVideoDurationSec =
     Number(entry.additional_options?.ref_video_duration) || 0;
   // Effective output duration: when ref2v follow-duration is on and we know the
-  // ref length, use it (clamped to the allowed max); otherwise the manual picker.
+  // ref length, use it (clamped to the tier max — 6s for free, 10s for advanced);
+  // otherwise the manual picker.
   $: effectiveVideoDuration =
     videoWorkflowType === "ref2v" &&
     ref2vFollowDuration &&
     refVideoDurationSec > 0
-      ? Math.min(10, Math.max(1, Math.round(refVideoDurationSec)))
+      ? Math.min(
+          hasAdvancedFeatures ? 10 : 6,
+          Math.max(1, Math.round(refVideoDurationSec)),
+        )
       : videoDuration;
 
   // Effective credit cost for the CURRENT selections (workflow base + rules like
