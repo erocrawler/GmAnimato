@@ -38,6 +38,28 @@ export const GET: RequestHandler = async ({ request }) => {
     const { searchParams } = new URL(request.url);
     const requestedUserId = request.headers.get('x-worker-user-id') ?? searchParams.get('userId') ?? undefined;
 
+    // Worker-declared capabilities (comma-separated, e.g. 'sage_attention').
+    // When a worker declares its capabilities, the server trusts it — a worker
+    // that can't run sage attention must not receive a workflow that requires
+    // it. When no capabilities are declared, fall back to the env default.
+    const declaredCapabilities = (request.headers.get('x-worker-capabilities') ?? '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    let useSageAttention = env.ENABLE_SAGE_ATTENTION_LOCAL === 'true';
+    if (declaredCapabilities.length > 0) {
+      if (declaredCapabilities.includes('sage_attention') || declaredCapabilities.includes('sage-attention')) {
+        useSageAttention = true;
+      } else {
+        // Declared capabilities without sage attention (or an unknown set) —
+        // be conservative and disable it rather than send an unrunnable job.
+        useSageAttention = false;
+      }
+      console.log(`[Worker] Capabilities declared: [${declaredCapabilities.join(', ')}] → sage attention: ${useSageAttention}`);
+    } else {
+      console.log(`[Worker] No capabilities declared, using env default (sage attention: ${useSageAttention})`);
+    }
+
     // Atomically claim the oldest local job in the queue
     // This prevents race conditions where two workers claim the same job
     const job = await claimLocalJob(requestedUserId);
@@ -75,7 +97,7 @@ export const GET: RequestHandler = async ({ request }) => {
       settings,
       callbackUrl,
       imageMode: shouldSendBase64 ? 'base64' : 'url',
-      useSageAttention: env.ENABLE_SAGE_ATTENTION_LOCAL === 'true',
+      useSageAttention,
     });
 
     console.log(`[Worker] Using workflow: ${resolvedWorkflow.name} (${resolvedWorkflow.id}) for ${workflowType.toUpperCase()} job ${job.id}`);

@@ -73,7 +73,7 @@
         body: JSON.stringify({
           prompt,
           workflowType: videoWorkflowType,
-          videoDuration,
+          videoDuration: effectiveVideoDuration,
           locale: get(locale) === "zh" ? "zh" : "en",
         }),
       });
@@ -1195,8 +1195,13 @@
         <ReviewRef2vPresets
           {refItems}
           {isEditable}
-          videoDuration={effectiveVideoDuration}
-          onSelect={(np) => (prompt = np)}
+          onSelect={(np) => {
+            prompt = np;
+            // Presets are a starting point — immediately send them through the
+            // enhancer (which opens the preview dialog) so the user gets a
+            // model-tuned prompt without having to find the Enhance button.
+            enhancePrompt();
+          }}
         />
       {/if}
 

@@ -347,7 +347,7 @@
       },
       "presets": {
         "title": "Quick prompts",
-        "hint": "Click to insert — then ✨ Enhance",
+        "hint": "Click to apply & auto ✨ Enhance",
         "needsMore": "Add a reference video and image(s) above to use this",
         "needImages": "need {count} img{count, plural, =1 {} other {s}}",
         "needVideo": "need video",

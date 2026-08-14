@@ -346,7 +346,7 @@
       },
       "presets": {
         "title": "快捷提示词",
-        "hint": "点击插入 — 然后 ✨ 增强",
+        "hint": "点击应用并自动 ✨ 增强",
         "needsMore": "请先在上方添加参考视频和图像",
         "needImages": "需 {count} 张图",
         "needVideo": "需视频",

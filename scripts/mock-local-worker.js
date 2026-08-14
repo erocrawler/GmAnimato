@@ -16,6 +16,8 @@
  *   WORKER_USER_ID - Optional: only claim jobs belonging to this user
  *   WORKER_POLL_INTERVAL - Poll interval in ms (default: 2000)
  *   WORKER_PROCESSING_TIME - Processing time in ms (default: 8000)
+ *   WORKER_SAGE_ATTENTION - Optional: 'true'/'false' declares sage attention
+ *     capability via x-worker-capabilities; unset falls back to server env
  */
 
 import { config } from 'dotenv';
@@ -27,6 +29,16 @@ const WORKER_TASK_SECRET = process.env.WORKER_TASK_SECRET;
 const WORKER_USER_ID = process.env.WORKER_USER_ID || '';
 const POLL_INTERVAL = parseInt(process.env.WORKER_POLL_INTERVAL || '2000');
 const PROCESSING_TIME = parseInt(process.env.WORKER_PROCESSING_TIME || '8000');
+const WORKER_SAGE_ATTENTION = process.env.WORKER_SAGE_ATTENTION;
+
+// Tri-state: 'true' declares sage_attention, 'false' declares no sage
+// attention, unset omits the header (server env fallback).
+const WORKER_CAPABILITIES =
+  WORKER_SAGE_ATTENTION === undefined
+    ? ''
+    : WORKER_SAGE_ATTENTION === 'true'
+      ? 'sage_attention'
+      : 'no_sage_attention';
 
 let isProcessing = false;
 let processedCount = 0;
@@ -42,6 +54,7 @@ async function claimLocalJob() {
       headers: {
         'x-worker-secret': WORKER_TASK_SECRET,
         ...(WORKER_USER_ID ? { 'x-worker-user-id': WORKER_USER_ID } : {}),
+        ...(WORKER_CAPABILITIES ? { 'x-worker-capabilities': WORKER_CAPABILITIES } : {}),
         'Content-Type': 'application/json',
       },
     });
