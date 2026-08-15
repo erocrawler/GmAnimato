@@ -27,7 +27,7 @@ interface Ref2VWorkflowParams {
   /** Output aspect ratio. 'video' follows the reference media (default); the
    *  presets override it. MiniMax H3 supports roughly 0.45-2.2. */
   ref2vAspect?: 'video' | '16:9' | '4:3' | 'square' | '3:4' | '9:16';
-  iterationSteps?: 10 | 12 | 15; // sampler steps (MiniMax fast/balanced/quality)
+  iterationSteps?: 4 | 8; // sampler steps (distilled turbo NFE: fast 4 / quality 8)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
   workflow?: Workflow;
@@ -50,7 +50,7 @@ const MAX_REF_IMAGES = 6;
  * stripped from the payload.
  *
  * Reuses the i2v MiniMax builder patterns: x32 dimension rounding, 720p upscale,
- * and the always-required speed-up LoRA with 10/12/15 steps.
+ * and the always-required speed-up LoRA with 4/8 steps.
  */
 export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<object> {
   // Resolve template path from workflow object or use default
@@ -208,6 +208,10 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   const schedulerNode = findNode(workflow, 'BasicScheduler');
   const guiderNode = findNode(workflow, 'BasicGuider');
   const unetLoaderNode = findNode(workflow, 'UNETLoader');
+  // The distilled template carries a MiniMaxH3SigmaShift node (12/3) between
+  // the UNETLoader and the scheduler/guider; the injected LoRA slots in before
+  // it. Templates without the node fall back to rewiring scheduler/guider.
+  const sigmaShiftNode = findNode(workflow, 'MiniMaxH3SigmaShift');
 
   const appliedLora = (params.loraPresets ?? [])
     .filter((p) => p.isConfigurable === false)
@@ -231,20 +235,26 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
     };
     workflow.input.node_weights[loraNodeId] = 1.0;
 
-    // Rewire BasicScheduler.model and BasicGuider.model to the LoRA output
+    // Rewire the model chain through the LoRA: slot it between the UNETLoader
+    // and the sigma-shift node (or scheduler/guider on templates without it).
     const schedulerInputs = getNodeInputs(workflow, schedulerNode);
     const guiderInputs = getNodeInputs(workflow, guiderNode);
-    if (schedulerInputs && Array.isArray(schedulerInputs.model) && schedulerInputs.model[0] === unetLoaderNode) {
-      schedulerInputs.model = [loraNodeId, 0];
-    }
-    if (guiderInputs && Array.isArray(guiderInputs.model) && guiderInputs.model[0] === unetLoaderNode) {
-      guiderInputs.model = [loraNodeId, 0];
+    const shiftInputs = sigmaShiftNode ? getNodeInputs(workflow, sigmaShiftNode) : null;
+    if (shiftInputs && Array.isArray(shiftInputs.model) && shiftInputs.model[0] === unetLoaderNode) {
+      shiftInputs.model = [loraNodeId, 0];
+    } else {
+      if (schedulerInputs && Array.isArray(schedulerInputs.model) && schedulerInputs.model[0] === unetLoaderNode) {
+        schedulerInputs.model = [loraNodeId, 0];
+      }
+      if (guiderInputs && Array.isArray(guiderInputs.model) && guiderInputs.model[0] === unetLoaderNode) {
+        guiderInputs.model = [loraNodeId, 0];
+      }
     }
 
-    // Reduce steps: user-selected iteration steps (10 fast / 12 balanced / 15 quality),
-    // defaulting to 10. The speed-up LoRA makes low step counts viable.
+    // Reduce steps: distilled NFE — user-selected 4/8 when provided, else the
+    // LoRA preset's target `steps` (4-step / 8-step lightx2v), else 8.
     if (schedulerInputs) {
-      schedulerInputs.steps = params.iterationSteps ?? 10;
+      schedulerInputs.steps = params.iterationSteps ?? appliedLora.steps ?? 8;
     }
     console.log(`[Ref2V] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
   } else {

@@ -405,9 +405,9 @@
         "balanced": "6步",
         "quality": "8步"
       },
-      "minimaxStepsFast": "10步",
-      "minimaxStepsBalanced": "12步",
-      "minimaxStepsQuality": "15步"
+      "minimaxStepsFast": "4步",
+      "minimaxStepsBalanced": "8步",
+      "minimaxStepsQuality": "8步"
     },
     "duration": {
       "title": "视频时长",
@@ -416,7 +416,7 @@
       "shortDesc": "81帧",
       "long": "6秒",
       "longDesc": "121帧",
-      "medium": "8秒",
+      "ultra": "15秒",
       "extended": "10秒",
       "extendedDesc": "177帧（仅限提示词接力模式）",
       "framesCount": "{n}帧"

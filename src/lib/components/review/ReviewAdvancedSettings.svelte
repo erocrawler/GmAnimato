@@ -32,8 +32,8 @@
   export let resetLoraWeights: () => void = () => {};
   export let resetAdvancedSettings: () => void = () => {};
 
-  type IterationSteps = 4 | 6 | 10 | 12 | 15;
-  type VideoDuration = 4 | 6 | 8 | 10;
+  type IterationSteps = 4 | 6 | 8;
+  type VideoDuration = 4 | 6 | 10 | 15;
   type VideoResolution = "480p" | "720p";
 
   let stepOptions: {
@@ -52,26 +52,20 @@
     { value: "720p", label: "", description: "", requiresPaid: true },
   ];
 
-  // Iteration steps — WAN uses 4/6 (analogous quality tiers), MiniMax uses 10/12/15
-  // (10 fast/free to limit GPU time, 12 balanced/premium = quality baseline with
-  // reasonable audio, 15 quality/premium = top tier for a visible difference).
-  // Default per model: WAN 4, MiniMax 10.
+  // Iteration steps — WAN uses 4/6 (analogous quality tiers); MiniMax H3 with
+  // the distilled lightx2v turbo LoRA uses 4/8 (NFE: 4 fast/free, 8 quality/
+  // premium, matching the 8-step v1.0 model's recommended 8/4 range).
+  // Default per model: WAN 4, MiniMax 8.
   $: stepOptions = isMiniMaxSelected
     ? [
         {
-          value: 10 as IterationSteps,
+          value: 4 as IterationSteps,
           label: $_("review.iteration.fast"),
           description: $_("review.iteration.minimaxStepsFast"),
           requiresPaid: false,
         },
         {
-          value: 12 as IterationSteps,
-          label: $_("review.iteration.balanced"),
-          description: $_("review.iteration.minimaxStepsBalanced"),
-          requiresPaid: true,
-        },
-        {
-          value: 15 as IterationSteps,
+          value: 8 as IterationSteps,
           label: $_("review.iteration.quality"),
           description: $_("review.iteration.minimaxStepsQuality"),
           requiresPaid: true,
@@ -91,7 +85,7 @@
           requiresPaid: true,
         },
       ];
-  $: defaultIterationSteps = isMiniMaxSelected ? 10 : 4;
+  $: defaultIterationSteps = isMiniMaxSelected ? 8 : 4;
 
   $: resolutionOptions = [
     {
@@ -145,10 +139,10 @@
   };
 
   // Duration options — 10s for advanced users (WAN: relay mode only; MiniMax: standard mode)
-  // 8s is a MiniMax H3 premium-only option. For ref2v with a known reference
+  // 15s is a MiniMax H3 premium-only option. For ref2v with a known reference
   // length, a "Follow video duration" radio is prepended (value FOLLOW_DURATION).
   // Free tier caps output at 6s, so the follow option reflects the capped value.
-  $: followMaxSec = canUseQuality ? 10 : 6;
+  $: followMaxSec = canUseQuality ? 15 : 6;
   $: followDurationSec = Math.min(followMaxSec, refVideoDurationSec);
   $: followDurationCapped = refVideoDurationSec > followMaxSec;
   $: durationOptions = ((): DurationOption[] => [
@@ -189,9 +183,9 @@
     ...(canUseQuality && isMiniMaxSelected
       ? [
           {
-            value: 8 as VideoDuration,
-            label: $_("review.duration.medium"),
-            description: durationDescription(8),
+            value: 15 as VideoDuration,
+            label: $_("review.duration.ultra"),
+            description: durationDescription(15),
             requiresPaid: true,
           },
         ]
@@ -233,15 +227,15 @@
   // If the selected step isn't available for the current model/tier, snap to default.
   // IMPORTANT: guard on `selectedWorkflowId` — same init-window race as duration.
   // At first render the workflow isn't resolved, so isMiniMaxSelected is momentarily
-  // false and stepOptions are the WAN ones; a MiniMax 12/15-step entry would be
-  // wrongly snapped to 4, then re-snapped to the WAN-default 4→10 after resolution.
+  // false and stepOptions are the WAN ones; a MiniMax 8-step entry would be
+  // wrongly snapped to 4, then re-snapped to the WAN-default 4→8 after resolution.
   $: if (
     selectedWorkflowId &&
     !stepOptions.some((o) => o.value === iterationSteps)
   )
     iterationSteps = defaultIterationSteps as IterationSteps;
-  $: if (!canUseQuality && iterationSteps === (isMiniMaxSelected ? 12 : 6)) iterationSteps = isMiniMaxSelected ? 10 : 4;
-  $: if (!canUseQuality && isMiniMaxSelected && iterationSteps === 15) iterationSteps = 10;
+  // Free tier: premium step tiers (MiniMax 8, WAN 6) snap down to the fast 4.
+  $: if (!canUseQuality && iterationSteps === (isMiniMaxSelected ? 8 : 6)) iterationSteps = 4;
 
   $: if (!canUseQuality && videoResolution === "720p") videoResolution = "480p";
 

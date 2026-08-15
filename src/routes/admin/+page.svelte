@@ -99,6 +99,7 @@
         tags: Array.isArray(p.tags) ? p.tags.map((t: any) => String(t).toLowerCase()) : [],
         presetGroup: typeof p.presetGroup === 'string' ? p.presetGroup : 'Custom',
         autoAddToWorkflows: typeof p.autoAddToWorkflows === 'boolean' ? p.autoAddToWorkflows : false,
+        steps: typeof (p as any).steps === 'number' && (p as any).steps >= 1 ? Number((p as any).steps) : undefined,
       }));
   }
 
@@ -468,6 +469,7 @@
       chain: 'high' as const,
       isConfigurable: true,
       enabled: true,
+      steps: undefined,
       tags: [],
       presetGroup: 'Custom',
       autoAddToWorkflows: false,
@@ -488,8 +490,9 @@
     const list = [...(settings.loraPresets || [])];
     if (!list[index]) return;
     const preset = { ...list[index] } as any;
-    if (['default', 'min', 'max', 'step'].includes(field)) {
-      preset[field] = Number(value);
+    if (['default', 'min', 'max', 'step', 'steps'].includes(field)) {
+      const num = Number(value);
+      preset[field] = Number.isFinite(num) && num > 0 ? num : undefined;
     } else if (['enabled', 'autoAddToWorkflows', 'isConfigurable'].includes(field)) {
       preset[field] = Boolean(value);
     } else {
@@ -1252,6 +1255,7 @@
                     <th>Chain / Group</th>
                     <th>Tags</th>
                     <th>Default</th>
+                    <th>Steps</th>
                     <th>Auto-add</th>
                     <th>Default ON</th>
                     <th></th>
@@ -1301,6 +1305,9 @@
                           <input title="min" type="number" class="input input-bordered input-xs w-12" value={preset.min ?? 0} step="0.01" oninput={(e) => updateLoraPreset(i, 'min', Number(e.currentTarget.value))} />
                           <input title="max" type="number" class="input input-bordered input-xs w-12" value={preset.max ?? 1.5} step="0.01" oninput={(e) => updateLoraPreset(i, 'max', Number(e.currentTarget.value))} />
                         </div>
+                      </td>
+                      <td>
+                        <input type="number" class="input input-bordered input-xs w-16" value={(preset as any).steps ?? ''} min="1" step="1" placeholder="—" title="Sampler steps when this LoRA is applied (e.g. turbo LoRAs: 4 or 8)" oninput={(e) => updateLoraPreset(i, 'steps', Number(e.currentTarget.value))} />
                       </td>
                       <td class="text-center">
                         <input type="checkbox" class="toggle toggle-primary toggle-xs" checked={!!preset.autoAddToWorkflows} onchange={(e) => updateLoraPreset(i, 'autoAddToWorkflows', e.currentTarget.checked)} />

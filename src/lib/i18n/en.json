@@ -406,9 +406,9 @@
         "balanced": "6 steps",
         "quality": "8 steps"
       },
-      "minimaxStepsFast": "10 steps",
-      "minimaxStepsBalanced": "12 steps",
-      "minimaxStepsQuality": "15 steps"
+      "minimaxStepsFast": "4 steps",
+      "minimaxStepsBalanced": "8 steps",
+      "minimaxStepsQuality": "8 steps"
     },
     "duration": {
       "title": "Video Duration",
@@ -417,7 +417,7 @@
       "shortDesc": "81 frames",
       "long": "6 seconds",
       "longDesc": "121 frames",
-      "medium": "8 seconds",
+      "ultra": "15 seconds",
       "extended": "10 seconds",
       "extendedDesc": "177 frames (relay mode only)",
       "framesCount": "{n} frames"

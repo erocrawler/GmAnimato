@@ -141,7 +141,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
     const iterationStepsRaw = body?.iterationSteps;
     const parsedSteps = Number(iterationStepsRaw);
-    const allowedSteps = [4, 6, 10, 12, 15] as const;
+    const allowedSteps = [4, 6, 8] as const;
     type IterationSteps = (typeof allowedSteps)[number];
     let iterationSteps: IterationSteps = 4;
 
@@ -149,25 +149,25 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       iterationSteps = parsedSteps as IterationSteps;
     }
 
-    // Extract video duration (4, 6, 8, or 10 seconds)
+    // Extract video duration (4, 6, 10, or 15 seconds)
     const videoDurationRaw = body?.videoDuration;
     const parsedDuration = Number(videoDurationRaw);
-    const allowedDurations = [4, 6, 8, 10] as const;
+    const allowedDurations = [4, 6, 10, 15] as const;
     type VideoDuration = (typeof allowedDurations)[number];
     let videoDuration: VideoDuration | undefined;
 
     // "Follow video duration" for ref2v: the client already resolved the output
-    // duration to the ref video's length (clamped 1..10). Accept any integer in
+    // duration to the ref video's length (clamped 1..15). Accept any integer in
     // that range instead of only the fixed presets, so short refs (e.g. 5s)
     // produce matching-length output.
     const ref2vFollowDuration: boolean = body?.ref2vFollowDuration === true;
     const isRef2vMode = existing.additional_options?.ref2v === true;
 
-    if (Number.isFinite(parsedDuration) && parsedDuration >= 1 && parsedDuration <= 10) {
+    if (Number.isFinite(parsedDuration) && parsedDuration >= 1 && parsedDuration <= 15) {
       if (allowedDurations.includes(parsedDuration as VideoDuration)) {
         videoDuration = parsedDuration as VideoDuration;
       } else if (ref2vFollowDuration && isRef2vMode) {
-        videoDuration = Math.max(1, Math.min(10, Math.round(parsedDuration))) as VideoDuration;
+        videoDuration = Math.max(1, Math.min(15, Math.round(parsedDuration))) as VideoDuration;
       }
     }
 
@@ -288,17 +288,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       });
     }
 
-    // 8s duration is a MiniMax H3-only option
-    if (videoDuration === 8 && !isMiniMaxWorkflow(workflow)) {
+    // 15s duration is a MiniMax H3-only option
+    if (videoDuration === 15 && !isMiniMaxWorkflow(workflow)) {
       return new Response(JSON.stringify({
-        error: '8-second duration is only available with the MiniMax H3 model.'
+        error: '15-second duration is only available with the MiniMax H3 model.'
       }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
-    // Cap output duration at 6s for the free tier (8s/10s are advanced features).
+    // Cap output duration at 6s for the free tier (10s/15s are advanced features).
     // ref2v "follow video duration" on a long ref is clamped rather than
     // rejected; relay mode is capped separately via the frame-count check below.
     if (videoDuration !== undefined && videoDuration > 6 && !promptRelayMode && !hasAdvancedFeatures) {
@@ -428,9 +428,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       });
     }
 
-    // Enforce role requirement for premium iteration steps (6 for WAN, 12/15 for MiniMax)
+    // Enforce role requirement for premium iteration steps (6 for WAN, 8 for MiniMax)
     const isMiniMax = isMiniMaxWorkflow(workflow);
-    const isPremiumStep = isMiniMax ? (iterationSteps === 12 || iterationSteps === 15) : iterationSteps === 6;
+    const isPremiumStep = isMiniMax ? iterationSteps === 8 : iterationSteps === 6;
     if (isPremiumStep && !hasAdvancedFeatures) {
       return new Response(JSON.stringify({ 
         error: `${iterationSteps} iteration steps is available to users with advanced features only.` 

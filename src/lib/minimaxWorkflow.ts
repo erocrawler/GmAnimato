@@ -13,9 +13,9 @@ interface MiniMaxWorkflowParams {
   input_prompt: string;
   seed: number;
   callback_url?: string;
-  videoDuration?: 4 | 6 | 8 | 10; // seconds; frames derived via ComfyMathExpression (24fps)
+  videoDuration?: 4 | 6 | 10 | 15; // seconds; frames derived via ComfyMathExpression (24fps)
   videoResolution?: '480p' | '720p';
-  iterationSteps?: 10 | 12 | 15; // sampler steps (MiniMax fast/balanced/quality)
+  iterationSteps?: 4 | 8; // sampler steps (distilled turbo NFE: fast 4 / quality 8)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
   useSageAttention?: boolean; // inject MiniMaxH3MemoryEfficientSageAttentionPatch
@@ -117,6 +117,11 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
   const schedulerNode = findNode(workflow, 'BasicScheduler');
   const guiderNode = findNode(workflow, 'BasicGuider');
   const unetLoaderNode = findNode(workflow, 'UNETLoader');
+  // The distilled templates carry a MiniMaxH3SigmaShift node (12/3) between the
+  // UNETLoader and the scheduler/guider; injected LoRA/sage patches slot in
+  // before it. Templates without the node (older variants) fall back to
+  // rewiring scheduler/guider directly.
+  const sigmaShiftNode = findNode(workflow, 'MiniMaxH3SigmaShift');
 
   // Fixed node ids for injected nodes (speed-up LoRA + sage attention patch)
   const loraNodeId = '105:1000:lora_speedup';
@@ -142,20 +147,26 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
     };
     workflow.input.node_weights[loraNodeId] = 1.0;
 
-    // Rewire BasicScheduler.model and BasicGuider.model to the LoRA output
+    // Rewire the model chain through the LoRA: slot it between the UNETLoader
+    // and the sigma-shift node (or scheduler/guider on templates without it).
     const schedulerInputs = getNodeInputs(workflow, schedulerNode);
     const guiderInputs = getNodeInputs(workflow, guiderNode);
-    if (schedulerInputs && Array.isArray(schedulerInputs.model) && schedulerInputs.model[0] === unetLoaderNode) {
-      schedulerInputs.model = [loraNodeId, 0];
-    }
-    if (guiderInputs && Array.isArray(guiderInputs.model) && guiderInputs.model[0] === unetLoaderNode) {
-      guiderInputs.model = [loraNodeId, 0];
+    const shiftInputs = sigmaShiftNode ? getNodeInputs(workflow, sigmaShiftNode) : null;
+    if (shiftInputs && Array.isArray(shiftInputs.model) && shiftInputs.model[0] === unetLoaderNode) {
+      shiftInputs.model = [loraNodeId, 0];
+    } else {
+      if (schedulerInputs && Array.isArray(schedulerInputs.model) && schedulerInputs.model[0] === unetLoaderNode) {
+        schedulerInputs.model = [loraNodeId, 0];
+      }
+      if (guiderInputs && Array.isArray(guiderInputs.model) && guiderInputs.model[0] === unetLoaderNode) {
+        guiderInputs.model = [loraNodeId, 0];
+      }
     }
 
-    // Reduce steps: user-selected iteration steps (10 fast / 12 balanced / 15 quality),
-    // defaulting to 10. The speed-up LoRA makes low step counts viable.
+    // Steps = distilled NFE: user-selected 4/8 when provided, else the LoRA
+    // preset's target `steps` (4-step / 8-step lightx2v), else 8.
     if (schedulerInputs) {
-      schedulerInputs.steps = params.iterationSteps ?? 10;
+      schedulerInputs.steps = params.iterationSteps ?? appliedLora.steps ?? 8;
     }
     console.log(`[MiniMax] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
   } else {
@@ -180,13 +191,20 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
     };
     workflow.input.node_weights[sageAttentionNodeId] = 1.0;
 
-    const schedulerInputs = getNodeInputs(workflow, schedulerNode);
-    const guiderInputs = guiderNode ? getNodeInputs(workflow, guiderNode) : null;
-    if (schedulerInputs && Array.isArray(schedulerInputs.model)) {
-      schedulerInputs.model = [sageAttentionNodeId, 0];
-    }
-    if (guiderInputs && Array.isArray(guiderInputs.model)) {
-      guiderInputs.model = [sageAttentionNodeId, 0];
+    // Slot the sage patch between the current model source and the sigma-shift
+    // node (or scheduler/guider on templates without the shift node).
+    const shiftInputs = sigmaShiftNode ? getNodeInputs(workflow, sigmaShiftNode) : null;
+    if (shiftInputs && Array.isArray(shiftInputs.model)) {
+      shiftInputs.model = [sageAttentionNodeId, 0];
+    } else {
+      const schedulerInputs = getNodeInputs(workflow, schedulerNode);
+      const guiderInputs = guiderNode ? getNodeInputs(workflow, guiderNode) : null;
+      if (schedulerInputs && Array.isArray(schedulerInputs.model)) {
+        schedulerInputs.model = [sageAttentionNodeId, 0];
+      }
+      if (guiderInputs && Array.isArray(guiderInputs.model)) {
+        guiderInputs.model = [sageAttentionNodeId, 0];
+      }
     }
     console.log('[MiniMax] Applied MiniMaxH3MemoryEfficientSageAttentionPatch');
   }

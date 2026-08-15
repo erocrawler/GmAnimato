@@ -135,14 +135,14 @@
   $: refVideoDurationSec =
     Number(entry.additional_options?.ref_video_duration) || 0;
   // Effective output duration: when ref2v follow-duration is on and we know the
-  // ref length, use it (clamped to the tier max — 6s for free, 10s for advanced);
+  // ref length, use it (clamped to the tier max — 6s for free, 15s for advanced);
   // otherwise the manual picker.
   $: effectiveVideoDuration =
     videoWorkflowType === "ref2v" &&
     ref2vFollowDuration &&
     refVideoDurationSec > 0
       ? Math.min(
-          hasAdvancedFeatures ? 10 : 6,
+          hasAdvancedFeatures ? 15 : 6,
           Math.max(1, Math.round(refVideoDurationSec)),
         )
       : videoDuration;
@@ -194,8 +194,8 @@
   // LoRA init gate — prevents save reactive from firing before restore completes
   let loraInitDone = false;
 
-  type IterationSteps = 4 | 6 | 10 | 15;
-  type VideoDuration = 4 | 6 | 8 | 10;
+  type IterationSteps = 4 | 6 | 8;
+  type VideoDuration = 4 | 6 | 10 | 15;
   type VideoResolution = "480p" | "720p";
   // Aspect ratio for ref2v output. 'video' follows the reference media's own
   // aspect; the rest are fixed presets (MiniMax H3 wants ~0.45-2.2 ratio).

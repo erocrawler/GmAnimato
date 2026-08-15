@@ -148,7 +148,7 @@
       },
       "105:17": {
         "inputs": {
-          "sampler_name": "res_multistep"
+          "sampler_name": "euler"
         },
         "class_type": "KSamplerSelect",
         "_meta": {
@@ -161,7 +161,7 @@
           "steps": 20,
           "denoise": 1,
           "model": [
-            "105:6",
+            "105:1002:sigma_shift",
             0
           ]
         },
@@ -201,7 +201,7 @@
       "105:16": {
         "inputs": {
           "model": [
-            "105:6",
+            "105:1002:sigma_shift",
             0
           ],
           "conditioning": [
@@ -222,6 +222,20 @@
         "class_type": "UNETLoader",
         "_meta": {
           "title": "Load Diffusion Model"
+        }
+      },
+      "105:1002:sigma_shift": {
+        "inputs": {
+          "model": [
+            "105:6",
+            0
+          ],
+          "shift_video": 12,
+          "shift_audio": 3
+        },
+        "class_type": "MiniMaxH3SigmaShift",
+        "_meta": {
+          "title": "MiniMax H3 Sigma Shift"
         }
       },
       "105:13": {
