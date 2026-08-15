@@ -1231,9 +1231,6 @@
         <h2 class="card-title text-2xl">LoRA Presets
           <span class="badge badge-sm badge-info ml-2">{settings.loraPresets?.length || 0}</span>
         </h2>
-        <div class="flex gap-2">
-          <button class="btn btn-sm btn-outline" onclick={addLoraPreset}>+ Add LoRA</button>
-        </div>
       </div>
       <p class="text-xs opacity-50 mb-3">Group = model family (wan22 / dasiwa-...). Tags = style, optional.</p>
 
@@ -1339,6 +1336,7 @@
       {/if}
 
       <div class="card-actions justify-end mt-4 gap-2">
+        <button class="btn btn-sm btn-outline" onclick={addLoraPreset}>+ Add LoRA</button>
         <button class="btn btn-primary" onclick={saveSettings} disabled={saving}>
           {#if saving}<span class="loading loading-spinner loading-sm"></span>{/if}
           Save LoRA Presets & Trigger Auto-Compat

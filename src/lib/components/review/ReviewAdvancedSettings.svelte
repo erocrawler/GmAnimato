@@ -138,10 +138,11 @@
     requiresPaid: boolean;
   };
 
-  // Duration options — 10s for advanced users (WAN: relay mode only; MiniMax: standard mode)
-  // 15s is a MiniMax H3 premium-only option. For ref2v with a known reference
-  // length, a "Follow video duration" radio is prepended (value FOLLOW_DURATION).
-  // Free tier caps output at 6s, so the follow option reflects the capped value.
+  // Duration options in ascending order: 4s/6s free, 10s advanced (WAN: relay
+  // mode only; MiniMax: standard mode), 15s MiniMax H3 premium-only. For ref2v
+  // with a known reference length, a "Follow video duration" radio is prepended
+  // (value FOLLOW_DURATION). Free tier caps output at 6s, so the follow option
+  // reflects the capped value.
   $: followMaxSec = canUseQuality ? 15 : 6;
   $: followDurationSec = Math.min(followMaxSec, refVideoDurationSec);
   $: followDurationCapped = refVideoDurationSec > followMaxSec;
@@ -180,16 +181,6 @@
         : $_("review.duration.longDesc"),
       requiresPaid: false,
     },
-    ...(canUseQuality && isMiniMaxSelected
-      ? [
-          {
-            value: 15 as VideoDuration,
-            label: $_("review.duration.ultra"),
-            description: durationDescription(15),
-            requiresPaid: true,
-          },
-        ]
-      : []),
     ...(canUseQuality && (promptRelayMode || isMiniMaxSelected)
       ? [
           {
@@ -198,6 +189,16 @@
             description: isMiniMaxSelected
               ? durationDescription(10)
               : $_("review.duration.extendedDesc"),
+            requiresPaid: true,
+          },
+        ]
+      : []),
+    ...(canUseQuality && isMiniMaxSelected
+      ? [
+          {
+            value: 15 as VideoDuration,
+            label: $_("review.duration.ultra"),
+            description: durationDescription(15),
             requiresPaid: true,
           },
         ]

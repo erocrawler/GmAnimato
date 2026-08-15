@@ -22,7 +22,18 @@
   export let data: any;
   let entry = data.entry as any;
   let sponsorUrl = data.sponsorUrl || "";
+
+  // On an uploaded entry the prompt IS the work-in-progress draft — it's only
+  // editable pre-submission, so restoring entry.prompt restores the draft.
   let prompt = entry.prompt || "";
+
+  // Debounced server-side prompt auto-save (1.5s after typing stops). Cancelled
+  // before kickoff (timer + AbortController) and the endpoint only accepts
+  // 'uploaded' entries, so the submitted prompt can never be clobbered.
+  let promptSaveTimer: ReturnType<typeof setTimeout> | undefined;
+  let promptSaveController: AbortController | undefined;
+  let lastSavedPrompt = entry.prompt || "";
+  let promptAutoSaveDisabled = false;
 
   // Ref2V references: available refs (video first, then images), tokens present
   // in the prompt, and refs not yet referenced (shown in the "+" picker).
@@ -734,7 +745,44 @@
     if (pollInterval) {
       clearInterval(pollInterval);
     }
+    if (promptSaveTimer) {
+      clearTimeout(promptSaveTimer);
+    }
+    if (promptSaveController) {
+      promptSaveController.abort();
+    }
   });
+
+  // Auto-save the prompt to the server (debounced) while editable. The debounce
+  // resets on every keystroke; after 1.5s of inactivity the current prompt is
+  // persisted via /api/video/update. Guard on lastSavedPrompt prevents both
+  // pointless re-saves and the reschedule loop (the timer's own assignment
+  // re-triggers this statement once, then settles).
+  $: if (typeof window !== "undefined" && isEditable && !promptAutoSaveDisabled && prompt !== lastSavedPrompt) {
+    if (promptSaveTimer) clearTimeout(promptSaveTimer);
+    if (promptSaveController) promptSaveController.abort();
+    promptSaveTimer = setTimeout(async () => {
+      const text = prompt;
+      if (text === lastSavedPrompt || promptAutoSaveDisabled) return;
+      lastSavedPrompt = text;
+      const controller = new AbortController();
+      promptSaveController = controller;
+      try {
+        await fetch(`/api/video/update`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: entry.id, prompt: text }),
+          signal: controller.signal,
+        });
+      } catch (err) {
+        if ((err as any)?.name !== "AbortError") {
+          console.error("Failed to save prompt:", err);
+        }
+      } finally {
+        if (promptSaveController === controller) promptSaveController = undefined;
+      }
+    }, 1500);
+  }
 
   // Automatically save settings to localStorage whenever any setting changes
   // Access variables first to ensure Svelte tracks them
@@ -889,6 +937,26 @@
     }
   }
 
+  // Stop any pending/in-flight prompt auto-save before kickoff so a stale
+  // editor snapshot can't overwrite the just-submitted prompt. Resume (with a
+  // fresh baseline) if the kickoff fails and the entry stays editable.
+  function cancelPromptAutoSave() {
+    promptAutoSaveDisabled = true;
+    if (promptSaveTimer) {
+      clearTimeout(promptSaveTimer);
+      promptSaveTimer = undefined;
+    }
+    if (promptSaveController) {
+      promptSaveController.abort();
+      promptSaveController = undefined;
+    }
+  }
+
+  function resumePromptAutoSave() {
+    promptAutoSaveDisabled = false;
+    lastSavedPrompt = prompt;
+  }
+
   async function generate() {
     busy = true;
     message = "";
@@ -942,6 +1010,9 @@
       const filteredLoraWeights = Object.fromEntries(
         Object.entries(loraWeights).filter(([id]) => loraEnabled[id]),
       );
+      // Cancel any pending/in-flight prompt auto-save so a stale debounced
+      // write can't overwrite the prompt we're about to submit.
+      cancelPromptAutoSave();
       const res = await fetch("/api/i2v/kickoff", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1002,6 +1073,9 @@
             values: { error: j.error || "unknown" },
           });
         }
+        // Kickoff failed — the entry is still editable, so prompt auto-save
+        // resumes from the current text.
+        resumePromptAutoSave();
         return;
       }
 
@@ -1021,9 +1095,14 @@
         message = t("review.failedToSubmit", {
           values: { error: j.error || "unknown" },
         });
+        // Kickoff responded unsuccessfully — entry stays editable, resume
+        // prompt auto-save from the current text.
+        resumePromptAutoSave();
       }
     } catch (err) {
       message = "Error: " + String(err);
+      // Network/parse error — entry may still be editable, resume auto-save.
+      resumePromptAutoSave();
     } finally {
       busy = false;
     }
