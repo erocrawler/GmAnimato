@@ -6,6 +6,7 @@
   import { _ } from "svelte-i18n";
   import type { Workflow } from "$lib/IDatabase";
   import type { LoraPreset } from "$lib/loraPresets";
+  import { maxAllowedDurationSeconds } from "$lib/mediaLimits";
 
   export let isEditable: boolean = true;
   export let loadingWorkflows: boolean = false;
@@ -143,7 +144,7 @@
   // with a known reference length, a "Follow video duration" radio is prepended
   // (value FOLLOW_DURATION). Free tier caps output at 6s, so the follow option
   // reflects the capped value.
-  $: followMaxSec = canUseQuality ? 15 : 6;
+  $: followMaxSec = maxAllowedDurationSeconds(canUseQuality);
   $: followDurationSec = Math.min(followMaxSec, refVideoDurationSec);
   $: followDurationCapped = refVideoDurationSec > followMaxSec;
   $: durationOptions = ((): DurationOption[] => [

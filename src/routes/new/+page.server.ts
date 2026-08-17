@@ -8,14 +8,32 @@ import {
   validateAndConvertVideo,
   extractVideoPoster,
   probeVideoDuration,
-  hasAudioFromBuffer,
-  MAX_REF_VIDEO_SECONDS
+  hasAudioFromBuffer
 } from '$lib/videoValidation';
 import { createVideoEntryForReview } from '$lib/videoEntryCreation';
-import { getVideosByUser, getWorkflows } from '$lib/db';
+import { getVideosByUser, getWorkflows, getAdminSettings } from '$lib/db';
 import { toOriginalUrl } from '$lib/serverImageUrl';
+import { maxAllowedDurationSeconds } from '$lib/mediaLimits';
 
 const MAX_REF_IMAGES = 6;
+
+/**
+ * Ref2V reference-video length cap = the max allowed OUTPUT duration for the
+ * user's tier (free 6s / advanced 15s) — a ref longer than the max output
+ * can't be followed meaningfully, so the upload limit simply IS that cap.
+ */
+async function resolveMaxRefVideoSeconds(userRoles: string[] | undefined): Promise<number> {
+  try {
+    const settings = await getAdminSettings();
+    const hasAdvanced = (userRoles ?? []).some((roleName) =>
+      settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
+    );
+    return maxAllowedDurationSeconds(hasAdvanced);
+  } catch (e) {
+    console.error('[New] Failed to resolve ref video max length:', e);
+    return maxAllowedDurationSeconds(false);
+  }
+}
 
 export const load: PageServerLoad = async ({ locals }) => {
   if (!locals.user) {
@@ -45,7 +63,11 @@ export const load: PageServerLoad = async ({ locals }) => {
     console.error('[New] Failed to load workflows:', e);
   }
 
-  return { reusableVideos, hasRef2vWorkflow };
+  // Ref2V reference-video length cap by tier, so the client can clip/limit
+  // the uploaded ref video accordingly (free 6s, advanced/paid 15s).
+  const maxRefVideoSeconds = await resolveMaxRefVideoSeconds(locals.user?.roles);
+
+  return { reusableVideos, hasRef2vWorkflow, maxRefVideoSeconds };
 };
 
 export const actions: Actions = {
@@ -53,6 +75,8 @@ export const actions: Actions = {
     if (!locals.user) return { error: 'unauthenticated' };
     const form = await request.formData();
     const mode = form.get('mode')?.toString() || 'i2v';
+    // Ref2V reference-video length cap by tier (free 6s, advanced/paid 15s).
+    const maxRefVideoSeconds = await resolveMaxRefVideoSeconds(locals.user.roles);
 
     if (mode === 'fl2v') {
       // Handle FL2V mode with two images
@@ -117,7 +141,7 @@ export const actions: Actions = {
       let refVideoHasAudio: boolean | undefined;
       if (refVideoFile && refVideoFile.size > 0) {
         const rawVideoBuffer = Buffer.from(await refVideoFile.arrayBuffer());
-        const videoResult = await validateAndConvertVideo(rawVideoBuffer, refVideoFile.type);
+        const videoResult = await validateAndConvertVideo(rawVideoBuffer, refVideoFile.type, maxRefVideoSeconds);
         if (videoResult.error) {
           return { error: videoResult.error };
         }
@@ -141,9 +165,9 @@ export const actions: Actions = {
         }
         if (isHttpUrl) {
           const urlDuration = await probeVideoDuration(normalizedInput);
-          if (urlDuration !== null && urlDuration > MAX_REF_VIDEO_SECONDS + 0.5) {
+          if (urlDuration !== null && urlDuration > maxRefVideoSeconds + 0.5) {
             return {
-              error: `ref video is ${Math.round(urlDuration)}s — max ${MAX_REF_VIDEO_SECONDS}s. Please use a shorter clip or download it first.`
+              error: `ref video is ${Math.round(urlDuration)}s — max ${maxRefVideoSeconds}s. Please use a shorter clip or download it first.`
             };
           }
         }
@@ -173,7 +197,7 @@ export const actions: Actions = {
             if (!resp.ok) throw new Error(`fetch ref_video_url failed: ${resp.status}`);
             const buf = Buffer.from(await resp.arrayBuffer());
             const ct = resp.headers.get('content-type') || 'video/webm';
-            const videoResult2 = await validateAndConvertVideo(buf, ct);
+            const videoResult2 = await validateAndConvertVideo(buf, ct, maxRefVideoSeconds);
             if (videoResult2.error) return { error: videoResult2.error };
             refVideoUrl = await uploadBufferToS3(videoResult2.buffer, videoResult2.ext || 'webm');
             refVideoName = `ref_video.${videoResult2.ext || 'webm'}`;

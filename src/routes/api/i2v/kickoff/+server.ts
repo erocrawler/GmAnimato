@@ -8,6 +8,7 @@ import { filterLoraWeights, isMiniMaxWorkflow } from '$lib/workflows';
 import { computeWorkflowQuotaCost } from '$lib/quotaCost';
 import { toOriginalUrl } from '$lib/serverImageUrl';
 import { evaluatePromptProperties } from '$lib/imageRecognition';
+import { maxAllowedDurationSeconds, MAX_DURATION_SECONDS_PAID } from '$lib/mediaLimits';
 
 async function delay(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
@@ -152,22 +153,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     // Extract video duration (4, 6, 10, or 15 seconds)
     const videoDurationRaw = body?.videoDuration;
     const parsedDuration = Number(videoDurationRaw);
-    const allowedDurations = [4, 6, 10, 15] as const;
+    const allowedDurations = [4, 6, 10, MAX_DURATION_SECONDS_PAID] as const;
     type VideoDuration = (typeof allowedDurations)[number];
     let videoDuration: VideoDuration | undefined;
 
     // "Follow video duration" for ref2v: the client already resolved the output
-    // duration to the ref video's length (clamped 1..15). Accept any integer in
-    // that range instead of only the fixed presets, so short refs (e.g. 5s)
-    // produce matching-length output.
+    // duration to the ref video's length (clamped to the max allowed duration).
+    // Accept any integer in that range instead of only the fixed presets, so
+    // short refs (e.g. 5s) produce matching-length output.
     const ref2vFollowDuration: boolean = body?.ref2vFollowDuration === true;
     const isRef2vMode = existing.additional_options?.ref2v === true;
 
-    if (Number.isFinite(parsedDuration) && parsedDuration >= 1 && parsedDuration <= 15) {
+    if (Number.isFinite(parsedDuration) && parsedDuration >= 1 && parsedDuration <= MAX_DURATION_SECONDS_PAID) {
       if (allowedDurations.includes(parsedDuration as VideoDuration)) {
         videoDuration = parsedDuration as VideoDuration;
       } else if (ref2vFollowDuration && isRef2vMode) {
-        videoDuration = Math.max(1, Math.min(15, Math.round(parsedDuration))) as VideoDuration;
+        videoDuration = Math.max(1, Math.min(MAX_DURATION_SECONDS_PAID, Math.round(parsedDuration))) as VideoDuration;
       }
     }
 
@@ -288,21 +289,23 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       });
     }
 
-    // 15s duration is a MiniMax H3-only option
-    if (videoDuration === 15 && !isMiniMaxWorkflow(workflow)) {
+    // Max (15s) duration is a MiniMax H3-only option
+    if (videoDuration === MAX_DURATION_SECONDS_PAID && !isMiniMaxWorkflow(workflow)) {
       return new Response(JSON.stringify({
-        error: '15-second duration is only available with the MiniMax H3 model.'
+        error: `${MAX_DURATION_SECONDS_PAID}-second duration is only available with the MiniMax H3 model.`
       }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
-    // Cap output duration at 6s for the free tier (10s/15s are advanced features).
-    // ref2v "follow video duration" on a long ref is clamped rather than
-    // rejected; relay mode is capped separately via the frame-count check below.
-    if (videoDuration !== undefined && videoDuration > 6 && !promptRelayMode && !hasAdvancedFeatures) {
-      videoDuration = 6;
+    // Cap output duration at the tier's max allowed duration (6s free / 15s
+    // advanced). ref2v "follow video duration" on a long ref is clamped rather
+    // than rejected; relay mode is capped separately via the frame-count check
+    // below. maxAllowedDuration is 6 or 15 — both valid VideoDuration values.
+    const maxAllowedDuration = maxAllowedDurationSeconds(hasAdvancedFeatures);
+    if (videoDuration !== undefined && videoDuration > maxAllowedDuration && !promptRelayMode) {
+      videoDuration = maxAllowedDuration;
     }
 
     // Filter LoRA weights to only compatible ones for the selected workflow

@@ -17,6 +17,7 @@
  */
 
 // MP4-first: Chromium's MP4 muxer produces playable blobs, webm muxer often not.
+import { MAX_DURATION_SECONDS_FREE } from './mediaLimits';
 const MIME_CANDIDATES = [
   'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
   'video/mp4;codecs=avc1.42E01E',
@@ -89,12 +90,14 @@ function isFullClip(startSec: number, endSec: number, duration: number): boolean
  * Clip [startSec, endSec] into mp4/webm Blob.
  * Fast-path: whole file ≤ maxDuration → return original bytes (no re-encode).
  * includeAudio controls whether audio track is merged.
+ * Default maxDurationSec is the free-tier max allowed duration — callers
+ * (ref2v upload UI) pass their tier cap explicitly (6s free / 15s paid).
  */
 export async function clipVideoToWebm(
   source: File | string,
   startSec: number,
   endSec: number,
-  maxDurationSec = 10,
+  maxDurationSec = MAX_DURATION_SECONDS_FREE,
   includeAudio = true,
 ): Promise<ClipResult> {
   // Fast-path: original File, no trim needed

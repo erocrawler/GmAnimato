@@ -1,7 +1,5 @@
 import sharp from 'sharp';
-
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
-export const ALLOWED_FORMATS = new Set(['jpeg', 'png', 'webp']);
+import { MAX_IMAGE_BYTES, ALLOWED_IMAGE_FORMATS } from './mediaLimits';
 
 export interface ImageProcessResult {
   buffer: Buffer;
@@ -31,7 +29,7 @@ export async function validateAndConvertImage(buffer: Buffer): Promise<ImageProc
   if (!meta.format) {
     return { buffer, format: '', wasConverted: false, ext: '', error: 'unknown image format' };
   }
-  if (!ALLOWED_FORMATS.has(meta.format)) {
+  if (!ALLOWED_IMAGE_FORMATS.has(meta.format)) {
     // Convert to JPEG
     try {
       const converted = await sharp(buffer).jpeg({ quality: 90 }).toBuffer();

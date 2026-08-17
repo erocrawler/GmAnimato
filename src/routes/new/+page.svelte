@@ -4,6 +4,7 @@
   import { _ } from 'svelte-i18n';
   import { onMount } from 'svelte';
   import { clipVideoToWebm, getVideoDuration } from '$lib/videoClipper';
+  import { MAX_IMAGE_BYTES } from '$lib/mediaLimits';
   import type { LoraPreset } from '$lib/loraPresets';
 
   type Mode = 'i2v' | 'fl2v' | 'ref2v';
@@ -26,7 +27,6 @@
   let lastImageInput: HTMLInputElement;
   let isDraggingOver = false;
   let dragCounter = 0;
-  const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
   let lastDragoverTimestamp = 0;
   let dragoverCheckInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -42,7 +42,10 @@
   let refVideoName = '';
   let refVideoDuration = 0;
   let clipStart = 0;
-  let clipEnd = 10;
+  // Tier-based ref video length cap (free 6s / paid 15s), provided by the
+  // server load so the client clips/limits to the user's entitlement.
+  const MAX_REF_VIDEO_SECONDS: number = data.maxRefVideoSeconds || 10;
+  let clipEnd = MAX_REF_VIDEO_SECONDS;
   let clipBusy = false;
   let clipError = '';
   let includeAudio = true; // include the source audio track in the clip (default on)
@@ -59,8 +62,8 @@
       (refVideoSource.startsWith('/') ||
         (typeof location !== 'undefined' && refVideoSource.startsWith(location.origin))));
   // Slider range: span the FULL source duration when known, so the user can
-  // pick WHERE the (max 10s) clip comes from. Fall back to the clip cap when
-  // the duration is unknown (e.g. cross-origin URLs). The clip LENGTH is
+  // pick WHERE the (max tier cap) clip comes from. Fall back to the clip cap
+  // when the duration is unknown (e.g. cross-origin URLs). The clip LENGTH is
   // enforced in the drag handlers below (window slides within the source), so
   // the UI can never select a range longer than MAX_REF_VIDEO_SECONDS.
   $: sliderMax = refVideoDuration > 0 ? refVideoDuration : MAX_REF_VIDEO_SECONDS;
@@ -69,7 +72,6 @@
   for (let i = 0; i < 6; i++) refImages.push({ file: null, preview: '', valid: false });
   let refImageInputs: (HTMLInputElement | undefined)[] = [];
   let refVideoInput: HTMLInputElement;
-  const MAX_REF_VIDEO_SECONDS = 10;
 
   function setFileInput(inputEl: HTMLInputElement | undefined, file: File | null) {
     if (!inputEl) return;

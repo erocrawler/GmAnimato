@@ -2,16 +2,8 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-
-export const MAX_REF_VIDEO_BYTES = 50 * 1024 * 1024; // 50 MB safety cap (client clips to ≤10s webm)
-// Ref2V clip cap. The client clips the ref video to ≤10s before uploading;
-// anything longer must be rejected (server-side), never silently accepted.
-export const MAX_REF_VIDEO_SECONDS = 10;
-export const ALLOWED_VIDEO_TYPES = new Set(['video/webm', 'video/mp4', 'video/quicktime', 'video/x-matroska']);
-// Downscale ref videos so the long edge is at most 854px (~480p 16:9). Ref videos
-// only condition the output (which is generated at 480p), so a smaller upload is
-// faster to upload and cheaper for the worker to decode (VHS_LoadVideo).
-export const MAX_VIDEO_LONG_EDGE = 854;
+import { MAX_DURATION_SECONDS_FREE } from './mediaLimits';
+import { ALLOWED_VIDEO_TYPES, MAX_REF_VIDEO_BYTES, MAX_VIDEO_LONG_EDGE } from './mediaLimits';
 
 export interface VideoProcessResult {
   buffer: Buffer;
@@ -137,11 +129,13 @@ async function resizeVideoWithFfmpeg(buffer: Buffer, inputExt: string): Promise<
 /**
  * Validates a reference video buffer and downscales it if needed.
  * - Checks type + size
+ * - Rejects videos longer than `maxSeconds` (default: the free-tier max
+ *   allowed duration; callers pass their tier cap — 6s free / 15s paid)
  * - Re-encodes with ffmpeg to cap the long edge at ~480p (best-effort: on any
  *   ffmpeg failure the original is kept so the upload flow is never blocked).
  * Returns { buffer, ext, wasConverted, error }.
  */
-export async function validateAndConvertVideo(buffer: Buffer, mime: string): Promise<VideoProcessResult> {
+export async function validateAndConvertVideo(buffer: Buffer, mime: string, maxSeconds: number = MAX_DURATION_SECONDS_FREE): Promise<VideoProcessResult> {
   if (!isAllowedVideoType(mime)) {
     return { buffer, ext: '', wasConverted: false, error: 'ref video must be webm, mp4, mov or mkv' };
   }
@@ -150,17 +144,18 @@ export async function validateAndConvertVideo(buffer: Buffer, mime: string): Pro
   }
   const ext = videoExtFromMime(mime);
 
-  // Reject videos longer than the ref2v clip cap. The client clips to ≤10s
-  // before uploading, but guard any path that bypasses that — a longer ref
-  // would condition the job on far more footage than the UI intended. A small
-  // grace (0.5s) absorbs ffprobe/MediaRecorder duration jitter on ~10s clips.
+  // Reject videos longer than the caller's ref2v clip cap (tier-based: free
+  // 6s, paid 15s). The client clips before uploading, but guard any path that
+  // bypasses that — a longer ref would condition the job on far more footage
+  // than the UI intended. A small grace (0.5s) absorbs ffprobe/MediaRecorder
+  // duration jitter on clips at the cap.
   const duration = await probeVideoDurationFromBuffer(buffer, ext);
-  if (duration !== null && duration > MAX_REF_VIDEO_SECONDS + 0.5) {
+  if (duration !== null && duration > maxSeconds + 0.5) {
     return {
       buffer,
       ext: '',
       wasConverted: false,
-      error: `ref video is ${Math.round(duration)}s — max ${MAX_REF_VIDEO_SECONDS}s`,
+      error: `ref video is ${Math.round(duration)}s — max ${maxSeconds}s`,
     };
   }
 

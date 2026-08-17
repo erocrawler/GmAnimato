@@ -14,6 +14,7 @@
   import ReviewPromptEditor from "$lib/components/review/ReviewPromptEditor.svelte";
   import ReviewRelayTimeline from "$lib/components/review/ReviewRelayTimeline.svelte";
   import ReviewAdvancedSettings from "$lib/components/review/ReviewAdvancedSettings.svelte";
+  import { maxAllowedDurationSeconds } from "$lib/mediaLimits";
   import ReviewActionBar from "$lib/components/review/ReviewActionBar.svelte";
   import ReviewBusyModal from "$lib/components/review/ReviewBusyModal.svelte";
   import ReviewEnhanceModal from "$lib/components/review/ReviewEnhanceModal.svelte";
@@ -146,14 +147,14 @@
   $: refVideoDurationSec =
     Number(entry.additional_options?.ref_video_duration) || 0;
   // Effective output duration: when ref2v follow-duration is on and we know the
-  // ref length, use it (clamped to the tier max — 6s for free, 15s for advanced);
-  // otherwise the manual picker.
+  // ref length, use it (clamped to the tier max — the max allowed output
+  // duration for the user's tier); otherwise the manual picker.
   $: effectiveVideoDuration =
     videoWorkflowType === "ref2v" &&
     ref2vFollowDuration &&
     refVideoDurationSec > 0
       ? Math.min(
-          hasAdvancedFeatures ? 15 : 6,
+          maxAllowedDurationSeconds(hasAdvancedFeatures),
           Math.max(1, Math.round(refVideoDurationSec)),
         )
       : videoDuration;
