@@ -119,44 +119,59 @@ export function calculateVideoDimensions(
 }
 
 /**
- * Add upscale nodes to workflow for 720p generation
+ * Add upscale nodes to workflow for 720p generation.
+ *
+ * Pipeline (single model pass to a clean 2×):
+ *   UpscaleModelLoader -> ImageUpscaleWithModel -> [ImageScaleBy(0.5)] -> VHS_VideoCombine
+ *
+ * ComfyUI node facts:
+ *   - `ImageUpscaleWithModel` has NO scale_by input — it always outputs the
+ *     model's native scale (4× model -> 4× output).
+ *   - There is no "model + scale_by" built-in node. To land on a clean 2× from
+ *     a 4× model we follow the model upscale with `ImageScaleBy` (scale_by 0.5,
+ *     lanczos), which halves the native 4× output back to exactly 2×.
+ *   - For the native 2× model the ImageScaleBy step is skipped entirely.
+ *
+ * The upscale model is chosen dynamically from the job's photorealism signal:
+ *   - isPhotoRealistic === true  -> RealESRGAN_x4plus (photoreal 4×, then halve -> 2×)
+ *   - isPhotoRealistic === false -> realesr-animevideov3 (anime video 4×, then halve -> 2×)
+ *   - undefined                  -> RealESRGAN_x2plus (native 2×, no halve) — legacy fallback
+ *
+ * The output is a clean 2× of the 480p generation (e.g. 832x480 -> 1664x960).
  * @param workflow The workflow object to modify
  * @param decodeNodeId The VAE decode node ID to connect from
  * @param videoCombineNodeId The video combine node ID to update
- * @param sourceWidth Source video width (480p)
- * @param sourceHeight Source video height (480p)
- * @param imageWidth Original image width
- * @param imageHeight Original image height
+ * @param isPhotoRealistic Photorealism signal from the video job; drives the
+ *        upscale model choice. undefined keeps the legacy x2plus model.
  */
 export function add720pUpscaleNodes(
   workflow: any,
   decodeNodeId: string,
   videoCombineNodeId: string,
-  sourceWidth: number,
-  sourceHeight: number,
-  imageWidth: number,
-  imageHeight: number
+  isPhotoRealistic?: boolean
 ): void {
-  // Calculate 720p target dimensions using the same logic
-  const { width: targetWidth, height: targetHeight } = calculateVideoDimensions(
-    imageWidth,
-    imageHeight,
-    '720p'
-  );
-  
+  // 4× models need a follow-up halve to land on 2×; the native 2× model does not.
+  const use4xModel = isPhotoRealistic !== undefined;
+  const modelName = use4xModel
+    ? isPhotoRealistic === true
+      ? 'RealESRGAN_x4plus.pth'
+      : 'realesr-animevideov3.pth'
+    : 'RealESRGAN_x2plus.pth';
+
   // Add upscale model loader node
   const modelLoaderNodeId = '998:upscale_model';
   workflow.input.workflow[modelLoaderNodeId] = {
     inputs: {
-      model_name: 'RealESRGAN_x2plus.pth'
+      model_name: modelName
     },
     class_type: 'UpscaleModelLoader',
     _meta: {
       title: 'Load Upscale Model'
     }
   };
-  
-  // Add upscale image node
+
+  // Model upscale — always runs at the model's native scale (4× for the 4×
+  // models, 2× for x2plus).
   const upscaleNodeId = '999:upscale720p';
   workflow.input.workflow[upscaleNodeId] = {
     inputs: {
@@ -165,36 +180,42 @@ export function add720pUpscaleNodes(
     },
     class_type: 'ImageUpscaleWithModel',
     _meta: {
-      title: 'Upscale to 720p'
+      title: 'Upscale with Model'
     }
   };
-  
-  // Add resize node to ensure exact target dimensions
-  const resizeNodeId = '997:resize_exact';
-  workflow.input.workflow[resizeNodeId] = {
-    inputs: {
-      upscale_method: 'lanczos',
-      width: targetWidth,
-      height: targetHeight,
-      crop: 'disabled',
-      image: [upscaleNodeId, 0]
-    },
-    class_type: 'ImageScale',
-    _meta: {
-      title: 'Resize to Exact 720p'
-    }
-  };
-  
-  // Update VideoCombine to use resized images
+
+  // Feed VideoCombine from either the model output or the halved output.
+  let imagesSource: [string, number] = [upscaleNodeId, 0];
+
+  if (use4xModel) {
+    // Halve the native 4× output back to exactly 2×. This is the standard
+    // quality-preserving path — the 4× model's captured detail survives the
+    // halving far better than the old 2×-then-squeeze-to-720p pipeline.
+    const halfNodeId = '997:scale_by';
+    workflow.input.workflow[halfNodeId] = {
+      inputs: {
+        upscale_method: 'lanczos',
+        scale_by: 0.5,
+        image: [upscaleNodeId, 0]
+      },
+      class_type: 'ImageScaleBy',
+      _meta: {
+        title: 'Halve to 2x'
+      }
+    };
+    workflow.input.node_weights[halfNodeId] = 2.0;
+    imagesSource = [halfNodeId, 0];
+  }
+
+  // Update VideoCombine to use upscaled images
   const videoCombineInputs = getNodeInputs(workflow, videoCombineNodeId);
   if (videoCombineInputs) {
-    videoCombineInputs.images = [resizeNodeId, 0];
+    videoCombineInputs.images = imagesSource;
   }
-  
+
   // Add node weights
   workflow.input.node_weights[modelLoaderNodeId] = 1.0;
   workflow.input.node_weights[upscaleNodeId] = 8.0;
-  workflow.input.node_weights[resizeNodeId] = 2.0;
 }
 
 /**

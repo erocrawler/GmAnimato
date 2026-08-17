@@ -18,6 +18,7 @@ interface MiniMaxWorkflowParams {
   iterationSteps?: 4 | 8; // sampler steps (distilled turbo NFE: fast 4 / quality 8)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
+  isPhotoRealistic?: boolean; // drives 720p upscale model choice (photo vs anime)
   useSageAttention?: boolean; // inject MiniMaxH3MemoryEfficientSageAttentionPatch
   workflow?: Workflow;
 }
@@ -275,10 +276,7 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
       workflow,
       decodeNode as string,
       videoCombineNode as string,
-      gen480pWidth,
-      gen480pHeight,
-      originalImageWidth,
-      originalImageHeight
+      params.isPhotoRealistic
     );
   }
 

@@ -159,6 +159,7 @@ export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promis
       iterationSteps: video.iteration_steps as 4 | 8 | undefined,
       loraWeights,
       loraPresets: settings.loraPresets,
+      isPhotoRealistic: video.is_photo_realistic,
       workflow,
     });
 
@@ -203,6 +204,7 @@ export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promis
       iterationSteps: video.iteration_steps as 4 | 8 | undefined,
       loraWeights,
       loraPresets: settings.loraPresets,
+      isPhotoRealistic: video.is_photo_realistic,
       useSageAttention,
       workflow,
     });
@@ -240,6 +242,7 @@ export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promis
       videoResolution: video.video_resolution as '480p' | '720p' | undefined,
       motionScale: video.additional_options?.motion_scale,
       freeLongBlendStrength: video.additional_options?.freelong_blend_strength,
+      isPhotoRealistic: video.is_photo_realistic,
       useSageAttention,
       loraWeights,
       loraPresets: settings.loraPresets,
@@ -273,6 +276,7 @@ export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promis
       videoResolution: video.video_resolution as '480p' | '720p' | undefined,
       motionScale: video.additional_options?.motion_scale,
       freeLongBlendStrength: video.additional_options?.freelong_blend_strength,
+      isPhotoRealistic: video.is_photo_realistic,
       useSageAttention,
       loraWeights,
       loraPresets: settings.loraPresets,
