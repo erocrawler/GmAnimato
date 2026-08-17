@@ -14,6 +14,12 @@
 
   let promptEditor: HTMLDivElement | undefined;
   let promptCursor = -1;
+  // Ref picker <details> — closed programmatically after inserting a token,
+  // mirroring the ref2v preset dropdown behavior.
+  let refPickerEl: HTMLDetailsElement | undefined;
+  function closeRefPicker() {
+    if (refPickerEl) refPickerEl.removeAttribute("open");
+  }
   // True while an IME composition (e.g. Chinese input) is in progress — we skip
   // re-rendering the editor during composition or the IME breaks.
   let composing = false;
@@ -358,6 +364,7 @@
     // caret and clobber the placement otherwise.
     promptEditor.focus();
     restoreEditorCaret(promptCursor);
+    closeRefPicker();
   }
 
   function insertAllRefTokens() {
@@ -370,6 +377,7 @@
     // Focus first, then place the caret at the end (see insertRefToken).
     if (promptEditor) promptEditor.focus();
     restoreEditorCaret(prompt.length);
+    closeRefPicker();
   }
 
   // Re-render when the prompt changes externally (suggestion click, relay AI,
@@ -397,15 +405,24 @@
       <!-- "+" button opens the picker of all refs. mousedown|preventDefault
            keeps focus in the prompt editor so the browser never stores a
            pre-blur selection that would later restore the caret before the
-           inserted badge. -->
-      <details class="dropdown dropdown-end">
+           inserted badge. Styled to match the ref2v preset dropdown. -->
+      <details bind:this={refPickerEl} class="dropdown dropdown-end">
         <summary
-          class="btn btn-xs btn-outline btn-circle"
+          class="btn btn-sm btn-outline gap-1.5"
           aria-label={$_("review.ref2v.addReference")}
           on:mousedown|preventDefault
-        >+</summary>
+        >
+          <span class="flex items-center gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            <span>{$_("review.ref2v.addReference")}</span>
+            <span class="badge badge-xs badge-ghost">{refItems.length}</span>
+          </span>
+          <span class="flex items-center gap-2">
+            <svg class="w-3 h-3 opacity-60" viewBox="0 0 20 20" fill="currentColor"><path d="M5.5 7l4.5 4 4.5-4z" /></svg>
+          </span>
+        </summary>
         <ul
-          class="menu dropdown-content bg-base-200 rounded-box z-10 w-56 max-h-64 overflow-y-auto p-1 shadow"
+          class="menu dropdown-content bg-base-200 rounded-box z-20 w-64 max-h-[28rem] overflow-y-auto p-2 shadow-lg mt-1"
         >
           {#if availableRefs.length > 1}
             <li>
