@@ -121,48 +121,26 @@ export function calculateVideoDimensions(
 /**
  * Add upscale nodes to workflow for 720p generation.
  *
- * Pipeline (single model pass to a clean 2×):
- *   UpscaleModelLoader -> ImageUpscaleWithModel -> [ImageScaleBy(0.5)] -> VHS_VideoCombine
+ * 2× upscale pipeline (single model pass, native scale):
+ *   UpscaleModelLoader(RealESRGAN_x2plus) -> ImageUpscaleWithModel -> VHS_VideoCombine
  *
- * ComfyUI node facts:
- *   - `ImageUpscaleWithModel` has NO scale_by input — it always outputs the
- *     model's native scale (4× model -> 4× output).
- *   - There is no "model + scale_by" built-in node. To land on a clean 2× from
- *     a 4× model we follow the model upscale with `ImageScaleBy` (scale_by 0.5,
- *     lanczos), which halves the native 4× output back to exactly 2×.
- *   - For the native 2× model the ImageScaleBy step is skipped entirely.
- *
- * The upscale model is chosen dynamically from the job's photorealism signal:
- *   - isPhotoRealistic === true  -> RealESRGAN_x4plus (photoreal 4×, then halve -> 2×)
- *   - isPhotoRealistic === false -> realesr-animevideov3 (anime video 4×, then halve -> 2×)
- *   - undefined                  -> RealESRGAN_x2plus (native 2×, no halve) — legacy fallback
- *
- * The output is a clean 2× of the 480p generation (e.g. 832x480 -> 1664x960).
+ * Output is a clean 2× of the 480p generation (e.g. 832x480 -> 1664x960).
+ * No post-resize and no dynamic model selection — the native 2× model is the
+ * reliable path (4× models + halve hung on the worker).
  * @param workflow The workflow object to modify
  * @param decodeNodeId The VAE decode node ID to connect from
  * @param videoCombineNodeId The video combine node ID to update
- * @param isPhotoRealistic Photorealism signal from the video job; drives the
- *        upscale model choice. undefined keeps the legacy x2plus model.
  */
 export function add720pUpscaleNodes(
   workflow: any,
   decodeNodeId: string,
-  videoCombineNodeId: string,
-  isPhotoRealistic?: boolean
+  videoCombineNodeId: string
 ): void {
-  // 4× models need a follow-up halve to land on 2×; the native 2× model does not.
-  const use4xModel = isPhotoRealistic !== undefined;
-  const modelName = use4xModel
-    ? isPhotoRealistic === true
-      ? 'RealESRGAN_x4plus.pth'
-      : 'realesr-animevideov3.pth'
-    : 'RealESRGAN_x2plus.pth';
-
   // Add upscale model loader node
   const modelLoaderNodeId = '998:upscale_model';
   workflow.input.workflow[modelLoaderNodeId] = {
     inputs: {
-      model_name: modelName
+      model_name: 'RealESRGAN_x2plus.pth'
     },
     class_type: 'UpscaleModelLoader',
     _meta: {
@@ -170,8 +148,7 @@ export function add720pUpscaleNodes(
     }
   };
 
-  // Model upscale — always runs at the model's native scale (4× for the 4×
-  // models, 2× for x2plus).
+  // Add upscale image node — native 2× (x2plus), fed straight to VideoCombine.
   const upscaleNodeId = '999:upscale720p';
   workflow.input.workflow[upscaleNodeId] = {
     inputs: {
@@ -180,37 +157,14 @@ export function add720pUpscaleNodes(
     },
     class_type: 'ImageUpscaleWithModel',
     _meta: {
-      title: 'Upscale with Model'
+      title: 'Upscale 2x'
     }
   };
-
-  // Feed VideoCombine from either the model output or the halved output.
-  let imagesSource: [string, number] = [upscaleNodeId, 0];
-
-  if (use4xModel) {
-    // Halve the native 4× output back to exactly 2×. This is the standard
-    // quality-preserving path — the 4× model's captured detail survives the
-    // halving far better than the old 2×-then-squeeze-to-720p pipeline.
-    const halfNodeId = '997:scale_by';
-    workflow.input.workflow[halfNodeId] = {
-      inputs: {
-        upscale_method: 'lanczos',
-        scale_by: 0.5,
-        image: [upscaleNodeId, 0]
-      },
-      class_type: 'ImageScaleBy',
-      _meta: {
-        title: 'Halve to 2x'
-      }
-    };
-    workflow.input.node_weights[halfNodeId] = 2.0;
-    imagesSource = [halfNodeId, 0];
-  }
 
   // Update VideoCombine to use upscaled images
   const videoCombineInputs = getNodeInputs(workflow, videoCombineNodeId);
   if (videoCombineInputs) {
-    videoCombineInputs.images = imagesSource;
+    videoCombineInputs.images = [upscaleNodeId, 0];
   }
 
   // Add node weights

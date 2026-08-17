@@ -20,7 +20,6 @@ interface WorkflowParams {
   motionScale?: number; // 0.5 to 2.0, optional
   freeLongBlendStrength?: number; // 0 to 1, optional (0 = off, 1 = full)
   useSageAttention?: boolean; // inject PathchSageAttentionKJ nodes after LoRA chains
-  isPhotoRealistic?: boolean; // drives 720p upscale model choice (photo vs anime)
   workflow?: Workflow;
   promptRelayMode?: boolean;
   promptRelaySegments?: PromptRelaySegment[];
@@ -145,8 +144,7 @@ export async function buildWorkflow(params: WorkflowParams): Promise<object> {
     add720pUpscaleNodes(
       workflow,
       decodeNode as string,
-      videoCombineNode as string,
-      params.isPhotoRealistic
+      videoCombineNode as string
     );
   }
 

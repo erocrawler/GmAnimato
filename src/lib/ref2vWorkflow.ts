@@ -30,7 +30,6 @@ interface Ref2VWorkflowParams {
   iterationSteps?: 4 | 8; // sampler steps (distilled turbo NFE: fast 4 / quality 8)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
-  isPhotoRealistic?: boolean; // drives 720p upscale model choice (photo vs anime)
   workflow?: Workflow;
 }
 
@@ -356,8 +355,7 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
     add720pUpscaleNodes(
       workflow,
       decodeNode as string,
-      videoCombineNode as string,
-      params.isPhotoRealistic
+      videoCombineNode as string
     );
   }
 
