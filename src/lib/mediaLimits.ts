@@ -30,7 +30,9 @@ export const ALLOWED_IMAGE_FORMATS = new Set(['jpeg', 'png', 'webp']);
 // ---- Reference videos (ref2v) ----
 /** 50 MB safety cap (the client clips to ≤ the tier's max duration webm). */
 export const MAX_REF_VIDEO_BYTES = 50 * 1024 * 1024;
-export const ALLOWED_VIDEO_TYPES = new Set(['video/webm', 'video/mp4', 'video/quicktime', 'video/x-matroska']);
+// Note: MKV appears as both 'video/x-matroska' (legacy, most Chromium builds)
+// and 'video/matroska' (IANA-registered, some browsers/tools) — accept both.
+export const ALLOWED_VIDEO_TYPES = new Set(['video/webm', 'video/mp4', 'video/quicktime', 'video/x-matroska', 'video/matroska']);
 /** Downscale ref videos so the long edge is at most 854px (~480p 16:9). Ref
  *  videos only condition the output (generated at 480p), so a smaller upload
  *  is faster to upload and cheaper for the worker to decode (VHS_LoadVideo). */

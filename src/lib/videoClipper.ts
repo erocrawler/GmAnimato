@@ -100,13 +100,15 @@ export async function clipVideoToWebm(
   maxDurationSec = MAX_DURATION_SECONDS_FREE,
   includeAudio = true,
 ): Promise<ClipResult> {
-  // Fast-path: original File, no trim needed
+  // Fast-path: original File, no trim needed AND audio kept. When the user
+  // asked to drop audio (includeAudio=false) we can't return the original
+  // bytes — the canvas/MediaRecorder path below is what actually strips it.
   if (source instanceof File) {
     try {
       const probeDur = await getVideoDuration(source);
       const safeStart = Math.max(0, Math.min(startSec, probeDur));
       const safeEnd = Math.max(safeStart, Math.min(endSec, safeStart + maxDurationSec));
-      if (isFullClip(safeStart, safeEnd, probeDur) && probeDur <= maxDurationSec + 0.05) {
+      if (includeAudio !== false && isFullClip(safeStart, safeEnd, probeDur) && probeDur <= maxDurationSec + 0.05) {
         return { blob: source, mimeType: source.type || 'video/mp4' };
       }
     } catch {
@@ -120,7 +122,7 @@ export async function clipVideoToWebm(
       v.load();
       const safeStart = Math.max(0, Math.min(startSec, dur));
       const safeEnd = Math.max(safeStart, Math.min(endSec, safeStart + maxDurationSec));
-      if (isFullClip(safeStart, safeEnd, dur) && dur <= maxDurationSec + 0.05) {
+      if (includeAudio !== false && isFullClip(safeStart, safeEnd, dur) && dur <= maxDurationSec + 0.05) {
         const res = await fetch(source);
         if (res.ok) {
           const blob = await res.blob();
@@ -142,7 +144,7 @@ export async function clipVideoToWebm(
     const safeStart = Math.max(0, Math.min(startSec, duration));
     const safeEnd = Math.max(safeStart, Math.min(endSec, safeStart + maxDurationSec));
 
-    if (isFullClip(safeStart, safeEnd, duration) && duration <= maxDurationSec + 0.05 && source instanceof File) {
+    if (includeAudio !== false && isFullClip(safeStart, safeEnd, duration) && duration <= maxDurationSec + 0.05 && source instanceof File) {
       return { blob: source, mimeType: source.type || 'video/mp4' };
     }
 

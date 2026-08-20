@@ -25,7 +25,7 @@ export function videoExtFromMime(mime: string): string {
   if (base === 'video/webm') return 'webm';
   if (base === 'video/mp4') return 'mp4';
   if (base === 'video/quicktime') return 'mov';
-  if (base === 'video/x-matroska') return 'mkv';
+  if (base === 'video/x-matroska' || base === 'video/matroska') return 'mkv';
   return 'webm';
 }
 
@@ -76,10 +76,24 @@ export async function hasAudioFromBuffer(buffer: Buffer): Promise<boolean | null
   }
 }
 
+/** Options for server-side video clipping (used when the client's browser
+ *  can't decode the container, e.g. MKV in Chromium — no Matroska demuxer). */
+export interface VideoTrimOptions {
+  startSec?: number;
+  endSec?: number;
+  includeAudio?: boolean;
+}
+
 /** Run ffmpeg to downscale a video buffer to MAX_VIDEO_LONG_EDGE (aspect-preserving, even dims),
  *  re-encoding to h264+aac mp4. Audio is preserved when present (the ref2v workflow uses the ref video's
- *  soundtrack via ref_video_audios). Returns the new buffer + 'mp4' ext and whether audio is present. */
-async function resizeVideoWithFfmpeg(buffer: Buffer, inputExt: string): Promise<{ buffer: Buffer; ext: string; hasAudio: boolean | null }> {
+ *  soundtrack via ref_video_audios). When `opts.startSec`/`opts.endSec` are set the input is trimmed
+ *  (accurate seek — decode from the nearest keyframe, so the window is precise at the cost of decoding
+ *  up to `startSec` of source). Returns the new buffer + 'mp4' ext and whether audio is present. */
+async function resizeVideoWithFfmpeg(
+  buffer: Buffer,
+  inputExt: string,
+  opts: VideoTrimOptions = {},
+): Promise<{ buffer: Buffer; ext: string; hasAudio: boolean | null }> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ref2v-'));
   const inPath = path.join(tmpDir, `input.${inputExt}`);
   const outPath = path.join(tmpDir, 'output.mp4');
@@ -89,19 +103,33 @@ async function resizeVideoWithFfmpeg(buffer: Buffer, inputExt: string): Promise<
     // Cap the long edge at MAX_VIDEO_LONG_EDGE (landscape -> width, portrait -> height),
     // preserve aspect ratio via -2 (even dimensions), never upscale (min()).
     const scaleFilter = `scale='if(gt(iw,ih),min(${MAX_VIDEO_LONG_EDGE},iw),-2)':'if(gt(iw,ih),-2,min(${MAX_VIDEO_LONG_EDGE},ih))'`;
-    const hasAudio = await hasAudioStream(inPath);
+    const startSec =
+      opts.startSec !== undefined && Number.isFinite(opts.startSec) ? Math.max(0, opts.startSec) : 0;
+    const endSec =
+      opts.endSec !== undefined && Number.isFinite(opts.endSec) ? Math.max(startSec, opts.endSec) : undefined;
+    const hasAudio = opts.includeAudio === false ? false : await hasAudioStream(inPath);
+    // Trim args are placed AFTER `-i` (output options) for an accurate seek:
+    // the output runs exactly from startSec to endSec. Fast seeking (before
+    // -i) would land on the nearest keyframe and shift the window by up to a
+    // GOP, which matters when the user picked a specific scene to condition on.
+    const trimArgs: string[] = [];
+    if (startSec > 0) trimArgs.push('-ss', String(startSec));
+    if (endSec !== undefined) trimArgs.push('-to', String(endSec));
+    const mapAudio = hasAudio !== false;
     const args = [
       '-y',
       '-i', inPath,
+      ...trimArgs,
       '-vf', scaleFilter,
       '-c:v', 'libx264',
       '-preset', 'veryfast',
       '-crf', '28',
       '-pix_fmt', 'yuv420p',
-      ...(hasAudio === false ? [] : ['-c:a', 'aac', '-b:a', '128k']),
+      ...(mapAudio ? ['-c:a', 'aac', '-b:a', '128k'] : []),
       '-movflags', '+faststart',
       '-map', '0:v:0',
-      ...(hasAudio === false ? [] : ['-map', '0:a:0?']),
+      ...(mapAudio ? ['-map', '0:a:0?'] : []),
+      ...(opts.includeAudio === false ? ['-an'] : []),
       outPath,
     ];
 
@@ -135,7 +163,12 @@ async function resizeVideoWithFfmpeg(buffer: Buffer, inputExt: string): Promise<
  *   ffmpeg failure the original is kept so the upload flow is never blocked).
  * Returns { buffer, ext, wasConverted, error }.
  */
-export async function validateAndConvertVideo(buffer: Buffer, mime: string, maxSeconds: number = MAX_DURATION_SECONDS_FREE): Promise<VideoProcessResult> {
+export async function validateAndConvertVideo(
+  buffer: Buffer,
+  mime: string,
+  maxSeconds: number = MAX_DURATION_SECONDS_FREE,
+  opts: VideoTrimOptions = {},
+): Promise<VideoProcessResult> {
   if (!isAllowedVideoType(mime)) {
     return { buffer, ext: '', wasConverted: false, error: 'ref video must be webm, mp4, mov or mkv' };
   }
@@ -148,21 +181,33 @@ export async function validateAndConvertVideo(buffer: Buffer, mime: string, maxS
   // 6s, paid 15s). The client clips before uploading, but guard any path that
   // bypasses that — a longer ref would condition the job on far more footage
   // than the UI intended. A small grace (0.5s) absorbs ffprobe/MediaRecorder
-  // duration jitter on clips at the cap.
+  // duration jitter on clips at the cap. When a server-side trim window is
+  // provided (browser-unsupported containers like MKV), the EFFECTIVE trimmed
+  // duration is what matters.
   const duration = await probeVideoDurationFromBuffer(buffer, ext);
-  if (duration !== null && duration > maxSeconds + 0.5) {
-    return {
-      buffer,
-      ext: '',
-      wasConverted: false,
-      error: `ref video is ${Math.round(duration)}s — max ${maxSeconds}s`,
-    };
+  if (duration !== null) {
+    const startSec =
+      opts.startSec !== undefined && Number.isFinite(opts.startSec) ? Math.max(0, opts.startSec) : 0;
+    const endSec =
+      opts.endSec !== undefined && Number.isFinite(opts.endSec) ? Math.min(opts.endSec, duration) : duration;
+    const effective = Math.max(0, endSec - startSec);
+    if (effective > maxSeconds + 0.5) {
+      return {
+        buffer,
+        ext: '',
+        wasConverted: false,
+        error: `ref video is ${Math.round(effective)}s — max ${maxSeconds}s`,
+      };
+    }
   }
 
   try {
-    const resized = await resizeVideoWithFfmpeg(buffer, ext);
+    const resized = await resizeVideoWithFfmpeg(buffer, ext, opts);
+    // When the user asked to drop audio we MUST use the re-encoded output
+    // (the only way audio is stripped) even if it isn't smaller than the input.
+    const forceConvert = opts.includeAudio === false;
     // Only treat as "converted" if the output is actually smaller/valid.
-    if (resized.buffer.length > 0 && resized.buffer.length < buffer.length) {
+    if (resized.buffer.length > 0 && (forceConvert || resized.buffer.length < buffer.length)) {
       return { buffer: resized.buffer, ext: resized.ext, wasConverted: true, hasAudio: resized.hasAudio ?? undefined };
     }
     // Even when we keep the original buffer (not smaller), expose hasAudio if we could probe it.

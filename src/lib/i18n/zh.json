@@ -287,6 +287,7 @@
         "clipped": "已裁剪：",
         "includeAudio": "在裁剪片段中包含音频",
         "crossOriginHint": "该视频来自其他源，无法在浏览器中裁剪 — 将直接使用原视频。",
+        "serverClipHint": "此格式无法在浏览器中解码（如 MKV）— 将原样上传，由服务器裁剪/转换。",
         "imagesLabel": "参考图像（可选，最多 6 张）",
         "imagesHint": "在提示词中用 <Picture 1..6> 引用",
         "optionalHint": "所有参考均为可选 — 若未提供任何参考，将退化为文本转视频。",

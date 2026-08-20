@@ -141,7 +141,16 @@ export const actions: Actions = {
       let refVideoHasAudio: boolean | undefined;
       if (refVideoFile && refVideoFile.size > 0) {
         const rawVideoBuffer = Buffer.from(await refVideoFile.arrayBuffer());
-        const videoResult = await validateAndConvertVideo(rawVideoBuffer, refVideoFile.type, maxRefVideoSeconds);
+        // Client-clipped files arrive as a final mp4/webm (no trim needed).
+        // Browser-unsupported containers (e.g. MKV in Chromium) arrive raw with
+        // a trim window — the server ffmpeg clips them here.
+        const clipStart = Number(form.get('ref_video_start')?.toString());
+        const clipEnd = Number(form.get('ref_video_end')?.toString());
+        const videoResult = await validateAndConvertVideo(rawVideoBuffer, refVideoFile.type, maxRefVideoSeconds, {
+          startSec: Number.isFinite(clipStart) && clipStart > 0 ? clipStart : undefined,
+          endSec: Number.isFinite(clipEnd) && clipEnd > 0 ? clipEnd : undefined,
+          includeAudio: form.get('ref_video_include_audio')?.toString() !== 'false',
+        });
         if (videoResult.error) {
           return { error: videoResult.error };
         }

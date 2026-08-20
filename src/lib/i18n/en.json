@@ -288,6 +288,7 @@
         "clipped": "Clipped:",
         "includeAudio": "Include audio in the clip",
         "crossOriginHint": "This video is from another origin and can't be clipped in the browser — it will be used as-is.",
+        "serverClipHint": "This format can't be decoded by your browser (e.g. MKV) — the file is uploaded as-is and the server trims/converts it.",
         "imagesLabel": "Reference Images (optional, up to 6)",
         "imagesHint": "Referenced in the prompt as <Picture 1..6>",
         "optionalHint": "All references are optional — without any, this becomes a text-to-video job.",

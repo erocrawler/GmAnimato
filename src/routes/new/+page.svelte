@@ -48,6 +48,10 @@
   let clipEnd = MAX_REF_VIDEO_SECONDS;
   let clipBusy = false;
   let clipError = '';
+  // Browser can't decode this container (e.g. MKV in Chromium — no Matroska
+  // demuxer), so duration can't be probed and client-side clipping is
+  // impossible. The raw file is uploaded and the server ffmpeg trims it.
+  let refVideoNeedsServerClip = false;
   let includeAudio = true; // include the source audio track in the clip (default on)
   let refVideoPreviewUrl = '';
   // Clip range: one of the two thumbs is "active" so overlapping thumbs stay draggable
@@ -210,7 +214,13 @@
       (refVideoDuration <= 0 || clipEnd + 0.16 >= refVideoDuration);
 
     if (isRef2v) {
-      const needsClip = !refVideoFile && !defaultTrim && canClipRefVideo;
+      // Trim required, OR the user asked to drop audio while the whole file
+      // fits (a full-range "clip" must still re-encode to actually strip the
+      // audio — the fast-path returns the original bytes otherwise).
+      // Containers the browser can't decode (MKV etc.) can't be clipped
+      // client-side — the raw file goes up and the server ffmpeg trims it.
+      const needsClip =
+        !refVideoFile && (!defaultTrim || !includeAudio) && canClipRefVideo && !refVideoNeedsServerClip;
       if (needsClip) {
         // Trim required → re-encode via canvas/MediaRecorder
         await applyClip();
@@ -248,6 +258,17 @@
       formData.delete('ref_video');
       formData.delete('ref_video_url');
     }
+    // Browser-unsupported container (e.g. MKV): pass the trim range + audio
+    // flag so the server ffmpeg clips the raw file on upload.
+    if (refVideoNeedsServerClip && refVideoFile) {
+      formData.set('ref_video_start', String(Math.max(0, clipStart)));
+      formData.set('ref_video_end', String(clipEnd));
+      formData.set('ref_video_include_audio', String(includeAudio));
+    } else {
+      formData.delete('ref_video_start');
+      formData.delete('ref_video_end');
+      formData.delete('ref_video_include_audio');
+    }
 
     for (let i = 0; i < 6; i++) {
       const f = refImages[i].file;
@@ -261,9 +282,20 @@
     // video duration" and the worker can match the output length to the source.
     // Use clipEnd - clipStart (not the original file duration) so a 20s video
     // clipped to 10s reports 10s, not 20s.
-    if (isRef2v && refVideoDuration > 0) {
-      const clippedDuration = Math.min(clipEnd, refVideoDuration) - clipStart;
-      formData.set("ref_video_duration", String(Math.min(MAX_REF_VIDEO_SECONDS, clippedDuration)));
+    if (isRef2v) {
+      // For server-clipped containers the effective duration is the selected
+      // window (source duration is unknown client-side). Otherwise report the
+      // clipped window clamped to the probed source duration.
+      const clippedDuration = refVideoNeedsServerClip
+        ? clipEnd - clipStart
+        : refVideoDuration > 0
+          ? Math.min(clipEnd, refVideoDuration) - clipStart
+          : 0;
+      if (clippedDuration > 0) {
+        formData.set("ref_video_duration", String(Math.min(MAX_REF_VIDEO_SECONDS, clippedDuration)));
+      } else {
+        formData.delete("ref_video_duration");
+      }
     } else {
       formData.delete("ref_video_duration");
     }
@@ -315,6 +347,7 @@
     clipStart = 0;
     clipEnd = MAX_REF_VIDEO_SECONDS;
     clipError = '';
+    refVideoNeedsServerClip = false;
     if (refVideoPreviewUrl && refVideoPreviewUrl.startsWith('blob:')) {
       URL.revokeObjectURL(refVideoPreviewUrl);
     }
@@ -341,11 +374,18 @@
     refVideoPreviewUrl = URL.createObjectURL(f);
     try {
       const dur = await getVideoDuration(f);
+      refVideoNeedsServerClip = false;
       refVideoDuration = dur;
       clipStart = 0;
       clipEnd = Math.min(MAX_REF_VIDEO_SECONDS, dur);
-    } catch (err) {
-      clipError = String(err);
+    } catch {
+      // Browser can't decode this container (e.g. MKV in Chromium — no
+      // Matroska demuxer, see DEMUXER_ERROR_COULD_NOT_OPEN). The server ffmpeg
+      // can handle it: upload the raw file and let the server trim/downscale.
+      refVideoNeedsServerClip = true;
+      refVideoDuration = 0;
+      clipStart = 0;
+      clipEnd = MAX_REF_VIDEO_SECONDS;
     }
   }
 
@@ -579,10 +619,18 @@
           refVideoName = videoFile.name || 'ref_video.webm';
           refVideoPreviewUrl = URL.createObjectURL(videoFile);
           getVideoDuration(videoFile).then((dur) => {
+            refVideoNeedsServerClip = false;
             refVideoDuration = dur;
             clipStart = 0;
             clipEnd = Math.min(MAX_REF_VIDEO_SECONDS, dur);
-          }).catch((err) => { clipError = String(err); });
+          }).catch(() => {
+            // Browser can't decode this container (e.g. MKV in Chromium) —
+            // server ffmpeg will trim/convert it on upload.
+            refVideoNeedsServerClip = true;
+            refVideoDuration = 0;
+            clipStart = 0;
+            clipEnd = MAX_REF_VIDEO_SECONDS;
+          });
         }
       }
       for (const img of imageFiles) {
@@ -938,16 +986,25 @@
 
           {#if refVideoSource}
             <div class="mt-4 rounded-lg overflow-hidden shadow-lg bg-base-200">
-              {#key refVideoPreviewUrl}
-                <video
-                  src={refVideoPreviewUrl}
-                  controls
-                  muted
-                  playsinline
-                  preload="auto"
-                  class="w-full max-h-72"
-                ></video>
-              {/key}
+              {#if refVideoNeedsServerClip}
+                <div class="flex items-center gap-3 p-4 text-sm opacity-80">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4M3 16h4M17 8h4M17 16h4M3 12h18" />
+                  </svg>
+                  <span class="truncate">{refVideoName || 'ref_video.mkv'}</span>
+                </div>
+              {:else}
+                {#key refVideoPreviewUrl}
+                  <video
+                    src={refVideoPreviewUrl}
+                    controls
+                    muted
+                    playsinline
+                    preload="auto"
+                    class="w-full max-h-72"
+                  ></video>
+                {/key}
+              {/if}
             </div>
 
             {#if canClipRefVideo}
@@ -988,18 +1045,24 @@
               </div>
 
               <div class="flex items-center gap-3 mt-4">
-                <button type="button" class="btn btn-primary" disabled={clipBusy} on:click={applyClip}>
-                  {#if clipBusy}
-                    <span class="loading loading-spinner"></span>
-                  {:else}
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
+                {#if refVideoNeedsServerClip}
+                  <div class="alert alert-warning shadow-lg py-2 w-full">
+                    <span class="text-sm">{$_('newVideo.mode.ref2v.serverClipHint')}</span>
+                  </div>
+                {:else}
+                  <button type="button" class="btn btn-primary" disabled={clipBusy} on:click={applyClip}>
+                    {#if clipBusy}
+                      <span class="loading loading-spinner"></span>
+                    {:else}
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                    {/if}
+                    {$_('newVideo.mode.ref2v.clipButton')}
+                  </button>
+                  {#if refVideoFile}
+                    <span class="text-sm opacity-70">{$_('newVideo.mode.ref2v.clipped')} {refVideoFile.name}</span>
                   {/if}
-                  {$_('newVideo.mode.ref2v.clipButton')}
-                </button>
-                {#if refVideoFile}
-                  <span class="text-sm opacity-70">{$_('newVideo.mode.ref2v.clipped')} {refVideoFile.name}</span>
                 {/if}
               </div>
 
