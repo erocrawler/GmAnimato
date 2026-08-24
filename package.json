@@ -27,6 +27,7 @@
 		"@types/bcrypt": "^6.0.0",
 		"@types/node": "^24.10.1",
 		"daisyui": "^5.5.5",
+		"playwright-core": "^1.62.1",
 		"prisma": "^7.0.0",
 		"svelte": "^5.41.0",
 		"svelte-check": "^4.3.3",

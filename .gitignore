@@ -30,5 +30,11 @@ vite.config.ts.timestamp-*
 test-*
 /workflow-test-output
 
+# Debug tooling runtime artifacts (keep the .mjs scripts, ignore their output)
+/scripts/*.png
+/scripts/probe-*.txt
+/scripts/*-out.txt
+/scripts/probe-*.mjs
+
 # Prisma
 node_modules/.prisma

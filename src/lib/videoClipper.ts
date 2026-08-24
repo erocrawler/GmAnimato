@@ -17,20 +17,35 @@
  */
 
 // MP4-first: Chromium's MP4 muxer produces playable blobs, webm muxer often not.
+// NOTE: prefer the BARE 'video/mp4' — Chrome's MediaRecorder REJECTS the
+// explicit codec string 'video/mp4;codecs=avc1.42E01E,mp4a.40.2' (isTypeSupported
+// says true but recording errors out with 0 chunks). Bare mp4 records fine.
 import { MAX_DURATION_SECONDS_FREE } from './mediaLimits';
 const MIME_CANDIDATES = [
+  'video/mp4',
   'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
   'video/mp4;codecs=avc1.42E01E',
-  'video/mp4',
   'video/webm;codecs=vp9,opus',
   'video/webm;codecs=vp8,opus',
   'video/webm',
 ];
+// Video-ONLY candidates (no audio codec) — used when the recorded stream has
+// NO audio tracks. Firefox throws "an audio track cannot be recorded: ...vp8
+// indicates an unsupported codec" if the stream has audio but the codec
+// doesn't, and (per probing) a video-only codec with an audio-less stream is
+// the reliable combo. Order: vp8 first — vp9 is NOT supported by Firefox's
+// MediaRecorder (isTypeSupported returned false in the probe).
+const MIME_VIDEO_ONLY = ['video/webm;codecs=vp8', 'video/webm'];
 
-function pickMimeType(): string {
+function pickMimeType(hasAudio: boolean): string {
   if (typeof MediaRecorder === 'undefined') {
     throw new Error('MediaRecorder is not supported in this browser');
   }
+  const list = hasAudio ? MIME_CANDIDATES : MIME_VIDEO_ONLY;
+  for (const mime of list) {
+    if (MediaRecorder.isTypeSupported(mime)) return mime;
+  }
+  // Fall back to the general list.
   for (const mime of MIME_CANDIDATES) {
     if (MediaRecorder.isTypeSupported(mime)) return mime;
   }
@@ -46,10 +61,22 @@ function baseMimeType(mime: string): string {
 function loadVideoElement(source: File | string): Promise<HTMLVideoElement> {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
-    video.muted = true;
+    // CRITICAL (Firefox): a MUTED video's captureStream can produce NO frames
+    // (the media pipeline treats muted as "no presentation"). The video is
+    // off-screen anyway, so use volume=0 (silent) instead of muted=true so
+    // frames actually flow into the recorder.
+    video.muted = false;
+    video.volume = 0;
     video.playsInline = true;
     video.preload = 'auto';
     video.crossOrigin = 'anonymous';
+    // Keep the video in the DOM hidden off-screen (NOT display:none, which can
+    // suppress rendering): this keeps frames being decoded/presented so
+    // canvas.drawImage always has a frame, and is required for reliable
+    // captureStream on Firefox. Cleaned up by callers (video.remove()).
+    video.style.cssText =
+      'position:fixed;left:-10000px;top:-10000px;width:2px;height:2px;opacity:0;pointer-events:none;';
+    document.body?.appendChild(video);
 
     const objectUrl = typeof source === 'string' ? null : URL.createObjectURL(source);
     const src = typeof source === 'string' ? source : objectUrl!;
@@ -58,14 +85,35 @@ function loadVideoElement(source: File | string): Promise<HTMLVideoElement> {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       video.removeAttribute('src');
       video.load();
+      video.remove();
     };
 
-    const onError = () => {
+    let settled = false;
+    const fail = (msg: string) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(loadTimeout);
+      console.warn('[Clip] loadVideoElement failed:', msg);
       cleanup();
-      reject(new Error('Failed to load video source'));
+      reject(new Error(msg));
+    };
+
+    // Hard timeout: if the browser never fires loadedmetadata OR error
+    // (e.g. a file it can partially parse but not decode), reject instead
+    // of hanging forever.
+    const loadTimeout = window.setTimeout(
+      () => fail('Timed out waiting for video metadata (15s)'),
+      15000,
+    );
+
+    const onError = () => {
+      fail(`Failed to load video source (${video.error?.code ?? 'unknown'})`);
     };
 
     video.onloadedmetadata = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(loadTimeout);
       video.ontimeupdate = null;
       video.onerror = null;
       // Keep objectUrl alive — caller uses same element for captureStream
@@ -111,8 +159,9 @@ export async function clipVideoToWebm(
       if (includeAudio !== false && isFullClip(safeStart, safeEnd, probeDur) && probeDur <= maxDurationSec + 0.05) {
         return { blob: source, mimeType: source.type || 'video/mp4' };
       }
-    } catch {
+    } catch (e) {
       // probe failed -> fall through
+      console.warn('[Clip] fast-path probe failed, falling through:', e);
     }
   } else if (typeof source === 'string') {
     try {
@@ -120,6 +169,7 @@ export async function clipVideoToWebm(
       const dur = v.duration;
       v.removeAttribute('src');
       v.load();
+      v.remove();
       const safeStart = Math.max(0, Math.min(startSec, dur));
       const safeEnd = Math.max(safeStart, Math.min(endSec, safeStart + maxDurationSec));
       if (includeAudio !== false && isFullClip(safeStart, safeEnd, dur) && dur <= maxDurationSec + 0.05) {
@@ -135,6 +185,8 @@ export async function clipVideoToWebm(
   }
 
   const video = await loadVideoElement(source);
+  // Hoisted so the catch below can clean it up on any error path.
+  let canvas: HTMLCanvasElement | undefined;
   try {
     const duration = video.duration;
     if (!Number.isFinite(duration) || duration <= 0) {
@@ -148,32 +200,65 @@ export async function clipVideoToWebm(
       return { blob: source, mimeType: source.type || 'video/mp4' };
     }
 
-    const width = Math.max(2, Math.floor(video.videoWidth / 2) * 2);
-    const height = Math.max(2, Math.floor(video.videoHeight / 2) * 2);
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas 2D context unavailable');
-
-    const stream = canvas.captureStream(24);
-    if (includeAudio) {
-      try {
-        const srcStream = (video as any).captureStream?.() || (video as any).mozCaptureStream?.();
-        if (srcStream) {
-          for (const track of srcStream.getAudioTracks()) {
-            stream.addTrack(track);
-          }
-        }
-      } catch {
-        // ignore — no audio track or captureStream not supported
+    // PREFERRED: record the media element's OWN stream (video.captureStream /
+    // mozCaptureStream). Firefox drives this from the media pipeline — frames
+    // flow as the video plays, independent of canvas painting/compositing,
+    // so MediaRecorder reliably gets data (the canvas round-trip below was
+    // producing ZERO frames on Firefox because the off-screen canvas was never
+    // painted → 0 dataavailable over the whole clip).
+    let stream: MediaStream | null = null;
+    const elStream = (video as any).captureStream?.() || (video as any).mozCaptureStream?.();
+    if (elStream) {
+      stream = elStream;
+      // The element stream's audio tracks are authoritative: keep them unless
+      // the user explicitly asked to drop audio.
+      if (!includeAudio) {
+        for (const t of Array.from(elStream.getAudioTracks())) elStream.removeTrack(t);
+      }
+      const vTracks = elStream.getVideoTracks();
+      // If the element stream has no LIVE video track, fall through to canvas.
+      if (vTracks.length === 0 || vTracks.some((t: any) => t.readyState === 'ended')) {
+        console.warn('[Clip] element captureStream has no live video track — falling back to canvas');
+        stream = null;
       }
     }
-    const mimeType = pickMimeType();
+
+    // FALLBACK: canvas round-trip (browsers without HTMLMediaElement.captureStream).
+    // The canvas must be in the DOM AND actually visible (tiny, near-opaque) —
+    // Firefox only emits captureStream frames for canvases it paints; fully
+    // transparent off-screen canvases emit nothing.
+    let drawFrame: () => void = () => {};
+    if (!stream) {
+      const width = Math.max(2, Math.floor(video.videoWidth / 2) * 2);
+      const height = Math.max(2, Math.floor(video.videoHeight / 2) * 2);
+      canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.style.cssText =
+        'position:fixed;top:0;left:0;width:4px;height:4px;opacity:0.01;pointer-events:none;z-index:-1;';
+      document.body?.appendChild(canvas);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas 2D context unavailable');
+      stream = canvas.captureStream(24);
+      if (includeAudio) {
+        try {
+          const aStream = (video as any).captureStream?.() || (video as any).mozCaptureStream?.();
+          if (aStream) {
+            for (const track of aStream.getAudioTracks()) stream.addTrack(track);
+          }
+        } catch {
+          // ignore — no audio track or captureStream not supported
+        }
+      }
+      drawFrame = () => ctx.drawImage(video, 0, 0, width, height);
+    }
+
+    const streamHasAudio = stream.getAudioTracks().length > 0;
+    const mimeType = pickMimeType(streamHasAudio);
     const recorder = new MediaRecorder(stream, {
       mimeType: mimeType || undefined,
       videoBitsPerSecond: 4_000_000,
-      ...(includeAudio && stream.getAudioTracks().length > 0 ? { audioBitsPerSecond: 128_000 } : {}),
+      ...(streamHasAudio ? { audioBitsPerSecond: 128_000 } : {}),
     });
 
     const chunks: BlobPart[] = [];
@@ -186,25 +271,30 @@ export async function clipVideoToWebm(
       recorder.onerror = (e) => reject(e as unknown as Error);
     });
 
-    const drawFrame = () => {
-      ctx.drawImage(video, 0, 0, width, height);
-    };
-
     return new Promise((resolve, reject) => {
       let recorderStarted = false;
       let finished = false;
-      let rvcbId = 0;
+      let rafId = 0;
 
       const finish = (err?: unknown) => {
         if (finished) return;
         finished = true;
-        if (rvcbId && (video as any).cancelVideoFrameCallback) {
-          try { (video as any).cancelVideoFrameCallback(rvcbId); } catch {}
-        }
+        window.clearTimeout(hangTimeout);
+        if (rafId) { window.cancelAnimationFrame(rafId); rafId = 0; }
         video.pause();
         video.removeAttribute('src');
         video.load();
+        video.remove();
+        canvas?.remove();
+        // NEVER resolve an empty blob: a recorder that stopped with zero data
+        // (Firefox MediaRecorder death with a poisoned audio track) would
+        // upload as a 0-byte file → "no video" entry. Treat as a hard error
+        // so applyClip falls back to the server.
+        if (!err && chunks.length === 0) {
+          err = new Error('MediaRecorder produced no data (clip failed)');
+        }
         if (err) {
+          console.warn('[Clip] finish with error:', err);
           reject(err);
         } else {
           const cleanMime = baseMimeType(mimeType);
@@ -214,6 +304,7 @@ export async function clipVideoToWebm(
       };
 
       const hangTimeout = window.setTimeout(() => {
+        console.warn('[Clip] HANG TIMEOUT fired — forcing stop. recorder state:', recorder.state, 'currentTime:', video.currentTime, 'chunks:', chunks.length);
         if (recorder.state !== 'inactive') {
           try { recorder.stop(); } catch { /* ignore */ }
         } else {
@@ -225,17 +316,22 @@ export async function clipVideoToWebm(
         window.clearTimeout(hangTimeout);
         finish();
       };
+      // Surface recorder errors (e.g. Firefox refusing to encode the track
+      // set) as failures so they never become a 0-byte upload.
       stopped.then(onStop).catch((err) => finish(err));
 
       const onSeeked = () => {
         video.removeEventListener('seeked', onSeeked);
-        video.play().catch(() => {});
+        video.play().catch((e) => console.warn('[Clip] play() rejected:', e));
       };
 
-      // Use requestVideoFrameCallback for frame-accurate stop (falls back to
-      // requestAnimationFrame). setInterval(50) had ±50ms jitter causing 10.1s
-      // clips instead of exact 10.0s.
-      const hasRVFC = typeof (video as any).requestVideoFrameCallback === 'function';
+      // rAF-based stop loop — deterministic across browsers. RVFC is NOT used:
+      // Firefox only fires requestVideoFrameCallback for frames actually sent
+      // to the compositor, and once the off-screen element stops being
+      // composited the callbacks go silent (video keeps playing, but checkStop
+      // never runs again) — exactly the hang we saw. rAF in a foreground tab
+      // runs at 60Hz, giving ±16ms stop precision (the original setInterval(50)
+      // had ±50ms jitter, which RVFC was meant to fix — rAF is good enough).
       const checkStop = () => {
         if (finished) return;
         if (video.currentTime >= safeEnd) {
@@ -244,18 +340,14 @@ export async function clipVideoToWebm(
           return;
         }
         drawFrame();
-        if (hasRVFC) {
-          rvcbId = (video as any).requestVideoFrameCallback(checkStop);
-        } else {
-          requestAnimationFrame(checkStop);
-        }
+        rafId = requestAnimationFrame(checkStop);
       };
 
       if (video.currentTime >= safeStart && !recorderStarted) {
         recorderStarted = true;
         recorder.start(200);
         drawFrame();
-        checkStop(); // start the frame-accurate stop loop
+        checkStop(); // start the stop loop
       }
 
       video.addEventListener('seeked', onSeeked);
@@ -264,7 +356,7 @@ export async function clipVideoToWebm(
           recorderStarted = true;
           recorder.start(200);
           drawFrame();
-          checkStop(); // start the frame-accurate stop loop
+          checkStop(); // start the stop loop
         }
       };
 
@@ -277,6 +369,8 @@ export async function clipVideoToWebm(
   } catch (err) {
     video.removeAttribute('src');
     video.load();
+    video.remove();
+    canvas?.remove();
     throw err;
   }
 }
@@ -383,6 +477,7 @@ export async function extractPosterFrame(source: File | string, atSec = 0): Prom
   } finally {
     video.removeAttribute('src');
     video.load();
+    video.remove();
   }
 }
 
@@ -394,13 +489,30 @@ export function getVideoDuration(source: File | string): Promise<number> {
     const objectUrl = typeof source === 'string' ? null : URL.createObjectURL(source);
     const url = typeof source === 'string' ? source : objectUrl!;
 
+    let settled = false;
+    const fail = (msg: string) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      console.warn('[Clip] getVideoDuration failed:', msg);
+      reject(new Error(msg));
+    };
+
+    // Hard timeout: neither onloadedmetadata nor onerror may fire for files
+    // the browser can partially parse — reject instead of hanging forever.
+    const timeout = window.setTimeout(() => fail('Timed out probing video duration (10s)'), 10000);
+
     video.onloadedmetadata = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       resolve(video.duration);
     };
     video.onerror = () => {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
-      reject(new Error('Failed to read video metadata'));
+      fail(`Failed to read video metadata (${video.error?.code ?? 'unknown'})`);
     };
     video.src = url;
   });
