@@ -1,8 +1,20 @@
 <script lang="ts">
-  // Ref2V-aware prompt editor: a contenteditable that renders <Picture N> /
-  // <Video 1> tokens as inline badge chips, with a "+" picker to insert refs
-  // at the cursor. Refs may be used multiple times.
+  // Ref2V-aware prompt editor built on TipTap (ProseMirror). <Picture N> /
+  // <Video 1> tokens render as inline badge chips via a custom atom node
+  // ("referenceToken"); the editor's plain text IS the prompt — every badge
+  // serializes back to its literal token, so getText() round-trips losslessly
+  // with no DOM walkers or caret arithmetic of our own. ProseMirror owns
+  // caret placement, IME composition, paste, and undo/redo.
   import { _ } from "svelte-i18n";
+  import { onMount, onDestroy } from "svelte";
+  import { Editor, Node, Extension, mergeAttributes, InputRule } from "@tiptap/core";
+  import Document from "@tiptap/extension-document";
+  import Paragraph from "@tiptap/extension-paragraph";
+  import Text from "@tiptap/extension-text";
+  import History from "@tiptap/extension-history";
+  import { baseKeymap } from "@tiptap/pm/commands";
+  import { Fragment, Slice, type Node as PMNode, type Schema } from "@tiptap/pm/model";
+  import { TextSelection } from "@tiptap/pm/state";
 
   export let prompt: string = "";
   export let isEditable: boolean = true;
@@ -12,378 +24,245 @@
   export let referencedTokens: string[] = [];
   export let availableRefs: { kind: "video" | "image"; token: string; url: string; label: string }[] = [];
 
-  let promptEditor: HTMLDivElement | undefined;
-  let promptCursor = -1;
+  const MAX_PROMPT_CHARS = 10000; // matches DB VarChar(10000)
+
+  let editorEl: HTMLDivElement | undefined;
+  let editor: Editor | undefined;
   // Ref picker <details> — closed programmatically after inserting a token,
   // mirroring the ref2v preset dropdown behavior.
   let refPickerEl: HTMLDetailsElement | undefined;
   function closeRefPicker() {
     if (refPickerEl) refPickerEl.removeAttribute("open");
   }
-  // True while an IME composition (e.g. Chinese input) is in progress — we skip
-  // re-rendering the editor during composition or the IME breaks.
-  let composing = false;
 
-  /** Render the prompt text into the contenteditable, tokenizing <Picture N> /
-   *  <Video 1> into badge spans. Preserves cursor where possible. Skips the
-   *  rebuild when nothing changed structurally (plain typing keeps native
-   *  editing + undo). Zero-width caret anchors are ignored in the comparison,
-   *  and the regenerated HTML is parsed by the browser first so self-closing
-   *  <img /> / attribute forms serialize identically on both sides. */
-  function renderPromptEditor() {
-    if (!promptEditor) return;
-    const el = promptEditor;
-    const html = tokenizePrompt(prompt);
-    const probe = document.createElement('div');
-    probe.innerHTML = html;
-    // Compare with ZWSP stripped on BOTH sides: ZWSPs are caret anchors (after
-    // <br> and after trailing breaks) and must never trigger a rebuild.
-    if (el.innerHTML.replace(/\u200b/g, '') === probe.innerHTML.replace(/\u200b/g, '')) return;
+  // ---------- ReferenceToken node ----------
+  // Atom inline node: renders a badge chip (thumbnail for images, video icon
+  // for videos) and serializes back to its literal <Picture N> / <Video 1>
+  // text via renderText, so the prompt round-trips byte-for-byte.
+  const TOKEN_RE = /^<(Picture|Video)\s*(\d+)>$/;
 
-    // Safety net: if the prompt is empty/whitespace but the editor still has
-    // meaningful content, the `prompt` variable is stale — e.g. a racing
-    // external update (Svelte 5 bind + parent re-render) or a transient empty
-    // read. Re-derive it from the DOM instead of wiping the user's work.
-    const domText = (el.textContent || '').replace(/\u200b/g, '').trim();
-    if (!prompt.trim() && domText) {
-      const fresh = editorToPrompt();
-      if (fresh.trim()) {
-        prompt = fresh;
-        return;
+  function refAttrsFor(token: string) {
+    const ref = refItems.find((r) => r.token === token);
+    const kind = /^<Video\s*1>$/i.test(token) ? "video" : /^<Picture\s*\d+>$/i.test(token) ? "image" : "";
+    return { token, kind: ref?.kind ?? kind, url: ref?.url ?? "", label: ref?.label ?? token };
+  }
+
+  const ReferenceToken = Node.create({
+    name: "referenceToken",
+    group: "inline",
+    inline: true,
+    atom: true,
+    addAttributes() {
+      return {
+        token: { default: "" },
+        kind: { default: "" },
+        url: { default: "" },
+        label: { default: "" },
+      };
+    },
+    parseHTML() {
+      return [
+        {
+          tag: "span[data-ref-token]",
+          getAttrs: (el) => {
+            const e = el as HTMLElement;
+            return {
+              token: e.getAttribute("data-ref-token") || "",
+              kind: e.getAttribute("data-ref-kind") || "",
+              url: e.getAttribute("data-ref-url") || "",
+              label: e.getAttribute("data-ref-label") || "",
+            };
+          },
+        },
+      ];
+    },
+    renderHTML({ node, HTMLAttributes }) {
+      const { token, kind, url } = node.attrs;
+      const children: any[] = [];
+      if (kind === "image" && url) {
+        children.push(["img", { src: url, alt: "", class: "w-3.5 h-3.5 rounded object-cover inline-block align-middle" }]);
+      } else if (kind === "video") {
+        children.push([
+          "svg",
+          { class: "w-3.5 h-3.5 inline-block align-middle", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2" },
+          ["rect", { x: "2", y: "6", width: "20", height: "12", rx: "2" }],
+          ["path", { d: "m10 9 5 3-5 3z" }],
+        ]);
       }
-    }
+      children.push(["span", token]);
+      return [
+        "span",
+        mergeAttributes(HTMLAttributes, {
+          "data-ref-token": token,
+          "data-ref-kind": node.attrs.kind,
+          "data-ref-url": url,
+          "data-ref-label": node.attrs.label,
+          class: "inline-flex items-center gap-1 badge badge-primary badge-sm font-normal px-1.5 py-0.5 align-middle",
+          contenteditable: "false",
+        }),
+        ...children,
+      ];
+    },
+    renderText({ node }) {
+      return node.attrs.token;
+    },
+    addInputRules() {
+      // Typing <Picture N> / <Video 1> live-converts to a badge.
+      return [
+        new InputRule({
+          find: /(?:<Picture|Video)\s*\d+>$/,
+          // The input-rules plugin shares its transaction via `state.tr` and
+          // applies it when it has steps — mutate it and return nothing.
+          handler: ({ state, range, match }) => {
+            state.tr.replaceWith(range.from, range.to, state.schema.nodes.referenceToken.create(refAttrsFor(match[0] || "")));
+          },
+        }),
+      ];
+    },
+  });
 
-    // Save caret position as character offset into the plain text
-    const caretOffset = getEditorCaretOffset();
-    el.innerHTML = html;
-    restoreEditorCaret(caretOffset);
+  // Default ProseMirror keymap (Enter splits blocks, Backspace/Delete, arrow
+  // keys...) — TipTap doesn't ship one without StarterKit. Undo/redo is
+  // handled by History, so those bindings are excluded to avoid conflicts.
+  const BaseKeymap = Extension.create({
+    name: "baseKeymap",
+    addKeyboardShortcuts() {
+      const { editor } = this;
+      const shortcuts: Record<string, () => boolean> = {};
+      for (const [key, command] of Object.entries(baseKeymap)) {
+        if (key === "Mod-z" || key === "Mod-y" || key === "Shift-Mod-z") continue;
+        shortcuts[key] = () => command(editor.state, editor.view.dispatch, editor.view);
+      }
+      return shortcuts;
+    },
+  });
+
+  // ---------- Prompt <-> editor text ----------
+  function editorText(): string {
+    return editor ? editor.getText({ blockSeparator: "\n" }) : prompt;
   }
 
-  function tokenizePrompt(text: string): string {
-    // Split on tokens, wrap each in a badge span. The badge's visible text is
-    // exactly the token (escaped), so DOM text length == source prompt length
-    // and caret offsets computed via the DOM walkers stay consistent.
-    const parts = text.split(/(<(?:Picture|Video)\s*\d+>)/g);
-    return parts
-      .map((part) => {
-        const m = part.match(/^<(Picture|Video)\s*(\d+)>$/);
-        if (m) {
-          const kind = m[1].toLowerCase();
-          const num = m[2];
-          const ref = refItems.find((r) => r.token === part);
-          const thumb = ref?.kind === 'image'
-            ? `<img src="${ref.url}" alt="" class="w-3.5 h-3.5 rounded object-cover inline-block align-middle" />`
-            : '';
-          const icon = ref?.kind === 'video'
-            ? '<svg class="w-3.5 h-3.5 inline-block align-middle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>'
-            : '';
-          return `<span class="inline-flex items-center gap-1 badge badge-primary badge-sm font-normal px-1.5 py-0.5 align-middle" contenteditable="false" data-ref-token="${escapeHtml(part)}">${thumb}${icon}<span>${escapeHtml(part)}</span></span>`;
-        }
-        return escapeHtml(part).replace(/\n/g, '<br>\u200b');
-      })
-      .join("");
-  }
-
-  function escapeHtml(s: string): string {
-    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
-
-  /** Walk a node, appending its "source prompt" text: text nodes verbatim
-   *  (zero-width caret anchors stripped), <br> as "\n", badges as their
-   *  token, icons skipped. Used by both editorToPrompt and
-   *  getEditorCaretOffset so they can never disagree. */
-  function domWalk(node: Node, onText: (t: string) => void): void {
-    if (node.nodeType === Node.TEXT_NODE) {
-      onText((node.textContent || '').replace(/\u00a0/g, ' ').replace(/\u200b/g, ''));
-      return;
-    }
-    const el = node as HTMLElement;
-    const tag = el.tagName;
-    if (tag === 'BR') {
-      onText('\n');
-      return;
-    }
-    if (tag === 'IMG' || tag === 'SVG') return; // decorative icons
-    if (el.hasAttribute('data-ref-token')) {
-      onText(el.getAttribute('data-ref-token') || '');
-      return;
-    }
-    el.childNodes.forEach((c) => domWalk(c, onText));
-  }
-
-  function editorToPrompt(): string {
-    if (!promptEditor) return prompt;
-    let out = '';
-    promptEditor.childNodes.forEach((c) => domWalk(c, (t) => (out += t)));
-    return out;
-  }
-
-  function getEditorCaretOffset(): number {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || !promptEditor) return -1;
-    const range = sel.getRangeAt(0);
-    return offsetInEditor(range.startContainer, range.startOffset);
-  }
-
-  /** Character offset of (node, offset) within the editor's prompt text — the
-   *  same walk getEditorCaretOffset uses, parameterized over an arbitrary
-   *  node/offset (e.g. both ends of a non-collapsed selection). Returns -1
-   *  when the node isn't inside the editor. */
-  function offsetInEditor(node: Node, offset: number): number {
-    if (!promptEditor) return -1;
-    let pos = 0;
-    let done = false;
-    const walk = (n: Node) => {
-      if (done) return;
-      if (n === node) {
-        if (n.nodeType === Node.TEXT_NODE) {
-          const t = (n.textContent || '').replace(/\u00a0/g, ' ').replace(/\u200b/g, '');
-          pos += Math.min(offset, t.length);
+  /** Build a ProseMirror fragment from the raw prompt string: each line a
+   *  paragraph, tokens as referenceToken nodes. Pure node construction (no
+   *  HTML parsing), so whitespace and token text round-trip exactly. */
+  function buildFragmentFromPrompt(text: string, schema: Schema): Fragment {
+    const blocks: PMNode[] = [];
+    for (const line of text.split("\n")) {
+      const inline: PMNode[] = [];
+      for (const part of line.split(/(<(?:Picture|Video)\s*\d+>)/g)) {
+        if (!part) continue;
+        if (TOKEN_RE.test(part)) {
+          inline.push(schema.nodes.referenceToken.create(refAttrsFor(part)));
         } else {
-          const children = Array.from(n.childNodes);
-          for (let i = 0; i < Math.min(offset, children.length); i++) {
-            domWalk(children[i], (t) => (pos += t.length));
-          }
+          inline.push(schema.text(part));
         }
-        done = true;
-        return;
       }
-      domWalk(n, (t) => (pos += t.length));
-    };
-    promptEditor.childNodes.forEach(walk);
-    return done ? pos : -1;
+      blocks.push(schema.nodes.paragraph.create(null, inline));
+    }
+    return Fragment.fromArray(blocks);
   }
 
-  function restoreEditorCaret(offset: number) {
-    if (offset < 0 || !promptEditor) return;
-    const sel = window.getSelection();
-    if (!sel) return;
-    let remaining = offset;
-    let target: { node: Node; off: number; mode: 'in' | 'before' | 'after' } | null = null;
-
-    const walk = (node: Node): boolean => {
-      if (target) return true;
-      if (node.nodeType === Node.TEXT_NODE) {
-        const raw = node.textContent || '';
-        const stripped = raw.replace(/\u200b/g, '');
-        if (stripped.length === 0) return false; // ZWSP caret-anchor node: invisible, skip
-        if (remaining <= stripped.length) {
-          // Map the stripped-space offset back to a raw offset in the node.
-          let rawOff = 0;
-          let seen = 0;
-          for (let i = 0; i < raw.length; i++) {
-            if (raw[i] === '\u200b') { rawOff++; continue; }
-            if (seen === remaining) break;
-            seen++; rawOff++;
-          }
-          target = { node, off: rawOff, mode: 'in' };
-          return true;
-        }
-        remaining -= stripped.length;
-        return false;
-      }
-      const el = node as HTMLElement;
-      const tag = el.tagName;
-      if (tag === 'BR') {
-        if (remaining <= 0) {
-          target = { node, off: 0, mode: 'before' };
-          return true;
-        }
-        remaining -= 1;
-        if (remaining <= 0) {
-          // Consumed the newline: caret goes to the start of the next line.
-          // Anchor it inside the ZWSP text node that follows the <br> (it's a
-          // caret home so backspace deletes the <br>, not an adjacent badge).
-          // If the break is trailing, sit AFTER the ZWSP so Chromium doesn't
-          // normalize the caret back before the <br>.
-          const next = el.nextSibling;
-          if (next && next.nodeType === Node.TEXT_NODE && (next.textContent || '').replace(/\u200b/g, '') === '') {
-            let trailing = true;
-            for (let s = next.nextSibling; s; s = s.nextSibling) {
-              const meaningful =
-                s.nodeType === Node.TEXT_NODE
-                  ? (s.textContent || '').replace(/\u200b/g, '') !== ''
-                  : s.nodeType === Node.ELEMENT_NODE && (s as HTMLElement).tagName !== 'BR';
-              if (meaningful) { trailing = false; break; }
-            }
-            target = { node: next, off: trailing ? 1 : 0, mode: 'in' };
-          } else if (next && next.nodeType === Node.TEXT_NODE) {
-            target = { node: next, off: 0, mode: 'in' };
-          } else {
-            target = { node: el, off: 0, mode: 'after' };
-          }
-          return true;
-        }
-        return false;
-      }
-      if (tag === 'IMG' || tag === 'SVG') return false;
-      if (el.hasAttribute('data-ref-token')) {
-        const tok = el.getAttribute('data-ref-token') || '';
-        if (remaining <= tok.length) {
-          target = { node: el, off: 0, mode: remaining === tok.length ? 'after' : 'before' };
-          return true;
-        }
-        remaining -= tok.length;
-        return false;
-      }
-      for (const c of Array.from(el.childNodes)) {
-        if (walk(c)) return true;
-      }
-      return false;
-    };
-
-    for (const c of Array.from(promptEditor.childNodes)) {
-      if (walk(c)) break;
+  /** Replace the whole document with the given fragment, optionally placing
+   *  the caret at the end. Used for external prompt sync and truncation. */
+  function replaceEditorContent(fragment: Fragment, caretAtEnd: boolean) {
+    if (!editor) return;
+    const tr = editor.state.tr.replaceWith(0, editor.state.doc.content.size, fragment);
+    if (caretAtEnd) {
+      tr.setSelection(TextSelection.create(tr.doc, tr.doc.content.size));
     }
-
-    const range = document.createRange();
-    if (!target) {
-      range.selectNodeContents(promptEditor);
-      range.collapse(false);
-    } else {
-      const t = target as { node: Node; off: number; mode: 'in' | 'before' | 'after' };
-      if (t.mode === 'in') {
-        const text = t.node.textContent || '';
-        range.setStart(t.node, Math.min(t.off, text.length));
-        range.collapse(true);
-      } else if (t.mode === 'before') {
-        range.setStartBefore(t.node);
-        range.collapse(true);
-      } else {
-        range.setStartAfter(t.node);
-        range.collapse(true);
-      }
-    }
-    sel.removeAllRanges();
-    sel.addRange(range);
+    editor.view.dispatch(tr);
   }
 
-  const MAX_PROMPT_CHARS = 10000; // matches DB VarChar(10000)
-
-  function onEditorInput() {
-    let next = editorToPrompt();
-    // Anti-wipe guard: if the DOM walk returns empty BUT the visible DOM still
-    // has content, the walk hit a transient state (renderPromptEditor sets
-    // el.innerHTML, and an input event can fire in that window; or a
-    // caret/selection edge case) — NOT the user deleting everything (a real
-    // clear leaves the DOM empty too). Re-sync from the last known-good prompt
-    // instead of letting the empty read wipe the user's essay.
-    const domHasContent =
-      !!promptEditor &&
-      (promptEditor.textContent || "").replace(/\u200b/g, "").trim() !== "";
-    if (next.trim() === "" && domHasContent && !composing) {
-      renderPromptEditor();
-      return;
-    }
+  function handleUpdate() {
+    if (!editor) return;
+    let next = editorText();
     // Hard cap at the DB column limit: pasting/typing past MAX_PROMPT_CHARS
     // would make the server 500 on write. Trim to the limit (never silently
     // drop the whole prompt — the user's text is preserved up to the cap).
     if (next.length > MAX_PROMPT_CHARS) {
       next = next.slice(0, MAX_PROMPT_CHARS);
-      prompt = next;
-      promptCursor = getEditorCaretOffset();
-      renderPromptEditor();
-      promptEditor?.focus();
-      restoreEditorCaret(prompt.length);
-      return;
+      replaceEditorContent(buildFragmentFromPrompt(next, editor.schema), true);
     }
     prompt = next;
-    promptCursor = getEditorCaretOffset();
-    // Live-render: if the user typed a token, turn it into a badge. Skipped
-    // during IME composition — re-rendering would break the composition.
-    if (!composing) renderPromptEditor();
   }
 
-  /** Insert a single <br> at the caret, always followed by a zero-width-space
-   *  caret anchor, then re-sync the prompt.
-   *
-   *  The ZWSP gives the caret a text home after the break:
-   *  - a caret directly after a *trailing* <br> is normalized back before it
-   *    by Chromium (requiring a second Enter), so we sit AFTER the anchor;
-   *  - a caret at a bare <br>/badge boundary makes Backspace delete the badge
-   *    instead of the break, so the anchor gives Backspace something to chew
-   *    through first.
-   *  The anchor is stripped everywhere (domWalk / getEditorCaretOffset /
-   *  renderPromptEditor comparison) and consumed naturally by the next
-   *  keystroke. */
-  function insertLineBreakAtCaret() {
-    if (!promptEditor) return;
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
-    const range = sel.getRangeAt(0);
-    range.deleteContents();
-    const br = document.createElement('br');
-    range.insertNode(br);
-    // Is the br trailing (nothing meaningful after it)? The caret then sits
-    // AFTER the anchor; otherwise BEFORE it (so Backspace removes the <br>).
-    let trailing = true;
-    for (let s = br.nextSibling; s; s = s.nextSibling) {
-      const meaningful =
-        s.nodeType === Node.TEXT_NODE
-          ? (s.textContent || '').replace(/\u200b/g, '') !== ''
-          : s.nodeType === Node.ELEMENT_NODE && (s as HTMLElement).tagName !== 'BR';
-      if (meaningful) { trailing = false; break; }
-    }
-    const anchor = document.createTextNode('\u200b');
-    br.parentNode?.insertBefore(anchor, br.nextSibling);
-    const after = document.createRange();
-    after.setStart(anchor, trailing ? 1 : 0);
-    after.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(after);
-    onEditorInput();
+  onMount(() => {
+    if (!editorEl) return;
+    editor = new Editor({
+      element: editorEl,
+      extensions: [Document, Paragraph, Text, History, BaseKeymap, ReferenceToken],
+      content: "",
+      editable: isEditable,
+      editorProps: {
+        attributes: {
+          id: "prompt",
+          class: "prompt-editor",
+          tabindex: "0",
+          "aria-label": $_("review.yourPrompt"),
+          "aria-multiline": "true",
+        },
+        // Paste as plain text (tokens become badges), replacing the selection.
+        handlePaste: (view, event) => {
+          const text = event.clipboardData?.getData("text/plain");
+          if (text == null) return false;
+          const fragment = buildFragmentFromPrompt(text, view.state.schema);
+          view.dispatch(view.state.tr.replaceSelection(Slice.maxOpen(fragment)));
+          return true;
+        },
+      },
+      onUpdate: () => handleUpdate(),
+    });
+  });
+
+  onDestroy(() => {
+    editor?.destroy();
+    editor = undefined;
+  });
+
+  // Reflect external prompt changes (suggestion click, relay AI, entry sync)
+  // into the editor — but only when the text actually differs, so typing
+  // (which writes prompt from the editor) never fights the editor.
+  $: if (editor && !editor.isDestroyed && prompt !== editorText()) {
+    replaceEditorContent(buildFragmentFromPrompt(prompt, editor.schema), false);
   }
+
+  // Read-only mode.
+  $: if (editor) editor.setEditable(isEditable);
 
   function insertRefToken(token: string) {
-    if (!isEditable) return;
-    if (!promptEditor) {
-      prompt = (prompt.trim() + " " + token).trim();
-      return;
-    }
-    // Prefer the live caret when the selection is still inside the editor (it
-    // persists after clicking the + button); fall back to the last tracked
-    // promptCursor position.
-    const sel = window.getSelection();
-    const liveCaret =
-      sel && sel.rangeCount > 0 && promptEditor.contains(sel.getRangeAt(0).startContainer)
-        ? getEditorCaretOffset()
-        : -1;
-    let caretOffset = liveCaret >= 0 ? liveCaret : promptCursor;
-    if (caretOffset < 0 || caretOffset > prompt.length) caretOffset = prompt.length;
-    const before = prompt.slice(0, caretOffset);
-    const after = prompt.slice(caretOffset);
-    const sepBefore = before && !/\s$/.test(before) ? " " : "";
-    const sepAfter = after && !/^\s/.test(after) ? " " : "";
-    prompt = before + sepBefore + token + sepAfter + after;
-    promptCursor = (before + sepBefore + token).length;
-    renderPromptEditor();
-    // renderPromptEditor restores the *old* caret (it re-reads the DOM before
-    // the rebuild). Then focus the editor FIRST and place the caret after the
-    // inserted badge LAST: if the editor lost focus (user clicked the + button
-    // and a picker item), .focus() would restore the browser's stored pre-blur
-    // caret and clobber the placement otherwise.
-    promptEditor.focus();
-    restoreEditorCaret(promptCursor);
+    if (!isEditable || !editor) return;
+    // Pad the token with a space only where the neighboring text isn't
+    // already whitespace (same separators as the old editor).
+    const { from, to } = editor.state.selection;
+    const doc = editor.state.doc;
+    const leaf = (n: PMNode) => (n.type.name === "referenceToken" ? n.attrs.token : n.text || "");
+    const before = doc.textBetween(0, from, "\n", leaf);
+    const after = doc.textBetween(to, doc.content.size, "\n", leaf);
+    const nodes: PMNode[] = [];
+    if (before && !/\s$/.test(before)) nodes.push(editor.schema.text(" "));
+    nodes.push(editor.schema.nodes.referenceToken.create(refAttrsFor(token)));
+    if (after && !/^\s/.test(after)) nodes.push(editor.schema.text(" "));
+    editor.chain().focus().insertContent(Fragment.fromArray(nodes)).run();
     closeRefPicker();
   }
 
   function insertAllRefTokens() {
-    if (!isEditable || availableRefs.length === 0) return;
-    // Append every not-yet-referenced token at the end of the prompt (separated
-    // by a space), so a user can quickly make all refs explicit.
-    const suffix = availableRefs.map((r) => r.token).join(" ");
-    prompt = (prompt.trim() + " " + suffix).trim();
-    renderPromptEditor();
-    // Focus first, then place the caret at the end (see insertRefToken).
-    if (promptEditor) promptEditor.focus();
-    restoreEditorCaret(prompt.length);
+    if (!isEditable || !editor || availableRefs.length === 0) return;
+    const schema = editor.schema;
+    // Append every not-yet-referenced token at the end of the prompt.
+    const doc = editor.state.doc;
+    const end = doc.content.size;
+    const leaf = (n: PMNode) => (n.type.name === "referenceToken" ? n.attrs.token : n.text || "");
+    const before = doc.textBetween(0, end, "\n", leaf);
+    const nodes: PMNode[] = [];
+    if (before && !/\s$/.test(before)) nodes.push(schema.text(" "));
+    availableRefs.forEach((r, i) => {
+      if (i > 0) nodes.push(schema.text(" "));
+      nodes.push(schema.nodes.referenceToken.create({ token: r.token, kind: r.kind, url: r.url, label: r.label }));
+    });
+    editor.chain().focus().insertContentAt(end, Fragment.fromArray(nodes)).run();
     closeRefPicker();
   }
-
-  // Re-render when the prompt changes externally (suggestion click, relay AI,
-  // entry sync) — but skip when the DOM already matches (user typing).
-  // `prompt` is referenced textually so Svelte tracks it as a dependency.
-  $: promptEditor && (prompt, renderPromptEditor());
 </script>
 
 <div class="form-control">
@@ -472,69 +351,11 @@
     </div>
   {/if}
 
-  <div
-    id="prompt"
-    contenteditable={isEditable}
-    tabindex="0"
-    class="textarea textarea-bordered textarea-lg min-h-32 w-full whitespace-pre-wrap"
-    role="textbox"
-    aria-multiline="true"
-    aria-label={$_("review.yourPrompt")}
-    bind:this={promptEditor}
-    on:input={onEditorInput}
-    on:keyup={() => (promptCursor = getEditorCaretOffset())}
-    on:click={() => (promptCursor = getEditorCaretOffset())}
-    on:focus={() => (promptCursor = getEditorCaretOffset())}
-    on:compositionstart={() => (composing = true)}
-    on:compositionend={() => {
-      composing = false;
-      onEditorInput();
-    }}
-    on:paste={(e) => {
-      // Paste as plain text at the caret. String-splice + re-render (the same
-      // proven path as insertRefToken) instead of the deprecated
-      // document.execCommand('insertText'), which — when the DOM selection is
-      // missing or stale (e.g. after an external prompt update) — inserts at
-      // the START of the editor instead of the caret. Falls back to the last
-      // tracked caret position when there is no live selection inside the
-      // editor.
-      e.preventDefault();
-      const text = e.clipboardData?.getData('text/plain') || '';
-      if (!text || !isEditable) return;
-
-      // Resolve the insertion point: live selection inside the editor first
-      // (handles replacing a selected range), then the tracked caret, then the
-      // end of the prompt.
-      let start = -1;
-      let end = -1;
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0 && promptEditor?.contains(sel.getRangeAt(0).startContainer)) {
-        const range = sel.getRangeAt(0);
-        start = offsetInEditor(range.startContainer, range.startOffset);
-        end = range.collapsed ? start : offsetInEditor(range.endContainer, range.endOffset);
-      }
-      if (start < 0 || start > prompt.length) {
-        start = promptCursor >= 0 && promptCursor <= prompt.length ? promptCursor : prompt.length;
-        end = start;
-      }
-      if (end < start) end = start;
-
-      prompt = prompt.slice(0, start) + text + prompt.slice(end);
-      promptCursor = start + text.length;
-      renderPromptEditor();
-      promptEditor?.focus();
-      restoreEditorCaret(promptCursor);
-    }}
-    on:keydown={(e) => {
-      // Enter must insert a single bare <br> (with the caret after it)
-      // instead of the browser's default <div> block, so the DOM stays
-      // text+br+badges and the DOM walker stays exact.
-      if (e.key === 'Enter' && isEditable) {
-        e.preventDefault();
-        insertLineBreakAtCaret();
-      }
-    }}
-  ></div>
+  <!-- TipTap mounts its editable .ProseMirror element inside this host; the
+       daisyUI textarea chrome stays on the host. -->
+  <div class="prompt-editor-host textarea textarea-bordered textarea-lg w-full cursor-text">
+    <div bind:this={editorEl}></div>
+  </div>
 
   <div class="flex justify-end mt-1">
     <span
@@ -546,3 +367,19 @@
     </span>
   </div>
 </div>
+
+<style>
+  /* TipTap mounts .ProseMirror inside the host; make it look like the plain
+     textarea it replaces (daisyUI textarea-lg vertical padding ≈ 0.875rem). */
+  :global(.prompt-editor-host .ProseMirror) {
+    outline: none;
+    min-height: 6.25rem;
+    white-space: pre-wrap;
+  }
+  :global(.prompt-editor-host .ProseMirror:focus) {
+    outline: none;
+  }
+  :global(.prompt-editor-host .ProseMirror p) {
+    margin: 0;
+  }
+</style>

@@ -48,6 +48,11 @@
   let clipEnd = MAX_REF_VIDEO_SECONDS;
   let clipBusy = false;
   let clipError = '';
+  // True when the LAST client-side clip attempt failed (as opposed to a
+  // validation error like notVideo/tooLarge). Lets submit distinguish "the
+  // browser couldn't clip it — fall back to server" from "the input is
+  // invalid — block" (see handleUploadEnhance).
+  let refVideoClipFailed = false;
   // Browser can't decode this container (e.g. MKV in Chromium — no Matroska
   // demuxer), so duration can't be probed and client-side clipping is
   // impossible. The raw file is uploaded and the server ffmpeg trims it.
@@ -199,9 +204,12 @@
   // completes before FormData is serialized. It must return the result-handler.
   async function handleUploadEnhance({ formData, cancel }: any) {
     submitting = true;
-    if (mode === 'ref2v' && clipError) {
-      // A previous clip attempt failed — don't silently drop the ref video
-      // and submit without it. Surface the error and cancel the submission.
+    if (mode === 'ref2v' && clipError && !refVideoClipFailed) {
+      // A validation error (notVideo / tooLarge / invalidUrl / urlNotReady)
+      // on the current input — the ref video is wrong/stale, so block the
+      // submit. Clip failures (refVideoClipFailed) are NOT validation errors:
+      // the browser just couldn't decode/clip, so we fall back to the server
+      // below instead of cancelling.
       submitting = false;
       message = clipError;
       messageType = 'error';
@@ -222,8 +230,26 @@
       const needsClip =
         !refVideoFile && (!defaultTrim || !includeAudio) && canClipRefVideo && !refVideoNeedsServerClip;
       if (needsClip) {
-        // Trim required → re-encode via canvas/MediaRecorder
-        await applyClip();
+        // Trim/audio-strip required → re-encode via canvas/MediaRecorder. On
+        // failure, fall back to server-side processing (same path as browser-
+        // undecodable containers): the raw file + trim/audio window go up and
+        // the server ffmpeg handles them. A browser clip failure (e.g.
+        // NS_ERROR_DOM_MEDIA_METADATA_ERR) is a browser limitation, not a bad
+        // file — ffmpeg decodes far more containers/codecs than any browser,
+        // so the server will almost always succeed. The server hard-fails on
+        // genuinely undecodable files (trim requested → error), so this never
+        // silently produces a broken entry.
+        // Skip the retry when the last attempt already failed with this same
+        // source/range (it would fail identically).
+        const clipOk = refVideoClipFailed ? false : await applyClip();
+        if (!clipOk && !refVideoFile) {
+          clipError = '';
+          refVideoNeedsServerClip = true;
+          refVideoFile = refVideoSource instanceof File ? refVideoSource : null;
+          if (refVideoFile) setFileInput(refVideoInput, refVideoFile);
+          message = $_('newVideo.mode.ref2v.errors.clientClipFailed');
+          messageType = 'success';
+        }
       } else if (!refVideoFile) {
         // No existing clipped file
         if (refVideoSource instanceof File) {
@@ -347,6 +373,7 @@
     clipStart = 0;
     clipEnd = MAX_REF_VIDEO_SECONDS;
     clipError = '';
+    refVideoClipFailed = false;
     refVideoNeedsServerClip = false;
     if (refVideoPreviewUrl && refVideoPreviewUrl.startsWith('blob:')) {
       URL.revokeObjectURL(refVideoPreviewUrl);
@@ -505,8 +532,11 @@
     clipActiveThumb = Math.abs(val - clipStart) <= Math.abs(val - clipEnd) ? 'start' : 'end';
   }
 
-  async function applyClip() {
-    if (!refVideoSource) return;
+  /** Clip the ref video in the browser. Returns true on success, false on
+   *  failure (sets `clipError`). On success `refVideoFile` is set to the
+   *  clipped file. */
+  async function applyClip(): Promise<boolean> {
+    if (!refVideoSource) return false;
     clipBusy = true;
     clipError = '';
     try {
@@ -524,8 +554,13 @@
       refVideoPreviewUrl = URL.createObjectURL(refVideoFile);
       // Poster frame is generated server-side (extractVideoPoster on the
       // uploaded S3 URL) — no client-side extraction needed here.
+      refVideoClipFailed = false;
+      return true;
     } catch (err) {
       clipError = String(err);
+      refVideoClipFailed = true;
+      console.warn('[Ref2V] Client-side clip failed:', err);
+      return false;
     } finally {
       clipBusy = false;
     }

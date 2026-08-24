@@ -159,8 +159,13 @@ async function resizeVideoWithFfmpeg(
  * - Checks type + size
  * - Rejects videos longer than `maxSeconds` (default: the free-tier max
  *   allowed duration; callers pass their tier cap — 6s free / 15s paid)
- * - Re-encodes with ffmpeg to cap the long edge at ~480p (best-effort: on any
- *   ffmpeg failure the original is kept so the upload flow is never blocked).
+ * - Re-encodes with ffmpeg to cap the long edge at ~480p. On ffmpeg failure
+ *   the original is kept so the upload flow is never blocked — EXCEPT when a
+ *   trim window (`opts.startSec`/`opts.endSec`) was explicitly requested
+ *   (browser-undecodable containers, or a failed client clip falling back to
+ *   server trim): then a failure is a hard error, since falling back to the
+ *   original would upload an untrimmed/undecodable file and produce a broken
+ *   entry.
  * Returns { buffer, ext, wasConverted, error }.
  */
 export async function validateAndConvertVideo(
@@ -213,6 +218,21 @@ export async function validateAndConvertVideo(
     // Even when we keep the original buffer (not smaller), expose hasAudio if we could probe it.
     return { buffer, ext, wasConverted: false, hasAudio: resized.hasAudio ?? undefined };
   } catch (e) {
+    // A trim window was explicitly requested (browser-undecodable container
+    // like MKV, or a client clip that failed and fell back to server trim) —
+    // the whole point is to re-encode a specific window. Falling back to the
+    // original would upload an untrimmed (or undecodable) file and produce a
+    // broken entry, so surface a hard error instead.
+    const needsTrim = opts.startSec !== undefined || opts.endSec !== undefined;
+    if (needsTrim) {
+      console.error('[Video] Ref video trim/resize failed:', e);
+      return {
+        buffer,
+        ext: '',
+        wasConverted: false,
+        error: `Failed to process the reference video: ${(e as Error)?.message || String(e)}`,
+      };
+    }
     console.warn('[Video] Ref video resize failed, using original:', e);
     return { buffer, ext, wasConverted: false };
   }

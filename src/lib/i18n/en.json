@@ -297,7 +297,8 @@
           "notVideo": "Selected file is not a video.",
           "tooLarge": "Video is too large (max 50 MB before clipping).",
           "invalidUrl": "Please enter a valid video URL, video page link, or video ID.",
-          "urlNotReady": "That video isn't ready to reuse yet — it must be completed and downloadable."
+          "urlNotReady": "That video isn't ready to reuse yet — it must be completed and downloadable.",
+          "clientClipFailed": "The browser couldn't clip this video, so the raw file will be uploaded and the server will trim/convert it instead."
         }
       }
     },

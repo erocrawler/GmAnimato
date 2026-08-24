@@ -561,9 +561,6 @@ export interface EnhanceMiniMaxPromptParams {
    *  the tag↔image correspondence from a bare URL, so every image MUST carry
    *  a label that names the tag it corresponds to. */
   labeledImages?: { label: string; url: string }[];
-  /** @deprecated Use labeledImages. Flat URL list sent without captions (the
-   *  model cannot tell which URL is which <Picture N> / <Video 1>). */
-  imageUrls?: string[];
   /** Video duration in seconds — the enhanced prompt references it. */
   durationSeconds?: number;
   /** 'zh' | 'en' — the generated shot descriptions / dialogue should prefer
@@ -610,44 +607,72 @@ export async function enhanceMiniMaxPrompt(
       ? availableRefTags.join(', ')
       : '（无 — 纯文本转视频，没有任何参考图像或视频）';
 
-  // Reference-to-video structure: subject definitions map each <Picture N> to
-  // a <Subject N>, then summary / retention analysis / shot-by-shot description
-  // with dialogue tags and the audio sections. Kept terse — the prompt itself
-  // is large and must fit the VL context window alongside up to 9 images.
-  const ref2vSystemPrompt = `MiniMax H3 reference-to-video prompt architect. Rewrite the user's simple prompt into the model's required structured prompt in ${lang}, using EXACTLY these sections (each heading on its own line ending with ':').
+  // Reference-to-video structure (full-reference / Ref2VA format from the
+  // official H3 prompt-writing guide): subject_definitions, summary,
+  // retention_analysis, detailed_description, overall_soundscape,
+  // non_diegetic_music — covering all reference operations available in this
+  // job: <Subject N>, <Picture N> (subject source, frame anchor, storyboard)
+  // and <Video N> (editing / continuation / structure), with the full summary
+  // task-type set and the visible retention markers. No <Audio N> is
+  // available — the job has no audio reference input, so audio copy / reuse /
+  // reference operations are out of scope. Kept terse — the prompt itself is
+  // large and must fit the VL context window alongside up to 9 images.
+  // Whether a reference video exists is known at construction time, so
+  // video-specific rules are built in statically instead of conditional text.
+  const videoMergeRule = hasVideoRef
+    ? `- <Video 1> is available. If it shows the same subject as a picture, merge it too: "<Picture 1>、<Video 1> 共同作为 <Subject N> 外观来源..." — if it shows different subjects, give it its own <Subject N>.\n`
+    : '';
+  const hasPictureRef = availableRefTags.some((t) => /^<Picture\s*\d+>$/i.test(t));
+  const videoOnlyRule = hasVideoRef && !hasPictureRef
+    ? `- <Video 1> is the only reference in this job: declare every subject as "<Video 1> 作为 <Subject N> ...".\n`
+    : '';
+  const ref2vSystemPrompt = `MiniMax H3 reference-to-video prompt architect. Rewrite the user's simple prompt into the model's required structured prompt in ${lang}, using EXACTLY these six sections in order (each heading on its own line ending with ':'): subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape, non_diegetic_music. A reference label keeps the same meaning across all six sections.
 
-AVAILABLE REFERENCES (the ONLY tags that exist — never use others):
+AVAILABLE REFERENCES (the complete set of tags for this job):
 ${availableRefsDesc}
 
 subject_definitions:
-- Only declare sources from AVAILABLE REFERENCES. NEVER invent <Picture N>/<Video 1> not listed.
-- GROUP pictures by the actual subject: if two <Picture N> show the SAME character/object (compare the attached images — same person, same outfit/features), declare ONE <Subject N> for them and list both pictures as its sources: "<Picture 1>、<Picture 2> 共同作为 <Subject 1> 人物/物体外观来源，需保持其<关键视觉特征>。" Only introduce a new <Subject N> when the images show a DIFFERENT person/object.
-- If <Video 1> available and it shows the same subject as a picture, merge it too: "<Picture 1>、<Video 1> 共同作为 <Subject N> 外观来源..." — if it shows different subjects, give it its own <Subject N>.
+- <Subject N> = reusable visible content: people/animals/objects, scenes/backgrounds/environments, clothing/props/interfaces/effects, styles/actions/expressions/poses. Declare sources from AVAILABLE REFERENCES using the listed tags, and declare each <Subject N> and its role.
+- GROUP pictures by the actual subject: if two <Picture N> show the SAME character/object (compare the attached images — same person, same outfit/features), declare ONE <Subject N> for them and list both pictures as its sources: "<Picture 1>、<Picture 2> 共同作为 <Subject 1> 人物/物体外观来源，需保持其<关键视觉特征>。" Introduce a new <Subject N> when the images show a different person or object.
+${videoMergeRule}- One subject may combine multiple assets; one asset may provide multiple subjects. State what each asset contributes.
 - "<Picture N> 作为 <Subject N> ..." format for each subject source (write in 中文).
+- Use a standalone <Picture N> entry when the image itself is a frame anchor (first frame, keyframe, last frame, edited keyframe, composition anchor) or a storyboard for specific shots: "<Picture 2> is the first frame of [Shot 1], showing ..." / "<Picture 3> is a storyboard reference for [Shot 1] and [Shot 2], defining their viewpoint, subject placement, and shot order." Otherwise cite the image inside the <Subject N> it defines.
+- <Video N> is reserved for whole-video relationships: editing an original video, continuing from its end, or referencing its camera movement, cuts, rhythm, or temporal structure ("<Video 1> is the source video for the target video edit."). People/objects/scenes/actions from the video belong under <Subject N>.
 - Unused available tags: "<X> 不适用。"
-- Declare each <Subject N> role.
 
 summary:
-One paragraph in ${lang}. If refs exist, start with "[reference generation + audio reference] ".
+- One short paragraph in ${lang}. Begin with a square-bracketed task-type prefix combining the actual roles of the references with " + " (each type appears at most once): [keyframe completion] an image is a concrete first-frame/keyframe/last-frame anchor / [reference generation] an image or video guides character, scene, style, action, camera or storyboard without being a concrete frame or an edited/continued source / [video editing] the source video is directly modified / [video continuation] new content continues, extends, resumes or transitions from the source video.
+- Match the type to the reference's actual role: camera/cuts/rhythm-only references use [reference generation]; videos that are directly edited or continued use [video editing]/[video continuation].
+- For video-editing tasks, continue after the prefix: "The target video is an edited version of <Video 1>."
+- Use only labels already defined in subject_definitions; introduce no new labels here.
 
 retention_analysis:
-Per <Subject N>: "<Subject N>（出现于 [Shot 1]）：fully_preserved - <特征>。" (list each picture/video that feeds it). Use the official marker set: fully_preserved 完全保留 / partially_preserved 部分保留（改动了个别特征）/ attribute_transfer 特征转移到另一主体 / weak_reference 仅风格或氛围的弱参考.
+- One line per reference label (Subject/Picture/Video), preserving the roles defined in subject_definitions; speaker IDs stay in detailed_description.
+- Visible markers (fixed English values): fully_preserved / partially_preserved (still used, some defined characteristics changed) / attribute_transfer (characteristics transferred to a different subject) / weak_reference (style, category, composition or atmosphere only).
+- Formats: "<Subject 1> (appears in [Shot 1], [Shot 3]): fully_preserved - <retained features>." / "<Picture 2> ([Shot 1] first frame): fully_preserved - ..." / "<Video 1> (cut and pacing structure): weak_reference - ...".
+- Match each marker to the role already defined for that label; rate fidelity against those roles, treating newly added actions, backgrounds, or plot events as the target video's own content.
 
 detailed_description:
-Shot-by-shot script in ${lang}: scene setup, then "[Shot N] At MM:SS.mmm, <Subject N> ..." — the first shot is "[Shot 1]" with NO timestamp; later shots carry strictly increasing cut times ("[Shot 2] At 00:03.500"). Camera motion is written naturally in the sentence as type + amplitude + speed when meaningful (e.g. "镜头小幅度慢速推近" / "the camera pans right with large amplitude at fast speed"). Speakers get stable IDs across shots: (S1), (S2)..., compound (S1,S2) for group speech; the ID sits OUTSIDE <d>: "<Subject 1> (S1) 说：<d>[Chinese] 对话内容。</d>". Voiceover: "以画外音说道" and state the on-screen lips remain closed. Dialogue crossing a cut uses <scenetrans> at the junction and notes the audio continues across the cut; speech cut off by the video end uses <cutoff>. On-screen readable text (signs, banners, subtitles) goes in English double quotes, preserved verbatim. Only wrap ACTUAL spoken words a character says aloud in dialogue tags: "<d>[Chinese] 对话内容。</d>" or "<d>[English] dialogue.</d>". Sound effects (breaths, sighs, moans, footsteps, thuds) are NEVER dialogue — describe them as plain text ("<Subject 1> 发出急促的呼气声") and put ambient sounds in overall_soundscape.
+- Establish the style in one or two ${lang} sentences BEFORE [Shot 1] (e.g. "The target video is in a cinematic, literary music-video style with soft lighting and a slightly desaturated color palette."). "[Shot 1]" is timestamp-free; later shots "[Shot N] At MM:SS.mmm, ..." carry strictly increasing cut times ("[Shot 2] At 00:03.500").
+- At a label's first clear appearance, describe its referenced characteristics, frame position and current action; reuse the label afterwards without redefining it. Frame anchors use natural phrasing: "the shot begins from <Picture 1>" / "the shot's keyframe corresponds to <Picture 2>" / "the shot ends on <Picture 3>". Cite <Video N> where its source state, structure or continuation relationship applies.
+- Camera motion is written naturally in the sentence as type + amplitude + speed when meaningful (e.g. "镜头小幅度慢速推近" / "the camera pans right with large amplitude at fast speed").
+- Speakers get stable IDs by order of actual vocal events: "<Subject 1> (S1) 说：<d>[Chinese] 对话内容。</d>" — <Subject N> is the referenced subject, (Sx) the speaker; ID sits OUTSIDE <d>; compound (S1,S2) for group speech. Off-screen: keep the same form and mark it off-screen. Non-subject speakers: stable voice description + (Sx).
+- <d>[lang]...</d> wraps real spoken sentences — the character speaks those exact words in that language (lip-sync + voice). Describe sound effects (breaths, sighs, moans, footsteps, thuds) as plain text ("<Subject 1> 发出急促的呼气声") and put ambient sounds in overall_soundscape. Voiceover: "以画外音说道" and state the on-screen lips remain closed.
+- Dialogue crossing a cut uses <scenetrans> at the junction and notes the audio continues across the cut; speech cut off by the video end uses <cutoff>.
+- On-screen readable text (signs, banners, subtitles) goes in English double quotes, preserved verbatim.
+- Make it as detailed and explicit as possible (composition, appearance, lighting, camera, sound per shot); normally 350-500 words for generation tasks; dialogue-dense content prioritizes a complete spoken timeline.
 
 overall_soundscape:
-Ambient sound in ${lang}, 1-4 sentences in one paragraph. Dialogue/singing stays in detailed_description — do not repeat it here. "N/A" only for complete silence.
+- Ambient sound in ${lang}, 1-4 sentences in one paragraph. Dialogue/singing stays in detailed_description. "N/A" only for complete silence.
 
 non_diegetic_music:
-Music/score in ${lang}, 1-3 sentences: instrumentation, tempo, dynamics — no abstract mood words. "N/A" when there is no audience-only music.
+- Music/score in ${lang}, 1-3 sentences: instrumentation, tempo, dynamics — no abstract mood words. "N/A" when there is no audience-only music.
 
 Rules:
-- Only tags the model sees: <Picture N>, <Video 1>, <Subject N>, <Audio N>. NEVER output screenshot labels like "<Video 1> 截图 N/M".
-- <d>[lang]...</d> means the character SPEAKS those exact words in that language (lip-sync + voice). Use it ONLY for real spoken sentences. Never wrap sounds/effects (breaths, gasps, moans, knocks) in <d> — write them as plain description and put them in overall_soundscape.
-- If only <Video 1> exists, write NO "<Picture N> 作为..." line.
-- Upload captions: '<Picture N>' for ref images, '<Video 1> 截图 N/M' for video frames — analysis only; video subjects source from <Video 1>.
-- Study attached images for appearance details (clothing, features) and use them. When pictures show the same subject, merge them — do NOT fabricate a separate <Subject N> per <Picture N>.
+- Use the tags <Picture N>, <Video 1>, <Subject N>; refer to the reference video as <Video 1>, not via screenshot labels like "<Video 1> 截图 N/M".
+- <d>[lang]...</d> wraps real spoken sentences — the character speaks those exact words in that language (lip-sync + voice). Describe sounds/effects (breaths, gasps, moans, knocks) as plain text, outside <d>, and put ambient sounds in overall_soundscape.
+${videoOnlyRule}- Upload captions: '<Picture N>' for ref images, '<Video 1> 截图 N/M' for video frames — analysis only; video subjects source from <Video 1>.
+- Study attached images for appearance details (clothing, features) and use them. When pictures show the same subject, merge them into a single <Subject N>.
 - Make detailed_description as detailed and explicit as possible (composition, appearance, lighting, camera, sound per shot); dialogue-dense content prioritizes a complete spoken timeline.
 - Video is ${duration}s; match shot plan.
 - Output ONLY {"enhanced_prompt": "<full prompt text with real line breaks>"}.`;
@@ -656,21 +681,21 @@ Rules:
   // with shot segments + audio sections. Kept terse to fit the VL context.
   const i2vSystemPrompt = `MiniMax H3 image-to-video prompt architect. Rewrite the user's simple prompt into the required structured prompt in ${lang}, using EXACTLY these sections (each heading on its own line ending with ':').
 
-AVAILABLE REFERENCES (the ONLY tags that exist — never use others):
+AVAILABLE REFERENCES (the complete set of tags for this job):
 ${availableRefsDesc}
 
 integrated_multimodal_description:
-Shot-by-shot script in ${lang}: scene setup, then "[Shot N] At MM:SS.mmm, ..." — the first shot is "[Shot 1]" with NO timestamp; later shots carry strictly increasing cut times ("[Shot 2] At 00:03.500"). Camera motion is written naturally in the sentence as type + amplitude + speed when meaningful (e.g. "镜头小幅度慢速推近" / "the camera pans right with large amplitude at fast speed"). Speakers get stable IDs: (S1), (S2)..., compound (S1,S2) for group speech, ID outside <d>: "女子 (S1) 说：<d>[Chinese] 对话内容。</d>". Voiceover: "以画外音说道" and state the on-screen lips remain closed. Dialogue crossing a cut uses <scenetrans>; speech cut off by the video end uses <cutoff>. On-screen text goes in English double quotes, verbatim. Only wrap ACTUAL spoken words in dialogue tags: "<d>[Chinese] 对话内容。</d>" or "<d>[English] dialogue.</d>". Sounds (breaths, sighs, moans, footsteps) are plain description, never <d>. Only reference <Picture N> from AVAILABLE REFERENCES.
+Shot-by-shot script in ${lang}: scene setup, then "[Shot N] At MM:SS.mmm, ..." — the first shot is "[Shot 1]" with NO timestamp; later shots carry strictly increasing cut times ("[Shot 2] At 00:03.500"). Camera motion is written naturally in the sentence as type + amplitude + speed when meaningful (e.g. "镜头小幅度慢速推近" / "the camera pans right with large amplitude at fast speed"). Speakers get stable IDs: (S1), (S2)..., compound (S1,S2) for group speech, ID outside <d>: "女子 (S1) 说：<d>[Chinese] 对话内容。</d>". Voiceover: "以画外音说道" and state the on-screen lips remain closed. Dialogue crossing a cut uses <scenetrans>; speech cut off by the video end uses <cutoff>. On-screen text goes in English double quotes, verbatim. Wrap real spoken sentences in dialogue tags: "<d>[Chinese] 对话内容。</d>" or "<d>[English] dialogue.</d>". Describe sounds (breaths, sighs, moans, footsteps) as plain text, outside <d>. Use <Picture N> tags from AVAILABLE REFERENCES.
 
 overall_soundscape:
-Ambient sound in ${lang}, 1-4 sentences in one paragraph. Dialogue/singing stays in integrated_multimodal_description — do not repeat it here. "N/A" only for complete silence.
+Ambient sound in ${lang}, 1-4 sentences in one paragraph. Dialogue/singing stays in integrated_multimodal_description. "N/A" only for complete silence.
 
 non_diegetic_music:
 Music/score in ${lang}, 1-3 sentences: instrumentation, tempo, dynamics — no abstract mood words. "N/A" when there is no audience-only music.
 
 Rules:
-- Only reference tags from AVAILABLE REFERENCES. NEVER invent <Picture N>/<Video 1> not listed.
-- <d>[lang]...</d> means the character SPEAKS those words in that language (lip-sync + voice). Only for real spoken sentences; never wrap sounds/effects in <d> — put them as plain description / overall_soundscape.
+- Reference tags from AVAILABLE REFERENCES as listed.
+- <d>[lang]...</d> wraps real spoken sentences — the character speaks those words in that language (lip-sync + voice). Describe sounds/effects as plain text and put them in overall_soundscape.
 - Upload captions ('首帧'/'尾帧'/etc.) tell you which image is which.
 - Make integrated_multimodal_description as detailed and explicit as possible (composition, appearance, lighting, camera, sound per shot); dialogue-dense content prioritizes a complete spoken timeline.
 - Video is ${duration}s; match shot plan.
@@ -691,20 +716,12 @@ Rules:
     // <Video 1> screenshots. Fall back to the deprecated flat list when no
     // labels are provided (still sent, just without binding info).
     const labeled = params.labeledImages ?? [];
-    const plain = (params.imageUrls ?? []).filter(Boolean);
     if (labeled.length > 0) {
       for (const { label, url } of labeled) {
         // Downscale aggressively: up to 9 images must fit the VL context window.
         const processed = await toInferenceImageUrl(url, CUSTOM_VL_ENHANCE_MAX_IMAGE_PIXELS);
         messageContent.push({ type: 'text', text: `Reference image for ${label}:` });
         messageContent.push({ type: 'image_url', image_url: { url: processed } });
-      }
-    } else if (plain.length > 0) {
-      const processed = await Promise.all(
-        plain.map((u) => toInferenceImageUrl(u, CUSTOM_VL_ENHANCE_MAX_IMAGE_PIXELS))
-      );
-      for (const url of processed) {
-        messageContent.push({ type: 'image_url', image_url: { url } });
       }
     }
 
