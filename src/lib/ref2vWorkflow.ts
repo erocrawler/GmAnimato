@@ -10,6 +10,12 @@ interface Ref2VWorkflowParams {
   ref_video_name: string;
   ref_video_url: string;
   ref_video_has_audio?: boolean;
+  /** Standalone reference audio (optional, ≤15s). Referenced as <Audio 1> in
+   *  the prompt. This is a SEPARATE input from the ref video's soundtrack
+   *  (ref_video_audios): when a ref video is also present, both audio sources
+   *  stay connected. */
+  ref_audio_name?: string;
+  ref_audio_url?: string;
   ref_image_names?: string[]; // up to 5 reference images
   ref_image_urls?: string[];
   /** Poster frame (video.original_image_url). For video refs it is a frame
@@ -45,9 +51,12 @@ const MAX_REF_IMAGES = 6;
  * - RandomNoise -> BasicScheduler -> SamplerCustomAdvanced (res_multistep)
  * - Video + audio VAEs -> VAEDecode/VAEDecodeAudio -> VHS_VideoCombine
  *
- * Refs are ALL optional: with no ref video and no ref images, the workflow
- * degrades to pure text-to-video (t2v) — unused LoadVideo/LoadImage nodes are
- * stripped from the payload.
+ * Refs are ALL optional: with no ref video, no ref audio and no ref images,
+ * the workflow degrades to pure text-to-video (t2v) — unused loader nodes are
+ * stripped from the payload. ref_audios (standalone audio) and
+ * ref_video_audios (the ref video's soundtrack) are separate node inputs: a
+ * standalone audio is added alongside the video's soundtrack, never replacing
+ * it. Both ride the payload's generic `videos` list.
  *
  * Reuses the i2v MiniMax builder patterns: x32 dimension rounding, 720p upscale,
  * and the always-required speed-up LoRA with 4/8 steps.
@@ -63,6 +72,8 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   const quote = (v: string | undefined) => JSON.stringify(v ?? '').slice(1, -1);
   template = template.replace(/{ref_video_name}/g, quote(params.ref_video_name));
   template = template.replace(/{ref_video_url}/g, quote(params.ref_video_url));
+  template = template.replace(/{ref_audio_name}/g, quote(params.ref_audio_name));
+  template = template.replace(/{ref_audio_url}/g, quote(params.ref_audio_url));
   for (let i = 1; i <= MAX_REF_IMAGES; i++) {
     const name = params.ref_image_names?.[i - 1] ?? '';
     const url = params.ref_image_urls?.[i - 1] ?? '';
@@ -75,6 +86,7 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   const workflow = JSON.parse(template);
 
   const hasRefVideo = !!params.ref_video_url && !!params.ref_video_name;
+  const hasRefAudio = !!params.ref_audio_url && !!params.ref_audio_name;
   const refImageCount = Math.max(0, Math.min(MAX_REF_IMAGES, params.ref_image_urls?.length ?? 0));
 
   // Find all required nodes dynamically
@@ -86,6 +98,7 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   const randomNoiseNode = findNode(workflow, 'RandomNoise');
   const durationNode = findNode(workflow, 'PrimitiveFloat');
   const loadVideoNode = findNode(workflow, 'VHS_LoadVideo');
+  const loadAudioNode = findNode(workflow, 'LoadAudio');
 
   // Validate all required nodes are present
   const validationErrors: string[] = [];
@@ -97,6 +110,7 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   if (!randomNoiseNode) validationErrors.push('RandomNoise node not found');
   if (!durationNode) validationErrors.push('PrimitiveFloat (duration) node not found');
   if (hasRefVideo && !loadVideoNode) validationErrors.push('VHS_LoadVideo node not found');
+  if (hasRefAudio && !loadAudioNode) validationErrors.push('LoadAudio node not found');
 
   if (validationErrors.length > 0) {
     console.error('Ref2V workflow validation errors:', validationErrors);
@@ -173,6 +187,29 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
       delete encodeInputs['ref_video_audios'];
     }
   }
+
+  // Standalone reference audio is optional. When absent, strip the LoadAudio
+  // node and its ref_audios input. ref_audios and ref_video_audios are
+  // SEPARATE node inputs — when a ref video (with soundtrack) and a standalone
+  // audio are both present, both stay connected and feed the node as-is.
+  if (!hasRefAudio) {
+    if (loadAudioNode) {
+      delete workflow.input.workflow[loadAudioNode];
+    }
+    if (encodeInputs) {
+      delete encodeInputs['ref_audios.ref_audio_0'];
+    }
+  } else if (loadAudioNode) {
+    workflow.input.node_weights[loadAudioNode] = 1.0; // LoadAudio - ref audio decode
+  }
+
+  // Rebuild the upload entries explicitly: ref video first, then the standalone
+  // audio (both ride the payload's generic `videos` list — the worker uploads
+  // them into ComfyUI's input/ where VHS_LoadVideo/LoadAudio read by name).
+  workflow.input.videos = [
+    ...(hasRefVideo ? [{ name: params.ref_video_name, image: params.ref_video_url }] : []),
+    ...(hasRefAudio ? [{ name: params.ref_audio_name as string, image: params.ref_audio_url as string }] : []),
+  ];
 
   // Reference images are optional (0-5). Remove unused LoadImage nodes and
   // their ref_images.* input keys (flat dotted names — the node's autogrow

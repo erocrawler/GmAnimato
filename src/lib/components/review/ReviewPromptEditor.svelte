@@ -20,9 +20,9 @@
   export let isEditable: boolean = true;
   export let videoWorkflowType: string = "";
   export let promptRelayMode: boolean = false;
-  export let refItems: { kind: "video" | "image"; token: string; url: string; label: string }[] = [];
+  export let refItems: { kind: "video" | "audio" | "image"; token: string; url: string; label: string }[] = [];
   export let referencedTokens: string[] = [];
-  export let availableRefs: { kind: "video" | "image"; token: string; url: string; label: string }[] = [];
+  export let availableRefs: { kind: "video" | "audio" | "image"; token: string; url: string; label: string }[] = [];
 
   const MAX_PROMPT_CHARS = 10000; // matches DB VarChar(10000)
 
@@ -39,11 +39,14 @@
   // Atom inline node: renders a badge chip (thumbnail for images, video icon
   // for videos) and serializes back to its literal <Picture N> / <Video 1>
   // text via renderText, so the prompt round-trips byte-for-byte.
-  const TOKEN_RE = /^<(Picture|Video)\s*(\d+)>$/;
+  const TOKEN_RE = /^<(Picture|Video|Audio)\s*(\d+)>$/;
 
   function refAttrsFor(token: string) {
     const ref = refItems.find((r) => r.token === token);
-    const kind = /^<Video\s*1>$/i.test(token) ? "video" : /^<Picture\s*\d+>$/i.test(token) ? "image" : "";
+    const kind = /^<Video\s*1>$/i.test(token) ? "video"
+      : /^<Audio\s*\d+>$/i.test(token) ? "audio"
+      : /^<Picture\s*\d+>$/i.test(token) ? "image"
+      : "";
     return { token, kind: ref?.kind ?? kind, url: ref?.url ?? "", label: ref?.label ?? token };
   }
 
@@ -88,6 +91,14 @@
           ["rect", { x: "2", y: "6", width: "20", height: "12", rx: "2" }],
           ["path", { d: "m10 9 5 3-5 3z" }],
         ]);
+      } else if (kind === "audio") {
+        children.push([
+          "svg",
+          { class: "w-3.5 h-3.5 inline-block align-middle", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round" },
+          ["path", { d: "M9 18V5l12-2v13" }],
+          ["circle", { cx: "6", cy: "18", r: "3" }],
+          ["circle", { cx: "18", cy: "16", r: "3" }],
+        ]);
       }
       children.push(["span", token]);
       return [
@@ -107,10 +118,10 @@
       return node.attrs.token;
     },
     addInputRules() {
-      // Typing <Picture N> / <Video 1> live-converts to a badge.
+      // Typing <Picture N> / <Video 1> / <Audio 1> live-converts to a badge.
       return [
         new InputRule({
-          find: /(?:<Picture|Video)\s*\d+>$/,
+          find: /(?:<Picture|Video|Audio)\s*\d+>$/,
           // The input-rules plugin shares its transaction via `state.tr` and
           // applies it when it has steps — mutate it and return nothing.
           handler: ({ state, range, match }) => {
@@ -149,7 +160,7 @@
     const blocks: PMNode[] = [];
     for (const line of text.split("\n")) {
       const inline: PMNode[] = [];
-      for (const part of line.split(/(<(?:Picture|Video)\s*\d+>)/g)) {
+      for (const part of line.split(/(<(?:Picture|Video|Audio)\s*\d+>)/g)) {
         if (!part) continue;
         if (TOKEN_RE.test(part)) {
           inline.push(schema.nodes.referenceToken.create(refAttrsFor(part)));
@@ -330,6 +341,8 @@
                 {/if}
                 {#if ref.kind === "video"}
                   <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
+                {:else if ref.kind === "audio"}
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
                 {:else}
                   <img src={ref.url} alt={ref.label} class="w-8 h-8 rounded object-cover shrink-0" />
                 {/if}

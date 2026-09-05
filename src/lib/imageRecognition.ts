@@ -561,6 +561,10 @@ export interface EnhanceMiniMaxPromptParams {
    *  the tag↔image correspondence from a bare URL, so every image MUST carry
    *  a label that names the tag it corresponds to. */
   labeledImages?: { label: string; url: string }[];
+  /** True when the job has a standalone reference audio attached (ref2v only).
+   *  It is referenced as <Audio 1> — the VL model can't hear it, but it must
+   *  know the tag exists (and never hallucinate it when absent). */
+  hasStandaloneAudio?: boolean;
   /** Video duration in seconds — the enhanced prompt references it. */
   durationSeconds?: number;
   /** 'zh' | 'en' — the generated shot descriptions / dialogue should prefer
@@ -602,6 +606,13 @@ export async function enhanceMiniMaxPrompt(
     if (/^<Video\s*1>/.test(img.label)) hasVideoRef = true;
   }
   if (hasVideoRef) availableRefTags.push('<Video 1>');
+  // Standalone reference audio is <Audio 1> — present only when the job has
+  // one. AVAILABLE REFERENCES is the single source of truth for what the model
+  // may reference, so the tag is listed purely by presence (no workflowType
+  // gate). Listed last, matching the node's images → videos → audio ordering.
+  if (params.hasStandaloneAudio) {
+    availableRefTags.push('<Audio 1>');
+  }
   const availableRefsDesc =
     availableRefTags.length > 0
       ? availableRefTags.join(', ')
@@ -613,10 +624,11 @@ export async function enhanceMiniMaxPrompt(
   // non_diegetic_music — covering all reference operations available in this
   // job: <Subject N>, <Picture N> (subject source, frame anchor, storyboard)
   // and <Video N> (editing / continuation / structure), with the full summary
-  // task-type set and the visible retention markers. No <Audio N> is
-  // available — the job has no audio reference input, so audio copy / reuse /
-  // reference operations are out of scope. Kept terse — the prompt itself is
-  // large and must fit the VL context window alongside up to 9 images.
+  // task-type set and the visible retention markers. A standalone reference
+  // audio (<Audio 1>) is listed only when the job actually has one (see
+  // AVAILABLE REFERENCES); without it, audio copy/reuse/reference operations
+  // are out of scope. Kept terse — the prompt itself is large and must fit
+  // the VL context window alongside up to 9 images.
   // Whether a reference video exists is known at construction time, so
   // video-specific rules are built in statically instead of conditional text.
   const videoMergeRule = hasVideoRef
@@ -625,6 +637,12 @@ export async function enhanceMiniMaxPrompt(
   const hasPictureRef = availableRefTags.some((t) => /^<Picture\s*\d+>$/i.test(t));
   const videoOnlyRule = hasVideoRef && !hasPictureRef
     ? `- <Video 1> is the only reference in this job: declare every subject as "<Video 1> 作为 <Subject N> ...".\n`
+    : '';
+  // <Audio 1> (standalone reference audio) is a separate node input from any
+  // ref-video soundtrack. Static, list-driven rules — emitted only when the
+  // tag is actually available, mirroring the videoMergeRule pattern.
+  const audioRule = params.hasStandaloneAudio
+    ? `- <Audio 1> (when listed) is the job's standalone reference AUDIO clip: it supplies the desired voice/singing timbre and music/ambience style, which you cannot hear but must follow. Direct generated dialogue/singing (the <d> lines) to follow <Audio 1> when the user's text implies speech or song; otherwise reflect its style in overall_soundscape / non_diegetic_music. Only the tags listed in AVAILABLE REFERENCES exist — a tag not listed there is invalid and will be stripped.\n`
     : '';
   const ref2vSystemPrompt = `MiniMax H3 reference-to-video prompt architect. Rewrite the user's simple prompt into the model's required structured prompt in ${lang}, using EXACTLY these six sections in order (each heading on its own line ending with ':'): subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape, non_diegetic_music. A reference label keeps the same meaning across all six sections.
 
@@ -669,8 +687,8 @@ non_diegetic_music:
 - Music/score in ${lang}, 1-3 sentences: instrumentation, tempo, dynamics — no abstract mood words. "N/A" when there is no audience-only music.
 
 Rules:
-- Use the tags <Picture N>, <Video 1>, <Subject N>; refer to the reference video as <Video 1>, not via screenshot labels like "<Video 1> 截图 N/M".
-- <d>[lang]...</d> wraps real spoken sentences — the character speaks those exact words in that language (lip-sync + voice). Describe sounds/effects (breaths, gasps, moans, knocks) as plain text, outside <d>, and put ambient sounds in overall_soundscape.
+- Use the tags <Picture N>, <Video 1>, <Subject N>, <Audio N>; refer to the reference video as <Video 1>, not via screenshot labels like "<Video 1> 截图 N/M". Only the tags listed in AVAILABLE REFERENCES exist — a tag not listed there is invalid and will be stripped.
+${audioRule}- <d>[lang]...</d> wraps real spoken sentences — the character speaks those exact words in that language (lip-sync + voice). Describe sounds/effects (breaths, gasps, moans, knocks) as plain text, outside <d>, and put ambient sounds in overall_soundscape.
 ${videoOnlyRule}- Upload captions: '<Picture N>' for ref images, '<Video 1> 截图 N/M' for video frames — analysis only; video subjects source from <Video 1>.
 - Study attached images for appearance details (clothing, features) and use them. When pictures show the same subject, merge them into a single <Subject N>.
 - Make detailed_description as detailed and explicit as possible (composition, appearance, lighting, camera, sound per shot); dialogue-dense content prioritizes a complete spoken timeline.
@@ -765,12 +783,14 @@ Rules:
     //    the generation node would try to bind a non-existent reference. When
     //    the job has a reference video, remap hallucinated <Picture N> to
     //    <Video 1> (the model observed those subjects in the video screenshots,
-    //    so the video is the correct source). Otherwise strip the tag.
+    //    so the video is the correct source). Hallucinated <Audio N> tags are
+    //    never remapped — always stripped (the standalone audio is always
+    //    <Audio 1> and only exists when listed).
     const hasVideo = availableRefTags.some((t) => /^<Video\s*1>$/i.test(t));
-    const refTagPattern = /<(?:Picture|Video)\s*\d+>/gi;
+    const refTagPattern = /<(?:Picture|Video|Audio)\s*\d+>/gi;
     enhanced = enhanced.replace(refTagPattern, (tag) => {
       if (availableRefTags.some((t) => t.toLowerCase() === tag.toLowerCase())) return tag;
-      return hasVideo ? '<Video 1>' : '';
+      return hasVideo && /^<(?:Picture|Video)\s*\d+>$/i.test(tag) ? '<Video 1>' : '';
     });
     // Collapse any leftover doubled whitespace from the removals.
     enhanced = enhanced.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n');

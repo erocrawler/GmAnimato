@@ -125,23 +125,29 @@ export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promis
     const refVideoUrl = video.additional_options?.ref_video_url
       ? toOriginalUrl(video.additional_options.ref_video_url)
       : undefined;
+    const refAudioUrl = video.additional_options?.ref_audio_url
+      ? toOriginalUrl(video.additional_options.ref_audio_url)
+      : undefined;
     const refImageUrls: string[] | undefined = Array.isArray(video.additional_options?.ref_image_urls)
       ? video.additional_options.ref_image_urls.map((u: string) => toOriginalUrl(u))
       : undefined;
 
-    const [refVideoBase64, refImageBase64s] = shouldSendBase64
+    const [refVideoBase64, refAudioBase64, refImageBase64s] = shouldSendBase64
       ? await Promise.all([
           refVideoUrl ? fetchImageAsBase64(refVideoUrl) : Promise.resolve(null),
+          refAudioUrl ? fetchImageAsBase64(refAudioUrl) : Promise.resolve(null),
           refImageUrls && refImageUrls.length > 0
             ? Promise.all(refImageUrls.map((u) => fetchImageAsBase64(u)))
             : Promise.resolve([]),
         ])
-      : [null, [] as string[]];
+      : [null, null, [] as string[]];
 
     payload = await buildRef2VWorkflow({
       ref_video_name: video.additional_options?.ref_video_name ?? '',
       ref_video_url: refVideoUrl ?? '',
       ref_video_has_audio: (video.additional_options as any)?.ref_video_has_audio as boolean | undefined,
+      ref_audio_name: video.additional_options?.ref_audio_name ?? '',
+      ref_audio_url: refAudioUrl ?? '',
       ref_image_names: Array.isArray(video.additional_options?.ref_image_names)
         ? (video.additional_options.ref_image_names as string[])
         : undefined,
@@ -168,10 +174,19 @@ export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promis
         image: b64,
       }));
     }
-    if (shouldSendBase64 && refVideoBase64 && payload?.input?.videos) {
-      payload.input.videos = [
-        { name: payload.input.videos[0]?.name ?? 'ref_video.mp4', image: refVideoBase64 },
-      ];
+    // Rebuild videos by NAME (not index) — the list may carry the ref video
+    // and/or the standalone ref audio, in either order.
+    if (shouldSendBase64 && Array.isArray(payload?.input?.videos)) {
+      const refVideoName = video.additional_options?.ref_video_name;
+      const refAudioName = video.additional_options?.ref_audio_name;
+      payload.input.videos = payload.input.videos.map((v: { name?: string; image?: string }) => ({
+        name: v.name ?? (v === payload.input.videos[0] ? 'ref_video.mp4' : 'ref_audio.wav'),
+        image: (v.name && v.name === refAudioName && refAudioBase64)
+          ? refAudioBase64
+          : (v.name && v.name === refVideoName && refVideoBase64)
+            ? refVideoBase64
+            : (v.image ?? ''),
+      }));
     }
   } else if (isMiniMaxWorkflow(workflow)) {
     // MiniMax H3 uses a different node stack — dedicated builder.

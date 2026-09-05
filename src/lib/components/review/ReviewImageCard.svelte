@@ -54,6 +54,15 @@
             {/each}
           </div>
         {/if}
+        {#if entry.additional_options?.ref_audio_url}
+          <div class="w-full mt-3 flex items-center gap-3 rounded-lg bg-base-200 p-3">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            <div class="min-w-0 flex-1">
+              <p class="text-xs opacity-70 truncate">{$_("review.ref2v.audioLabel")} · &lt;Audio 1&gt;</p>
+              <audio controls src={entry.additional_options.ref_audio_url} class="w-full h-8"></audio>
+            </div>
+          </div>
+        {/if}
       </div>
     {:else if entry.last_image_url}
       <!-- FL2V Mode: Show both images -->

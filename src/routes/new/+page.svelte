@@ -82,6 +82,19 @@
   let refImageInputs: (HTMLInputElement | undefined)[] = [];
   let refVideoInput: HTMLInputElement;
 
+  // Standalone reference audio (ref2v): a single ≤15s clip, referenced as
+  // <Audio 1> in the prompt (see the review page). It is a SEPARATE audio
+  // input from the ref video's soundtrack — both can be present. Mirrors the
+  // ref-video flow: a visible "choose" input feeds a hidden named input that
+  // the form actually submits.
+  let refAudioFile: File | null = null;
+  let refAudioDuration = 0;
+  let refAudioError = '';
+  let refAudioPreviewUrl = '';
+  let refAudioChooseInput: HTMLInputElement;
+  let refAudioInput: HTMLInputElement;
+  const MAX_REF_AUDIO_SECONDS = 15;
+
   function setFileInput(inputEl: HTMLInputElement | undefined, file: File | null) {
     if (!inputEl) return;
     const dt = new DataTransfer();
@@ -325,6 +338,11 @@
     } else {
       formData.delete("ref_video_duration");
     }
+    if (refAudioFile) {
+      formData.set('ref_audio', refAudioFile);
+    } else {
+      formData.delete('ref_audio');
+    }
     return async ({ result }: any) => {
       submitting = false;
       if (result.type === 'success' && result.data) {
@@ -342,6 +360,7 @@
             validFirstFile = false;
             validLastFile = false;
             resetRefVideo();
+            resetRefAudio();
             for (let i = 0; i < 6; i++) removeRefImage(i);
             await goto(`/new/review/${entry.id}`);
             return;
@@ -594,6 +613,85 @@
     refImages[index] = { file: null, preview: '', valid: false };
     refImages = [...refImages];
     setFileInput(refImageInputs[index], null);
+  }
+
+  // ---- Ref2V reference audio handlers ----
+
+  /** Read an audio file's duration (seconds) via <audio> metadata. */
+  function getAudioDuration(source: File | string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const url = typeof source === 'string' ? source : URL.createObjectURL(source);
+      const audio = new Audio();
+      audio.preload = 'metadata';
+      audio.onloadedmetadata = () => {
+        const d = audio.duration;
+        if (typeof source !== 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+        resolve(Number.isFinite(d) && d > 0 ? d : 0);
+      };
+      audio.onerror = () => {
+        if (typeof source !== 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+        reject(new Error($_('newVideo.mode.ref2v.errors.notAudio')));
+      };
+      audio.src = url;
+    });
+  }
+
+  function resetRefAudio() {
+    refAudioFile = null;
+    refAudioDuration = 0;
+    refAudioError = '';
+    if (refAudioPreviewUrl && refAudioPreviewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(refAudioPreviewUrl);
+    }
+    refAudioPreviewUrl = '';
+    setFileInput(refAudioInput, null);
+  }
+
+  async function onRefAudioFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const f = input.files?.[0] || null;
+    refAudioError = '';
+    if (!f) {
+      resetRefAudio();
+      return;
+    }
+    if (!f.type.startsWith('audio/')) {
+      refAudioError = $_('newVideo.mode.ref2v.errors.notAudio');
+      // Clear the chooser so the same file can be re-picked after fixing it.
+      setFileInput(input, null);
+      return;
+    }
+    if (f.size > 50 * 1024 * 1024) {
+      refAudioError = $_('newVideo.mode.ref2v.errors.audioTooLarge');
+      setFileInput(input, null);
+      return;
+    }
+    try {
+      const dur = await getAudioDuration(f);
+      if (dur > MAX_REF_AUDIO_SECONDS + 0.5) {
+        refAudioError = $_('newVideo.mode.ref2v.errors.audioTooLong', {
+          values: { max: MAX_REF_AUDIO_SECONDS },
+        });
+        setFileInput(input, null);
+        setFileInput(refAudioInput, null);
+        refAudioFile = null;
+        return;
+      }
+      refAudioFile = f;
+      refAudioDuration = dur;
+      if (refAudioPreviewUrl && refAudioPreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(refAudioPreviewUrl);
+      }
+      refAudioPreviewUrl = URL.createObjectURL(f);
+      setFileInput(refAudioInput, f);
+      // Clear the chooser so selecting the same file again re-triggers change.
+      setFileInput(input, null);
+    } catch (err) {
+      refAudioError = String(err);
+      setFileInput(input, null);
+      setFileInput(refAudioInput, null);
+      refAudioFile = null;
+    }
   }
 
   function handleDragOver(e: DragEvent) {
@@ -1121,6 +1219,47 @@
               </div>
             {/if}
           {/if}
+
+          <!-- Standalone reference audio (optional, ≤15s): an extra audio
+               reference (<Audio 1>) alongside the ref video's soundtrack. -->
+          <div class="form-control w-full mt-6">
+            <div class="label">
+              <span class="label-text font-semibold">{$_('newVideo.mode.ref2v.audioLabel')}</span>
+              <span class="label-text-alt">{$_('newVideo.mode.ref2v.audioHint', { values: { max: MAX_REF_AUDIO_SECONDS } })}</span>
+            </div>
+            <input
+              id="ref_audio_source"
+              type="file"
+              accept="audio/*"
+              on:change={onRefAudioFile}
+              bind:this={refAudioChooseInput}
+              class="file-input file-input-bordered file-input-primary w-full"
+            />
+            <input id="ref_audio" name="ref_audio" type="file" accept="audio/*" class="hidden" bind:this={refAudioInput} />
+            {#if refAudioFile}
+              <div class="flex items-center gap-3 mt-3 rounded-lg bg-base-200 p-3">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                <div class="min-w-0 flex-1">
+                  <p class="text-sm truncate">{refAudioFile.name}</p>
+                  <p class="text-xs opacity-60">
+                    {refAudioDuration > 0 ? refAudioDuration.toFixed(1) + 's' : ''}
+                  </p>
+                </div>
+                <audio controls class="h-9 max-w-[220px]" src={refAudioPreviewUrl}></audio>
+                <button
+                  type="button"
+                  class="btn btn-circle btn-xs btn-error"
+                  on:click={resetRefAudio}
+                  aria-label={$_('newVideo.mode.ref2v.audioRemove')}
+                >✕</button>
+              </div>
+            {/if}
+            {#if refAudioError}
+              <div class="alert alert-error shadow-lg mt-3 py-2">
+                <span class="text-sm">{refAudioError}</span>
+              </div>
+            {/if}
+          </div>
 
           <!-- Reference images (up to 6) -->
           <div class="form-control w-full mt-6">

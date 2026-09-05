@@ -8,7 +8,8 @@ import {
   validateAndConvertVideo,
   extractVideoPoster,
   probeVideoDuration,
-  hasAudioFromBuffer
+  hasAudioFromBuffer,
+  validateAndConvertReferenceAudio
 } from '$lib/videoValidation';
 import { createVideoEntryForReview } from '$lib/videoEntryCreation';
 import { getVideosByUser, getWorkflows, getAdminSettings } from '$lib/db';
@@ -239,6 +240,25 @@ export const actions: Actions = {
         refImageNames.push(imgFile.name || `ref_image_${i}.${imgExt || 'png'}`);
       }
 
+      // Optional standalone reference audio (≤15s, single clip). Rides the same
+      // generic upload path as the other refs; the server re-encodes it to PCM
+      // WAV (best-effort) so ComfyUI's core LoadAudio node can read it, and
+      // rejects anything longer than the cap — never silently accept it.
+      const refAudioFile = form.get('ref_audio') as File | null;
+      let refAudioUrl = '';
+      let refAudioName = '';
+      if (refAudioFile && refAudioFile.size > 0) {
+        const rawAudioBuffer = Buffer.from(await refAudioFile.arrayBuffer());
+        const audioResult = await validateAndConvertReferenceAudio(rawAudioBuffer, refAudioFile.type);
+        if (audioResult.error) {
+          return { error: audioResult.error };
+        }
+        const storedExt = audioResult.ext || 'wav';
+        refAudioUrl = await uploadBufferToS3(audioResult.buffer, storedExt);
+        const base = (refAudioFile.name || 'ref_audio').replace(/\.[^.]+$/, '');
+        refAudioName = `${base}.${storedExt}`;
+      }
+
       // Poster/thumbnail: prefer the first ref image (it carries the intended
       // look and a probeable aspect); fall back to a server-side ffmpeg frame
       // extracted from the ref video when no ref images were provided.
@@ -278,6 +298,8 @@ export const actions: Actions = {
           ref_video_name: refVideoName,
           ...(refVideoHasAudio !== undefined ? { ref_video_has_audio: refVideoHasAudio } : {}),
           ...(refVideoDuration !== undefined ? { ref_video_duration: refVideoDuration } : {}),
+          ref_audio_url: refAudioUrl,
+          ref_audio_name: refAudioName,
           ref_image_urls: refImageUrls,
           ref_image_names: refImageNames
         }

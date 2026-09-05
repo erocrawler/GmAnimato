@@ -6,7 +6,7 @@
    */
   import { _ } from "svelte-i18n";
 
-  export let refItems: { kind: "video" | "image"; token: string; url: string; label: string }[] = [];
+  export let refItems: { kind: "video" | "audio" | "image"; token: string; url: string; label: string }[] = [];
   export let isEditable: boolean = true;
   export let onSelect: (newPrompt: string) => void = () => {};
 

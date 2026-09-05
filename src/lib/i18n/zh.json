@@ -210,7 +210,7 @@
     "unlike": "取消喜欢",
     "download": "下载 MP4",
     "downloadGif": "GIF（480p）",
-    "downloadGifSmall": "GIF（320p，<5MB）",
+    "downloadGifSmall": "GIF（320p）",
     "downloadWebp": "动态 WebP（480p）",
     "downloadConverting": "转换中...",
     "downloadConvertError": "转换失败",
@@ -288,6 +288,9 @@
         "includeAudio": "在裁剪片段中包含音频",
         "crossOriginHint": "该视频来自其他源，无法在浏览器中裁剪 — 将直接使用原视频。",
         "serverClipHint": "此格式无法在浏览器中解码（如 MKV）— 将原样上传，由服务器裁剪/转换。",
+        "audioLabel": "参考音频（可选）",
+        "audioHint": "最长 {max} 秒 — 在提示词中用 <Audio 1> 引用",
+        "audioRemove": "移除参考音频",
         "imagesLabel": "参考图像（可选，最多 6 张）",
         "imagesHint": "在提示词中用 <Picture 1..6> 引用",
         "optionalHint": "所有参考均为可选 — 若未提供任何参考，将退化为文本转视频。",
@@ -297,7 +300,10 @@
           "tooLarge": "视频过大（裁剪前最大 50 MB）。",
           "invalidUrl": "请输入有效的视频链接、视频页面链接或视频 ID。",
           "urlNotReady": "该视频尚不可复用——需要已完成且可下载。",
-          "clientClipFailed": "浏览器无法裁剪该视频，将改由服务器对原始文件进行裁剪/转换。"
+          "clientClipFailed": "浏览器无法裁剪该视频，将改由服务器对原始文件进行裁剪/转换。",
+          "notAudio": "所选文件不是受支持的音频文件。",
+          "audioTooLarge": "音频过大（最大 50 MB）。",
+          "audioTooLong": "音频超过 {max} 秒。请先裁剪。"
         }
       }
     },
@@ -321,10 +327,11 @@
     "ref2v": {
       "noRefVideo": "没有参考视频 — 将以文本转视频方式生成",
       "noRefVideoWithImages": "没有参考视频 — 将使用下方的参考图像",
+      "audioLabel": "参考音频",
       "referencesLabel": "参考元素：",
       "addReference": "在提示词中添加参考",
       "removeReference": "从提示词中移除 {ref}",
-      "referencesHint": "点击 + 在提示词光标处插入 <Picture N> / <Video 1> 标签。",
+      "referencesHint": "点击 + 在提示词光标处插入 <Picture N> / <Video 1> / <Audio 1> 标签。",
       "allReferencesUsed": "所有参考已添加",
       "allReferencesUsedShort": "所有参考已标记",
       "addAllReferences": "添加所有参考",

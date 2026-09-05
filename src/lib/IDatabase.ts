@@ -1,4 +1,4 @@
-export type VideoEntry = {
+﻿export type VideoEntry = {
   id: string;
   user_id: string;
   workflow_id?: string; // ID of the workflow used to generate this video
@@ -49,7 +49,15 @@ export type VideoEntry = {
     ref2v?: boolean;
     ref_video_url?: string;
     ref_video_name?: string;
+
     ref_video_has_audio?: boolean;
+
+    // Standalone reference audio (≤15s, single clip). Referenced as <Audio 1>
+    // in the prompt. Separate from the ref video's own soundtrack
+    // (ref_video_audios) — when a ref video is also present both are fed in.
+    ref_audio_url?: string;
+    ref_audio_name?: string;
+
     ref_image_urls?: string[];
     ref_image_names?: string[];
     ref2v_aspect?: 'video' | '16:9' | '4:3' | 'square' | '3:4' | '9:16'; // ref2v output aspect
@@ -105,7 +113,7 @@ export type Workflow = {
   workflowType: 'i2v' | 'fl2v' | 'ref2v'; // i2v (single image), fl2v (two images), ref2v (reference video + optional images)
   compatibleLoraIds: string[]; // Array of LoRA IDs compatible with this workflow
   // Preset mechanism extensions
-  tags?: string[]; // e.g. ['wan22', 'nsfw'] — used for auto-matching LoRAs
+  tags?: string[]; // e.g. ['wan22', 'nsfw'] 窶・used for auto-matching LoRAs
   autoIncludeNewLoras?: boolean; // if true, new LoRAs with matching tags auto-added
   presetGroup?: string; // optional UI grouping
   quotaCost?: number; // Credits consumed per video generated with this workflow (default 1)
@@ -176,7 +184,7 @@ export type GetPublishedVideosOptions = {
   isNsfw?: boolean;
   sortBy?: 'date' | 'likes'; // Sort by creation date or like count
   afterValue?: string; // Cursor-based pagination: skip up to and including this video ID (exclusive)
-  startAtId?: string; // Start from this video ID (inclusive) — for "resume position"
+  startAtId?: string; // Start from this video ID (inclusive) 窶・for "resume position"
 };
 
 export type GetAllVideosOptions = {

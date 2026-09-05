@@ -5,6 +5,22 @@ import path from 'node:path';
 import { MAX_DURATION_SECONDS_FREE } from './mediaLimits';
 import { ALLOWED_VIDEO_TYPES, MAX_REF_VIDEO_BYTES, MAX_VIDEO_LONG_EDGE } from './mediaLimits';
 
+// --- Reference audio (ref2v standalone <Audio 1>) --------------------------
+// A single standalone ref audio conditions the generated soundtrack. It is
+// clipped/normalized to ≤15s; anything longer is rejected (client + server).
+export const MAX_REF_AUDIO_SECONDS = 15;
+export const MAX_REF_AUDIO_BYTES = 50 * 1024 * 1024; // 50 MB safety cap
+export const ALLOWED_AUDIO_TYPES = new Set([
+  'audio/mpeg', // mp3
+  'audio/wav',
+  'audio/x-wav',
+  'audio/ogg',
+  'audio/aac',
+  'audio/mp4', // m4a
+  'audio/x-m4a',
+  'audio/flac',
+]);
+
 export interface VideoProcessResult {
   buffer: Buffer;
   ext: string;
@@ -400,4 +416,117 @@ export async function extractVideoScreenshots(
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+// --- Reference audio (ref2v standalone reference) ---------------------------
+
+export function isAllowedAudioType(mime: string): boolean {
+  const base = (mime || '').split(';')[0].trim().toLowerCase();
+  return ALLOWED_AUDIO_TYPES.has(base);
+}
+
+export function audioExtFromMime(mime: string): string {
+  const base = (mime || '').split(';')[0].trim().toLowerCase();
+  if (base === 'audio/mpeg') return 'mp3';
+  if (base === 'audio/wav' || base === 'audio/x-wav') return 'wav';
+  if (base === 'audio/ogg') return 'ogg';
+  if (base === 'audio/aac') return 'aac';
+  if (base === 'audio/mp4' || base === 'audio/x-m4a') return 'm4a';
+  if (base === 'audio/flac') return 'flac';
+  return 'mp3';
+}
+
+/** Probe an audio buffer's duration (seconds) by writing it to a temp file
+ *  and ffprobing it (same approach as the ref-video probe). */
+async function probeAudioDurationFromBuffer(buffer: Buffer, ext: string): Promise<number | null> {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ref2v-audio-probe-'));
+  const inPath = path.join(tmpDir, `probe.${ext || 'mp3'}`);
+  try {
+    await fs.writeFile(inPath, buffer);
+    return await probeVideoDuration(inPath); // ffprobe format=duration works for any media
+  } catch {
+    return null;
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** Best-effort ffmpeg transcode to PCM WAV — universally decodable by
+ *  ComfyUI's core LoadAudio node regardless of torchaudio/soundfile backend.
+ *  Returns null on any failure (caller keeps the original). */
+async function convertAudioToWav(buffer: Buffer, inputExt: string): Promise<Buffer | null> {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ref2v-audio-'));
+  const inPath = path.join(tmpDir, `input.${inputExt}`);
+  const outPath = path.join(tmpDir, 'output.wav');
+  try {
+    await fs.writeFile(inPath, buffer);
+    await new Promise<void>((resolve, reject) => {
+      const errChunks: Buffer[] = [];
+      const proc = spawn('ffmpeg', [
+        '-y',
+        '-i', inPath,
+        '-vn',
+        '-ac', '2',
+        '-ar', '44100',
+        '-c:a', 'pcm_s16le',
+        outPath,
+      ]);
+      proc.stderr.on('data', (c: Buffer) => errChunks.push(c));
+      proc.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg exited with code ${code}: ${Buffer.concat(errChunks).toString().slice(-400)}`));
+      });
+      proc.on('error', (err) => reject(new Error(`Failed to spawn ffmpeg: ${err.message}`)));
+    });
+    const out = await fs.readFile(outPath);
+    return out.length > 0 ? out : null;
+  } catch (e) {
+    console.warn('[Audio] Ref audio transcode failed, keeping original:', e);
+    return null;
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+export interface AudioProcessResult {
+  buffer: Buffer;
+  ext: string;
+  wasConverted: boolean;
+  error?: string;
+}
+
+/**
+ * Validates a standalone reference audio buffer for ref2v:
+ * - Checks type + size.
+ * - Rejects audio longer than MAX_REF_AUDIO_SECONDS (never silently accept a
+ *   clip longer than the intended conditioning window).
+ * - Re-encodes to PCM WAV (best-effort) so ComfyUI's LoadAudio can read it.
+ * Returns { buffer, ext, wasConverted, error }.
+ */
+export async function validateAndConvertReferenceAudio(buffer: Buffer, mime: string): Promise<AudioProcessResult> {
+  if (!isAllowedAudioType(mime)) {
+    return { buffer, ext: '', wasConverted: false, error: 'ref audio must be mp3, wav, ogg, m4a/aac or flac' };
+  }
+  if (buffer.length > MAX_REF_AUDIO_BYTES) {
+    return { buffer, ext: '', wasConverted: false, error: `ref audio too large (max ${Math.round(MAX_REF_AUDIO_BYTES / 1024 / 1024)} MB)` };
+  }
+  const ext = audioExtFromMime(mime);
+
+  // Reject audio longer than the ref2v audio cap. A small grace (0.5s) absorbs
+  // ffprobe/HTMLAudioElement duration jitter on ~15s clips.
+  const duration = await probeAudioDurationFromBuffer(buffer, ext);
+  if (duration !== null && duration > MAX_REF_AUDIO_SECONDS + 0.5) {
+    return {
+      buffer,
+      ext: '',
+      wasConverted: false,
+      error: `ref audio is ${Math.round(duration)}s — max ${MAX_REF_AUDIO_SECONDS}s`,
+    };
+  }
+
+  const wav = await convertAudioToWav(buffer, ext);
+  if (wav) {
+    return { buffer: wav, ext: 'wav', wasConverted: true };
+  }
+  return { buffer, ext, wasConverted: false };
 }

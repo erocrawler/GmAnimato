@@ -128,6 +128,9 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
       prompt,
       workflowType,
       labeledImages: filteredLabeled,
+      hasStandaloneAudio: workflowType === 'ref2v'
+        ? Boolean(video.additional_options?.ref_audio_url)
+        : false,
       durationSeconds,
       locale: String(body.locale ?? ''),
       userId: video.user_id,

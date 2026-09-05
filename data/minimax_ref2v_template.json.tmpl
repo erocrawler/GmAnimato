@@ -311,11 +311,24 @@
           "ref_video_audios.ref_video_audio_0": [
             "105:1",
             2
+          ],
+          "ref_audios.ref_audio_0": [
+            "105:108",
+            0
           ]
         },
         "class_type": "MiniMaxH3ReferenceToVideo",
         "_meta": {
           "title": "MiniMax H3 Reference to Video"
+        }
+      },
+      "105:108": {
+        "inputs": {
+          "audio": "{ref_audio_name}"
+        },
+        "class_type": "LoadAudio",
+        "_meta": {
+          "title": "Load Reference Audio"
         }
       },
       "105:107": {

@@ -36,20 +36,24 @@
   let lastSavedPrompt = entry.prompt || "";
   let promptAutoSaveDisabled = false;
 
-  // Ref2V references: available refs (video first, then images), tokens present
-  // in the prompt, and refs not yet referenced (shown in the "+" picker).
+  // Ref2V references: available refs (video, standalone audio, then images),
+  // tokens present in the prompt, and refs not yet referenced (shown in the
+  // "+" picker). A standalone ref audio is always <Audio 1>.
   $: refItems = (() => {
     const ao = entry.additional_options || {};
-    const items: { kind: "video" | "image"; token: string; url: string; label: string }[] = [];
+    const items: { kind: "video" | "audio" | "image"; token: string; url: string; label: string }[] = [];
     if (ao.ref_video_url) {
       items.push({ kind: "video", token: "<Video 1>", url: ao.ref_video_url, label: "Video 1" });
+    }
+    if (ao.ref_audio_url) {
+      items.push({ kind: "audio", token: "<Audio 1>", url: ao.ref_audio_url, label: "Audio 1" });
     }
     (ao.ref_image_urls || []).forEach((u: string, i: number) => {
       items.push({ kind: "image", token: `<Picture ${i + 1}>`, url: u, label: `Picture ${i + 1}` });
     });
     return items;
   })();
-  $: referencedTokens = [...prompt.matchAll(/<(Picture|Video)\s*\d+>/g)].map((m) => m[0]);
+  $: referencedTokens = [...prompt.matchAll(/<(Picture|Video|Audio)\s*\d+>/g)].map((m) => m[0]);
   $: availableRefs = refItems.filter((r) => !referencedTokens.includes(r.token));
 
   let busy = false;
@@ -1014,12 +1018,23 @@
       // Cancel any pending/in-flight prompt auto-save so a stale debounced
       // write can't overwrite the prompt we're about to submit.
       cancelPromptAutoSave();
+      // Ref2V: if a standalone reference audio is attached but the prompt never
+      // mentions <Audio 1>, append it so the model actually uses the audio
+      // reference. The user can place it earlier if they prefer.
+      let finalPrompt = prompt;
+      if (
+        videoWorkflowType === "ref2v" &&
+        entry.additional_options?.ref_audio_url &&
+        !/<Audio\s*1>/i.test(finalPrompt)
+      ) {
+        finalPrompt = (finalPrompt.trim() + " <Audio 1>").trim();
+      }
       const res = await fetch("/api/i2v/kickoff", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: entry.id,
-          prompt,
+          prompt: finalPrompt,
           tags: $tags.map((t) => t.value),
           workflowId: selectedWorkflowId,
           loraWeights: filteredLoraWeights,

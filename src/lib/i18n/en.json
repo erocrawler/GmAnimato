@@ -211,7 +211,7 @@
     "unlike": "Unlike",
     "download": "Download MP4",
     "downloadGif": "GIF (480p)",
-    "downloadGifSmall": "GIF (320p, <5MB)",
+    "downloadGifSmall": "GIF (320p)",
     "downloadWebp": "Animated WebP (480p)",
     "downloadConverting": "Converting...",
     "downloadConvertError": "Conversion failed",
@@ -289,6 +289,9 @@
         "includeAudio": "Include audio in the clip",
         "crossOriginHint": "This video is from another origin and can't be clipped in the browser — it will be used as-is.",
         "serverClipHint": "This format can't be decoded by your browser (e.g. MKV) — the file is uploaded as-is and the server trims/converts it.",
+        "audioLabel": "Reference Audio (optional)",
+        "audioHint": "Max {max}s — referenced in the prompt as <Audio 1>",
+        "audioRemove": "Remove reference audio",
         "imagesLabel": "Reference Images (optional, up to 6)",
         "imagesHint": "Referenced in the prompt as <Picture 1..6>",
         "optionalHint": "All references are optional — without any, this becomes a text-to-video job.",
@@ -298,7 +301,10 @@
           "tooLarge": "Video is too large (max 50 MB before clipping).",
           "invalidUrl": "Please enter a valid video URL, video page link, or video ID.",
           "urlNotReady": "That video isn't ready to reuse yet — it must be completed and downloadable.",
-          "clientClipFailed": "The browser couldn't clip this video, so the raw file will be uploaded and the server will trim/convert it instead."
+          "clientClipFailed": "The browser couldn't clip this video, so the raw file will be uploaded and the server will trim/convert it instead.",
+          "notAudio": "Selected file is not a supported audio file.",
+          "audioTooLarge": "Audio is too large (max 50 MB).",
+          "audioTooLong": "Audio is longer than {max}s. Please trim it first."
         }
       }
     },
@@ -322,10 +328,11 @@
     "ref2v": {
       "noRefVideo": "No reference video — this will run as a text-to-video job",
       "noRefVideoWithImages": "No reference video — using the reference images below",
+      "audioLabel": "Reference Audio",
       "referencesLabel": "References:",
       "addReference": "Add reference to prompt",
       "removeReference": "Remove {ref} from prompt",
-      "referencesHint": "Click + to insert a <Picture N> / <Video 1> tag into the prompt at the cursor.",
+      "referencesHint": "Click + to insert a <Picture N> / <Video 1> / <Audio 1> tag into the prompt at the cursor.",
       "allReferencesUsed": "All references already added",
       "allReferencesUsedShort": "All references tagged",
       "addAllReferences": "Add all references",
