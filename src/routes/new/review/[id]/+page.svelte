@@ -1325,7 +1325,7 @@
         {loadingWorkflows}
         {filteredWorkflows}
         bind:selectedWorkflowId
-        {isMiniMaxSelected}
+        {selectedWorkflow}
         {promptRelayMode}
         {canUseQuality}
         {videoWorkflowType}

@@ -97,6 +97,7 @@ export type Session = {
 };
 
 import type { LoraPreset } from './loraPresets';
+import type { WorkflowEngine, WorkflowRunOn, WorkflowCapabilities } from './workflowCapabilities';
 
 export type RoleConfig = {
   name: string;
@@ -112,6 +113,15 @@ export type Workflow = {
   templatePath: string;
   workflowType: 'i2v' | 'fl2v' | 'ref2v'; // i2v (single image), fl2v (two images), ref2v (reference video + optional images)
   compatibleLoraIds: string[]; // Array of LoRA IDs compatible with this workflow
+  // Node-stack family ('wan' | 'minimax'). Optional for legacy tolerance — when
+  // absent the code falls back to the template path heuristic. The DB column is
+  // backfilled by migration; mapToWorkflow always emits a value.
+  engine?: WorkflowEngine;
+  // Runner routing: 'auto' (default) respects local queue + migration;
+  // 'serverless' always goes straight to RunPod, never the local worker.
+  runOn?: WorkflowRunOn;
+  // Value allowlists (steps/durations/resolutions). Empty = per-engine defaults.
+  capabilities?: WorkflowCapabilities;
   // Preset mechanism extensions
   tags?: string[]; // e.g. ['wan22', 'nsfw'] 窶・used for auto-matching LoRAs
   autoIncludeNewLoras?: boolean; // if true, new LoRAs with matching tags auto-added

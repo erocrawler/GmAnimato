@@ -4,7 +4,7 @@ import { env } from '$env/dynamic/private';
 import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { submitJob } from '$lib/local-queue';
-import { filterLoraWeights, isMiniMaxWorkflow } from '$lib/workflows';
+import { filterLoraWeights, isMiniMaxWorkflow, getWorkflowCapabilities, getWorkflowEngine, getWorkflowRunOn } from '$lib/workflows';
 import { computeWorkflowQuotaCost } from '$lib/quotaCost';
 import { toOriginalUrl } from '$lib/serverImageUrl';
 import { evaluatePromptProperties } from '$lib/imageRecognition';
@@ -289,6 +289,55 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       });
     }
 
+    // ---- Workflow capability allowlists (steps / durations / resolutions) ----
+    // The selected workflow (or its engine defaults) defines what this model can
+    // run. Reject explicit out-of-range values and clamp anything ambiguous.
+    const caps = getWorkflowCapabilities(workflow);
+    const engine = getWorkflowEngine(workflow);
+    const capMaxDuration = Math.max(...caps.durations);
+    const stepExplicit = body && Object.prototype.hasOwnProperty.call(body, 'iterationSteps');
+    const durationExplicit = body && Object.prototype.hasOwnProperty.call(body, 'videoDuration');
+    const resolutionExplicit = body && Object.prototype.hasOwnProperty.call(body, 'videoResolution');
+
+    if (stepExplicit && !(caps.steps as readonly number[]).includes(iterationSteps)) {
+      return new Response(JSON.stringify({
+        error: `${iterationSteps} iteration steps is not available for the selected model (${workflow.name}). Allowed: ${caps.steps.join(' / ')}.`
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (!(caps.steps as readonly number[]).includes(iterationSteps)) {
+      // Implicit/legacy value not in the allowlist — snap to the engine default
+      // when present, else the cheapest allowed step.
+      iterationSteps = ((caps.steps as readonly number[]).includes(engine === 'minimax' ? 8 : 4)
+        ? (engine === 'minimax' ? 8 : 4)
+        : caps.steps[0] ?? 4) as IterationSteps;
+    }
+
+    if (videoDuration !== undefined) {
+      const isPreset = (caps.durations as readonly number[]).includes(videoDuration);
+      const isFollow = ref2vFollowDuration && isRef2vMode;
+      if (!isPreset && !(isFollow && videoDuration >= 1 && videoDuration <= capMaxDuration)) {
+        if (durationExplicit) {
+          return new Response(JSON.stringify({
+            error: `${videoDuration}-second duration is not available for the selected model (${workflow.name}). Allowed: ${caps.durations.join('s / ')}s.`
+          }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+        }
+        videoDuration = Math.min(videoDuration, capMaxDuration) as VideoDuration;
+      }
+      // Clamp follow/edge durations to the workflow's max option too.
+      if (videoDuration > capMaxDuration) {
+        videoDuration = capMaxDuration as VideoDuration;
+      }
+    }
+
+    if (resolution !== undefined && !caps.resolutions.includes(resolution)) {
+      if (resolutionExplicit) {
+        return new Response(JSON.stringify({
+          error: `${resolution} is not available for the selected model (${workflow.name}). Allowed: ${caps.resolutions.join(' / ')}.`
+        }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      }
+      resolution = '480p';
+    }
+
     // Max (15s) duration is a MiniMax H3-only option
     if (videoDuration === MAX_DURATION_SECONDS_PAID && !isMiniMaxWorkflow(workflow)) {
       return new Response(JSON.stringify({
@@ -431,9 +480,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       });
     }
 
-    // Enforce role requirement for premium iteration steps (6 for WAN, 8 for MiniMax)
-    const isMiniMax = isMiniMaxWorkflow(workflow);
-    const isPremiumStep = isMiniMax ? iterationSteps === 8 : iterationSteps === 6;
+    // Enforce role requirement for premium iteration steps. A step is premium
+    // when it's above THIS workflow's freeSteps (per-workflow, default 4) — so
+    // a turbo workflow that raises freeSteps to 8 lets free users run its 8 NFE.
+    const isPremiumStep = iterationSteps > caps.freeSteps;
     if (isPremiumStep && !hasAdvancedFeatures) {
       return new Response(JSON.stringify({ 
         error: `${iterationSteps} iteration steps is available to users with advanced features only.` 
@@ -470,6 +520,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       RUNPOD_ENDPOINT_URL: env.RUNPOD_ENDPOINT_URL,
       RUNPOD_API_KEY: env.RUNPOD_API_KEY
     });
+
+    // Serverless-only workflows must never fall through to the local queue.
+    // If RunPod isn't configured we can't honor that — fail loudly instead of
+    // silently running the model on a worker that doesn't have its weights.
+    const workflowRunOn = getWorkflowRunOn(workflow);
+    if (workflowRunOn === 'serverless' && !runpodConfig) {
+      return new Response(JSON.stringify({
+        error: `This model (${workflow.name}) is only available on the serverless endpoint, which is not configured.`
+      }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
 
     let localQueueAvailable = false;
     try {
@@ -584,6 +647,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         getLocalJobStats,
         claimJobForMigration,
         updateVideo,
+        workflowRunOn,
         async (video) => {
           // This callback builds workflow for migrated jobs or RunPod-direct jobs.
           // Single shared construction path (MiniMax / FL2V / I2V / Ref2V) —

@@ -2,6 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/db';
 import { normalizeQuotaCostRules } from '$lib/quotaCost';
+import { normalizeWorkflowCapabilities } from '$lib/workflowCapabilities';
 
 export const PUT: RequestHandler = async ({ locals, params, request }) => {
   // Check authentication
@@ -16,7 +17,7 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
 
   const { id } = params;
   const body = await request.json();
-  const { compatibleLoraIds, name, description, templatePath, workflowType, isDefault } = body;
+  const { compatibleLoraIds, name, description, templatePath, workflowType, isDefault, engine, runOn, capabilities } = body;
 
   if (compatibleLoraIds !== undefined && !Array.isArray(compatibleLoraIds)) {
     throw error(400, 'compatibleLoraIds must be an array');
@@ -24,6 +25,16 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
 
   if (workflowType !== undefined && !['i2v', 'fl2v', 'ref2v'].includes(workflowType)) {
     throw error(400, 'workflowType must be "i2v", "fl2v", or "ref2v"');
+  }
+
+  if (engine !== undefined && engine !== 'wan' && engine !== 'minimax') {
+    throw error(400, 'engine must be "wan" or "minimax"');
+  }
+  if (runOn !== undefined && runOn !== 'auto' && runOn !== 'serverless') {
+    throw error(400, 'runOn must be "auto" or "serverless"');
+  }
+  if (capabilities !== undefined && typeof capabilities !== 'object') {
+    throw error(400, 'capabilities must be an object');
   }
 
   const { quotaCost, quotaCostRules } = body as any;
@@ -40,6 +51,9 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
     if (templatePath !== undefined) patch.templatePath = templatePath;
     if (workflowType !== undefined) patch.workflowType = workflowType;
     if (isDefault !== undefined) patch.isDefault = isDefault;
+    if (engine !== undefined) patch.engine = engine;
+    if (runOn !== undefined) patch.runOn = runOn;
+    if (capabilities !== undefined) patch.capabilities = normalizeWorkflowCapabilities(capabilities);
     const { tags, autoIncludeNewLoras, presetGroup } = body as any;
     if (tags !== undefined) patch.tags = Array.isArray(tags) ? tags.map((t: string) => String(t).toLowerCase()) : [];
     if (autoIncludeNewLoras !== undefined) patch.autoIncludeNewLoras = !!autoIncludeNewLoras;

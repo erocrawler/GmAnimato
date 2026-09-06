@@ -2,6 +2,10 @@
   import { goto, invalidateAll } from '$app/navigation';
   import type { PageData } from './$types';
   import { _ } from 'svelte-i18n';
+  import {
+    ENGINE_DEFAULT_CAPABILITIES,
+    KNOWN_STEPS,
+  } from '$lib/workflowCapabilities';
   
   let { data } = $props<{ data: PageData }>();
   
@@ -29,6 +33,13 @@
   let workflowTemplatePath = $state('');
   let workflowType: 'i2v' | 'fl2v' | 'ref2v' = $state('i2v');
   let workflowIsDefault = $state(false);
+  let workflowEngine = $state<'wan' | 'minimax'>('wan');
+  let workflowRunOn = $state<'auto' | 'serverless'>('auto');
+  // Step allowlist for this workflow (empty = engine default). Durations and
+  // resolutions are NOT editable yet — they follow engine defaults.
+  let workflowSteps = $state<number[]>([]);
+  // Highest step treated as free for this workflow (premium above it). Default 4.
+  let workflowFreeSteps = $state<number>(4);
   let workflowCompatibleLoras = $state<string[]>([]);
   let workflowTags = $state<string[]>([]); // tags for auto matching
   let workflowAutoInclude = $state(true);
@@ -533,6 +544,13 @@
       workflowPresetGroup = workflow.presetGroup || '';
       workflowQuotaCost = typeof workflow.quotaCost === 'number' && workflow.quotaCost >= 1 ? workflow.quotaCost : 1;
       workflowQuotaCostRules = (workflow.quotaCostRules || []).map((r: any) => ({ ...r, when: { ...(r.when || {}) } }));
+      workflowEngine = workflow.engine === 'minimax' ? 'minimax' : 'wan';
+      workflowRunOn = workflow.runOn === 'serverless' ? 'serverless' : 'auto';
+      const def = ENGINE_DEFAULT_CAPABILITIES[workflowEngine];
+      const caps = workflow.capabilities || {};
+      workflowSteps = caps.steps?.length ? caps.steps : [...def.steps];
+      workflowFreeSteps = typeof caps.freeSteps === 'number' ? caps.freeSteps : def.freeSteps;
+      syncWorkflowFreeSteps();
     } else {
       editingWorkflowId = null;
       workflowName = '';
@@ -545,6 +563,10 @@
       workflowPresetGroup = '';
       workflowQuotaCost = 1;
       workflowQuotaCostRules = [];
+      workflowEngine = 'wan';
+      workflowRunOn = 'auto';
+      workflowSteps = [...ENGINE_DEFAULT_CAPABILITIES.wan.steps];
+      workflowFreeSteps = ENGINE_DEFAULT_CAPABILITIES.wan.freeSteps;
       // New workflow starts empty — no forced base LoRAs (lightx2v only for wan22 base model, not distilled)
       workflowCompatibleLoras = (settings.loraPresets || []).filter((p: any) => p.autoAddToWorkflows).map((p: any) => p.id);
     }
@@ -563,6 +585,10 @@
     workflowTemplatePath = '';
     workflowType = 'i2v';
     workflowIsDefault = false;
+    workflowEngine = 'wan';
+    workflowRunOn = 'auto';
+    workflowSteps = [];
+    workflowFreeSteps = 4;
     workflowCompatibleLoras = [];
     workflowTags = [];
     workflowAutoInclude = true;
@@ -571,6 +597,53 @@
     workflowQuotaCostRules = [];
     workflowTagInput = '';
   }
+
+  // ---- Workflow capability helpers (engine / runOn / steps / freeSteps) ----
+  // Durations and resolutions currently follow the engine defaults (the review
+  // page + kickoff derive them per-engine, and e.g. 15s is MiniMax-only), so
+  // only the step allowlist + free-step threshold are stored per-workflow.
+  function workflowCapabilitiesPayload(): any {
+    const p: any = {};
+    if (workflowSteps.length) p.steps = workflowSteps;
+    if (workflowFreeSteps !== 4) p.freeSteps = workflowFreeSteps;
+    return p;
+  }
+  /** The highest step this workflow can run (its allowlist, or engine default). */
+  function workflowMaxAllowedStep(): number {
+    const allowed = workflowSteps.length ? workflowSteps : [...ENGINE_DEFAULT_CAPABILITIES[workflowEngine].steps];
+    return Math.max(...allowed, 4);
+  }
+  /** Keep freeSteps ≤ the workflow's max allowed step (defaults to 4 otherwise). */
+  function syncWorkflowFreeSteps() {
+    if (workflowFreeSteps > workflowMaxAllowedStep()) workflowFreeSteps = 4;
+  }
+  function onWorkflowEngineChange() {
+    // Switching engine for a NEW workflow resets the step allowlist to that
+    // engine's defaults. Existing workflows keep whatever was configured.
+    if (!editingWorkflowId) {
+      const def = ENGINE_DEFAULT_CAPABILITIES[workflowEngine];
+      workflowSteps = [...def.steps];
+      workflowFreeSteps = def.freeSteps;
+    }
+  }
+  function resetCapabilitiesToDefaults() {
+    const def = ENGINE_DEFAULT_CAPABILITIES[workflowEngine];
+    workflowSteps = [...def.steps];
+    workflowFreeSteps = def.freeSteps;
+  }
+  function toggleNumberIn(list: number[], value: number, set: (v: number[]) => void) {
+    set(list.includes(value) ? list.filter((x) => x !== value) : [...list, value].sort((a, b) => a - b));
+  }
+  function setWorkflowSteps(v: number[]) { workflowSteps = v; syncWorkflowFreeSteps(); }
+  // Options for the "free steps" threshold: the central floor (4) plus each
+  // ACTUAL allowed step — those are the only breakpoints that change behavior.
+  // freeSteps marks everything up to that value as free, so a value that isn't
+  // itself an allowed step (e.g. 6 on a 4/8 workflow) is redundant and hidden.
+  // An 8-only turbo still gets both 4 (8 = premium-only) and 8 (8 = free).
+  let workflowFreeStepOptions = $derived((() => {
+    const allowed = workflowSteps.length ? workflowSteps : [...ENGINE_DEFAULT_CAPABILITIES[workflowEngine].steps];
+    return Array.from(new Set([4, ...allowed])).sort((a, b) => a - b);
+  })());
 
   function addWorkflowTag(tag: string) {
     if (!tag.trim()) return;
@@ -695,6 +768,9 @@
         templatePath: workflowTemplatePath.trim(),
         workflowType: workflowType,
         isDefault: workflowIsDefault,
+        engine: workflowEngine,
+        runOn: workflowRunOn,
+        capabilities: workflowCapabilitiesPayload(),
         compatibleLoraIds: workflowCompatibleLoras,
         tags: workflowTags,
         autoIncludeNewLoras: workflowAutoInclude,
@@ -2032,6 +2108,51 @@
             {/each}
           </div>
         {/if}
+      </div>
+
+      <!-- Engine & Capabilities -->
+      <div class="mt-4 rounded-lg border border-base-300 p-3 space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-semibold">Engine &amp; Capabilities</span>
+          <button type="button" class="btn btn-xs btn-outline" onclick={resetCapabilitiesToDefaults}>Reset to engine defaults</button>
+        </div>
+        <p class="text-xs opacity-50">Steps and the free-step threshold are configurable per workflow; durations and resolutions follow the engine defaults (e.g. 15s is MiniMax-only). Serverless-only workflows always go to RunPod — use for models whose weights only exist on the serverless image.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label class="form-control">
+            <span class="label-text text-sm">Engine (node stack)</span>
+            <select bind:value={workflowEngine} onchange={onWorkflowEngineChange} class="select select-bordered select-sm w-full">
+              <option value="wan">WAN</option>
+              <option value="minimax">MiniMax H3</option>
+            </select>
+          </label>
+          <label class="form-control">
+            <span class="label-text text-sm">Run on</span>
+            <select bind:value={workflowRunOn} class="select select-bordered select-sm w-full">
+              <option value="auto">Auto (local queue + migration)</option>
+              <option value="serverless">Serverless only (RunPod)</option>
+            </select>
+          </label>
+        </div>
+        <div class="text-sm">
+          <div class="opacity-60 mb-1">Allowed iteration steps</div>
+          <div class="flex flex-wrap gap-1">
+            {#each [...KNOWN_STEPS] as v}
+              <button type="button" class="badge badge-sm cursor-pointer"
+                class:badge-ghost={!workflowSteps.includes(v)}
+                class:badge-primary={workflowSteps.includes(v)}
+                onclick={() => toggleNumberIn(workflowSteps, v, setWorkflowSteps)}>{v}</button>
+            {/each}
+          </div>
+        </div>
+        <label class="form-control">
+          <span class="label-text text-sm">Free steps (up to)</span>
+          <select bind:value={workflowFreeSteps} class="select select-bordered select-sm w-full max-w-xs">
+            {#each workflowFreeStepOptions as s}
+              <option value={s}>≤ {s} steps free for all users</option>
+            {/each}
+          </select>
+          <span class="text-xs opacity-50 mt-1">Steps above this are premium (advanced-features only). An 8-NFE turbo workflow that should be usable by everyone should set this to 8.</span>
+        </label>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">

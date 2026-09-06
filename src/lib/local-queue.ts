@@ -80,6 +80,8 @@ export async function migrateOldestEligibleJob(
  * Submit a job with intelligent routing and migration
  * All jobs go to local queue first. If local queue exceeds migration threshold,
  * migrate the oldest eligible job (paid user OR free user waited 30+ min) to RunPod.
+ * Workflows marked runOn='serverless' ALWAYS route straight to RunPod (their model
+ * weights only exist on the serverless image / dynamic disk), never the local queue.
  * 
  * @param config RunPod configuration (only used if routing to RunPod or migrating)
  * @param video Video entry for the new job (caller should have this after creating in DB)
@@ -88,6 +90,7 @@ export async function migrateOldestEligibleJob(
  * @param getLocalJobStats Function to get current local job stats
  * @param claimJobForMigration Function to atomically claim job for migration
  * @param updateVideo Function to update video in database
+ * @param runOn Workflow runner routing ('auto' | 'serverless')
  * @param buildWorkflowCallback Function to build workflow for migration (takes VideoEntry)
  * @returns {isLocal: boolean, jobId?: string} - indicates if job is local and the job ID
  */
@@ -99,10 +102,15 @@ export async function submitJob(
   getLocalJobStats: () => Promise<{ inQueue: number; processing: number; completed: number; failed: number }>,
   claimJobForMigration: (settings: AdminSettings) => Promise<VideoEntry | null>,
   updateVideo: (id: string, patch: any) => Promise<any>,
+  runOn: 'auto' | 'serverless' = 'auto',
   buildWorkflowCallback: (video: VideoEntry) => Promise<any>
 ): Promise<{ isLocal: boolean; jobId?: string }> {
+  // Serverless-only workflows always go straight to RunPod, bypassing the local
+  // queue entirely (kickoff already 503s when RunPod isn't configured for these).
+  const forceServerless = runOn === 'serverless';
+
   // If local queue is disabled (threshold = 0), route all jobs directly to RunPod
-  if (settings.localQueueThreshold <= 0) {
+  if (forceServerless || settings.localQueueThreshold <= 0) {
     if (!config) {
       throw new Error('Local queue is disabled but RunPod is not configured. Either enable local queue (localQueueThreshold > 0) or configure RunPod.');
     }

@@ -7,12 +7,25 @@
   import type { Workflow } from "$lib/IDatabase";
   import type { LoraPreset } from "$lib/loraPresets";
   import { maxAllowedDurationSeconds } from "$lib/mediaLimits";
+  import { getWorkflowEngine, getWorkflowCapabilities } from "$lib/workflows";
+  import {
+    ENGINE_DEFAULT_CAPABILITIES,
+    ENGINE_DEFAULT_STEP,
+    FREE_DURATION_MAX,
+    STEP_LABEL_KEY,
+    MINIMAX_STEP_DESC_KEY,
+    DURATION_LABEL_KEY,
+    type CapabilityStep,
+  } from "$lib/workflowCapabilities";
 
   export let isEditable: boolean = true;
   export let loadingWorkflows: boolean = false;
   export let filteredWorkflows: Workflow[] = [];
   export let selectedWorkflowId: string = "";
-  export let isMiniMaxSelected: boolean = false;
+  // The resolved workflow (null before the workflows load). Its engine +
+  // capability allowlists drive every option list below — no more hardcoded
+  // "is this MiniMax?" ternaries.
+  export let selectedWorkflow: Workflow | null = null;
   export let promptRelayMode: boolean = false;
   export let canUseQuality: boolean = false;
   export let showAdvancedSettings: boolean = false;
@@ -32,6 +45,14 @@
   export let toggleLoraEnabled: (id: string) => void = () => {};
   export let resetLoraWeights: () => void = () => {};
   export let resetAdvancedSettings: () => void = () => {};
+
+  // Engine + effective capability allowlists, derived from the DB workflow
+  // (falling back to the WAN defaults before the workflows have loaded).
+  $: engine = selectedWorkflow ? getWorkflowEngine(selectedWorkflow) : "wan";
+  $: isMiniMax = engine === "minimax";
+  $: caps = selectedWorkflow
+    ? getWorkflowCapabilities(selectedWorkflow)
+    : ENGINE_DEFAULT_CAPABILITIES.wan;
 
   type IterationSteps = 4 | 6 | 8;
   type VideoDuration = 4 | 6 | 10 | 15;
@@ -53,55 +74,39 @@
     { value: "720p", label: "", description: "", requiresPaid: true },
   ];
 
-  // Iteration steps — WAN uses 4/6 (analogous quality tiers); MiniMax H3 with
-  // the distilled lightx2v turbo LoRA uses 4/8 (NFE: 4 fast/free, 8 quality/
-  // premium, matching the 8-step v1.0 model's recommended 8/4 range).
-  // Default per model: WAN 4, MiniMax 8.
-  $: stepOptions = isMiniMaxSelected
-    ? [
-        {
-          value: 4 as IterationSteps,
-          label: $_("review.iteration.fast"),
-          description: $_("review.iteration.minimaxStepsFast"),
-          requiresPaid: false,
-        },
-        {
-          value: 8 as IterationSteps,
-          label: $_("review.iteration.quality"),
-          description: $_("review.iteration.minimaxStepsQuality"),
-          requiresPaid: true,
-        },
-      ]
-    : [
-        {
-          value: 4 as IterationSteps,
-          label: $_("review.iteration.fast"),
-          description: $_("review.iteration.steps.fast"),
-          requiresPaid: false,
-        },
-        {
-          value: 6 as IterationSteps,
-          label: $_("review.iteration.balanced"),
-          description: $_("review.iteration.steps.balanced"),
-          requiresPaid: true,
-        },
-      ];
-  $: defaultIterationSteps = isMiniMaxSelected ? 8 : 4;
+  // Iteration steps — built from the workflow's capability allowlist. WAN uses
+  // 4/6 (analogous quality tiers); MiniMax H3 with the distilled lightx2v turbo
+  // LoRA uses 4/8 (NFE: 4 fast/free, 8 quality/premium). Steps above the free
+  // max (4) are premium — a central business rule, applied to whatever the
+  // workflow allows.
+  $: stepOptions = caps.steps.map((value: CapabilityStep) => {
+    const labelKey = STEP_LABEL_KEY[value] ?? String(value);
+    const descKey =
+      isMiniMax && MINIMAX_STEP_DESC_KEY[value]
+        ? MINIMAX_STEP_DESC_KEY[value]
+        : `steps.${labelKey}`;
+    return {
+      value: value as IterationSteps,
+      label: $_(`review.iteration.${labelKey}`),
+      description: $_(`review.iteration.${descKey}`),
+      // Premium threshold is the workflow's own freeSteps (default 4). A turbo
+      // workflow that raises freeSteps to 8 makes its 8-step mode free.
+      requiresPaid: value > caps.freeSteps,
+    };
+  });
+  // Default per engine (WAN 4, MiniMax 8) when the workflow allows it; otherwise
+  // the cheapest allowed step so a radio is always available.
+  $: defaultIterationSteps =
+    caps.steps.includes(ENGINE_DEFAULT_STEP[engine])
+      ? ENGINE_DEFAULT_STEP[engine]
+      : (caps.steps[0] ?? 4);
 
-  $: resolutionOptions = [
-    {
-      value: "480p",
-      label: $_("review.resolution.standard"),
-      description: $_("review.resolution.standardDesc"),
-      requiresPaid: false,
-    },
-    {
-      value: "720p",
-      label: $_("review.resolution.hd"),
-      description: $_("review.resolution.hdDesc"),
-      requiresPaid: true,
-    },
-  ];
+  $: resolutionOptions = caps.resolutions.map((value) => ({
+    value,
+    label: $_(`review.resolution.${value === "480p" ? "standard" : "hd"}`),
+    description: $_(`review.resolution.${value === "480p" ? "standardDesc" : "hdDesc"}`),
+    requiresPaid: value !== "480p",
+  }));
 
   $: visibleStepOptions = canUseQuality
     ? stepOptions
@@ -122,7 +127,7 @@
     return base + pyMod;
   }
   function durationDescription(duration: number): string {
-    const frames = isMiniMaxSelected
+    const frames = isMiniMax
       ? minimaxFrameCount(duration)
       : wanFrameCount(duration);
     return $_("review.duration.framesCount", { values: { n: frames } });
@@ -139,72 +144,69 @@
     requiresPaid: boolean;
   };
 
-  // Duration options in ascending order: 4s/6s free, 10s advanced (WAN: relay
-  // mode only; MiniMax: standard mode), 15s MiniMax H3 premium-only. For ref2v
-  // with a known reference length, a "Follow video duration" radio is prepended
-  // (value FOLLOW_DURATION). Free tier caps output at 6s, so the follow option
-  // reflects the capped value.
+  // Duration options — built from the workflow's capability allowlist in
+  // ascending order. Values ≤ FREE_DURATION_MAX (6s) are free; 10s is advanced
+  // (WAN: relay mode only; MiniMax: standard mode); 15s is MiniMax H3
+  // premium-only. For ref2v with a known reference length, a "Follow video
+  // duration" radio is prepended (value FOLLOW_DURATION). Free tier caps output
+  // at 6s, so the follow option reflects the capped value.
   $: followMaxSec = maxAllowedDurationSeconds(canUseQuality);
   $: followDurationSec = Math.min(followMaxSec, refVideoDurationSec);
   $: followDurationCapped = refVideoDurationSec > followMaxSec;
-  $: durationOptions = ((): DurationOption[] => [
-    ...(videoWorkflowType === "ref2v" && refVideoDurationSec > 0
-      ? [
-          {
-            value: FOLLOW_DURATION,
-            label: $_("review.ref2v.followDuration.shortTitle", {
+  $: durationOptions = ((): DurationOption[] => {
+    const opts: DurationOption[] = [];
+    if (videoWorkflowType === "ref2v" && refVideoDurationSec > 0) {
+      opts.push({
+        value: FOLLOW_DURATION,
+        label: $_("review.ref2v.followDuration.shortTitle", {
+          values: { s: followDurationSec.toFixed(1) },
+        }),
+        description: followDurationCapped
+          ? $_("review.ref2v.followDuration.helpCapped", {
+              values: { s: followMaxSec },
+            })
+          : $_("review.ref2v.followDuration.helpKnown", {
               values: { s: followDurationSec.toFixed(1) },
             }),
-            description: followDurationCapped
-              ? $_("review.ref2v.followDuration.helpCapped", {
-                  values: { s: followMaxSec },
-                })
-              : $_("review.ref2v.followDuration.helpKnown", {
-                  values: { s: followDurationSec.toFixed(1) },
-                }),
-            requiresPaid: false,
-          },
-        ]
-      : []),
-    {
-      value: 4 as VideoDuration,
-      label: $_("review.duration.short"),
-      description: isMiniMaxSelected
-        ? durationDescription(4)
-        : $_("review.duration.shortDesc"),
-      requiresPaid: false,
-    },
-    {
-      value: 6 as VideoDuration,
-      label: $_("review.duration.long"),
-      description: isMiniMaxSelected
-        ? durationDescription(6)
-        : $_("review.duration.longDesc"),
-      requiresPaid: false,
-    },
-    ...(canUseQuality && (promptRelayMode || isMiniMaxSelected)
-      ? [
-          {
-            value: 10 as VideoDuration,
-            label: $_("review.duration.extended"),
-            description: isMiniMaxSelected
-              ? durationDescription(10)
-              : $_("review.duration.extendedDesc"),
-            requiresPaid: true,
-          },
-        ]
-      : []),
-    ...(canUseQuality && isMiniMaxSelected
-      ? [
-          {
-            value: 15 as VideoDuration,
-            label: $_("review.duration.ultra"),
-            description: durationDescription(15),
-            requiresPaid: true,
-          },
-        ]
-      : []),
-  ])();
+        requiresPaid: false,
+      });
+    }
+    const sorted = [...caps.durations].sort((a, b) => a - b);
+    for (const value of sorted) {
+      const label = $_(`review.duration.${DURATION_LABEL_KEY[value] ?? value}`);
+      if (value <= FREE_DURATION_MAX) {
+        opts.push({
+          value: value as VideoDuration,
+          label,
+          description: isMiniMax
+            ? durationDescription(value)
+            : $_(`review.duration.${DURATION_LABEL_KEY[value] ?? value}Desc`),
+          requiresPaid: false,
+        });
+      } else if (value === 10) {
+        // 10s is advanced; WAN only offers it in relay mode, MiniMax in standard.
+        if (!canUseQuality || (!isMiniMax && !promptRelayMode)) continue;
+        opts.push({
+          value: 10 as VideoDuration,
+          label,
+          description: isMiniMax
+            ? durationDescription(10)
+            : $_("review.duration.extendedDesc"),
+          requiresPaid: true,
+        });
+      } else if (value === 15) {
+        // 15s is a MiniMax H3 premium-only option.
+        if (!canUseQuality || !isMiniMax) continue;
+        opts.push({
+          value: 15 as VideoDuration,
+          label,
+          description: durationDescription(15),
+          requiresPaid: true,
+        });
+      }
+    }
+    return opts;
+  })();
 
   // Effective selected value for display: FOLLOW_DURATION when follow is on
   // (and there's a video to follow — the pref can be remembered from an earlier
@@ -226,26 +228,40 @@
     videoDuration = value as VideoDuration;
   }
 
-  // If the selected step isn't available for the current model/tier, snap to default.
-  // IMPORTANT: guard on `selectedWorkflowId` — same init-window race as duration.
-  // At first render the workflow isn't resolved, so isMiniMaxSelected is momentarily
-  // false and stepOptions are the WAN ones; a MiniMax 8-step entry would be
-  // wrongly snapped to 4, then re-snapped to the WAN-default 4→8 after resolution.
+  // If the selected step isn't available for the current model/tier, snap to
+  // default. IMPORTANT: guard on `selectedWorkflowId` — same init-window race
+  // as duration. At first render the workflow isn't resolved, so caps/engine
+  // are the WAN ones; a MiniMax 8-step entry would be wrongly snapped to 4,
+  // then re-snapped to the WAN-default 4→8 after resolution.
   $: if (
     selectedWorkflowId &&
     !stepOptions.some((o) => o.value === iterationSteps)
   )
     iterationSteps = defaultIterationSteps as IterationSteps;
-  // Free tier: premium step tiers (MiniMax 8, WAN 6) snap down to the fast 4.
-  $: if (!canUseQuality && iterationSteps === (isMiniMaxSelected ? 8 : 6)) iterationSteps = 4;
+  // Free tier: snap to the best step the workflow gives free users (the largest
+  // allowed step ≤ the workflow's freeSteps). A workflow with no free step (e.g.
+  // steps:[8] with the default freeSteps 4) is premium-only — leave the value so
+  // the kickoff gate produces a clear "advanced features" error.
+  $: if (!canUseQuality) {
+    const bestFree = caps.steps
+      .filter((s) => s <= caps.freeSteps)
+      .sort((a, b) => b - a)[0];
+    if (bestFree !== undefined && iterationSteps > bestFree) {
+      iterationSteps = bestFree;
+    }
+  }
 
   $: if (!canUseQuality && videoResolution === "720p") videoResolution = "480p";
 
-  // Free tier: 8s/10s are advanced features. MiniMax keeps 8s/10s in its
-  // option list for paid users, so a free user's stored 8s/10s (e.g. from a
-  // premium period) would otherwise leave no duration radio selected — snap
-  // it down to 6s so a radio is always checked.
-  $: if (!canUseQuality && videoDuration > 6) videoDuration = 6;
+  // Free tier: durations above 6s are advanced features — snap down to 6s when
+  // the workflow allows it so a radio is always checked. Premium-only durations
+  // (workflow that excludes ≤6s) are left for kickoff to gate.
+  $: if (
+    !canUseQuality &&
+    videoDuration > FREE_DURATION_MAX &&
+    caps.durations.includes(FREE_DURATION_MAX)
+  )
+    videoDuration = FREE_DURATION_MAX;
 
   // Follow-duration is meaningless without a ref video (the pref is remembered
   // globally and may outlive the entry that set it). Snap it off so it never
@@ -253,18 +269,26 @@
   // ref2v_follow_duration flag to kickoff.
   $: if (ref2vFollowDuration && refVideoDurationSec <= 0) ref2vFollowDuration = false;
 
-  // WAN (non-MiniMax) doesn't support 8s/10s outside relay mode — snap to 6.
-  // IMPORTANT: guard on `selectedWorkflowId` — at first render the workflow
-  // isn't resolved yet (it's set in onMount), so isMiniMaxSelected is
-  // momentarily false. Without this guard, a MiniMax job with 10s would be
-  // wrongly snapped to 6s during the init window and stay corrupted even after
-  // the real workflow loads (DB says 10, UI shows 6).
+  // Keep the current value a real option: after the workflow resolves (or the
+  // tier/relay gating drops a previously-valid option, e.g. WAN 10s outside
+  // relay mode), snap to the nearest still-allowed numeric preset. Guarded on
+  // selectedWorkflowId for the same init-window race as above.
   $: if (
     selectedWorkflowId &&
-    !isMiniMaxSelected &&
-    (videoDuration === 8 || (videoDuration === 10 && !promptRelayMode))
-  )
-    videoDuration = 6;
+    !ref2vFollowDuration &&
+    videoDuration > 0 &&
+    !durationOptions.some((o) => o.value === videoDuration)
+  ) {
+    const numeric = durationOptions.filter(
+      (o) => o.value !== FOLLOW_DURATION,
+    ) as { value: number; requiresPaid: boolean }[];
+    if (numeric.length > 0) {
+      const nearest = numeric.reduce((best, o) =>
+        Math.abs(o.value - videoDuration) < Math.abs(best.value - videoDuration) ? o : best,
+      );
+      videoDuration = nearest.value as VideoDuration;
+    }
+  }
 </script>
 
 <div class="collapse collapse-arrow bg-base-200">
@@ -497,7 +521,7 @@
     <div class="divider"></div>
 
     <!-- Additional Options -->
-    {#if !isMiniMaxSelected}
+    {#if !isMiniMax}
       <div class="space-y-3 mb-6">
         <h3 class="font-semibold flex items-center gap-2">
           {$_("review.additionalOptions.title")}

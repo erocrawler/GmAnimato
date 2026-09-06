@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic, Workflow, SponsorClaim } from './IDatabase';
 import { DEFAULT_LORA_PRESETS, normalizeLoraPresets } from './loraPresets';
 import { normalizeQuotaCostRules } from './quotaCost';
+import { normalizeWorkflowCapabilities, engineFromTemplatePath } from './workflowCapabilities';
 import { PrismaPg } from '@prisma/adapter-pg'
 
 export class PostgresDatabase implements IDatabase {
@@ -511,7 +512,10 @@ export class PostgresDatabase implements IDatabase {
     // This prevents race conditions where two workers claim the same job
     try {
       const video = await this.prisma.$transaction(async (tx) => {
-        // Optionally scope the claim to a specific user's jobs
+        // Optionally scope the claim to a specific user's jobs. Belt-and-
+        // suspenders: never hand a local worker a job whose workflow is marked
+        // runOn='serverless' (kickoff never enqueues those, but an old job
+        // enqueued before the field was set must not be claimable either).
         const where = userId
           ? Prisma.sql`WHERE is_local_job = true AND status = 'in_queue' AND user_id = ${userId}`
           : Prisma.sql`WHERE is_local_job = true AND status = 'in_queue'`;
@@ -520,6 +524,10 @@ export class PostgresDatabase implements IDatabase {
         const job = await tx.$queryRaw<Array<{id: string}>>(Prisma.sql`
           SELECT id FROM videos 
           ${where}
+          AND NOT EXISTS (
+            SELECT 1 FROM workflows w
+            WHERE w.id = videos.workflow_id AND w.run_on = 'serverless'
+          )
           ORDER BY created_at ASC
           LIMIT 1
           FOR UPDATE SKIP LOCKED
@@ -1334,6 +1342,11 @@ export class PostgresDatabase implements IDatabase {
         workflowType: workflowType || 'i2v',
         isDefault: isDefault || false,
         compatibleLoraIds,
+        ...((data as any).engine !== undefined ? { engine: (data as any).engine } : {}),
+        ...((data as any).runOn !== undefined ? { runOn: (data as any).runOn } : {}),
+        ...((data as any).capabilities !== undefined
+          ? { capabilities: normalizeWorkflowCapabilities((data as any).capabilities) }
+          : {}),
         // new fields — stored as JSON / columns if exist, otherwise ignored by Prisma if not in schema (we store in compatibleLoraIds JSON fallback)
         // For flexibility, we try to write tags etc. into extra columns if they exist.
         ...(tags !== undefined ? { tags } : {}),
@@ -1356,6 +1369,9 @@ export class PostgresDatabase implements IDatabase {
     if ((patch as any).tags !== undefined) updateData.tags = (patch as any).tags;
     if ((patch as any).autoIncludeNewLoras !== undefined) updateData.autoIncludeNewLoras = (patch as any).autoIncludeNewLoras;
     if ((patch as any).presetGroup !== undefined) updateData.presetGroup = (patch as any).presetGroup;
+    if ((patch as any).engine !== undefined) updateData.engine = (patch as any).engine;
+    if ((patch as any).runOn !== undefined) updateData.runOn = (patch as any).runOn;
+    if ((patch as any).capabilities !== undefined) updateData.capabilities = normalizeWorkflowCapabilities((patch as any).capabilities);
     if ((patch as any).quotaCost !== undefined) updateData.quotaCost = Math.max(1, (patch as any).quotaCost);
     if ((patch as any).quotaCostRules !== undefined) updateData.quotaCostRules = normalizeQuotaCostRules((patch as any).quotaCostRules);
     if (patch.isDefault !== undefined) {
@@ -1428,17 +1444,27 @@ export class PostgresDatabase implements IDatabase {
     const rawTags = (workflow as any).tags;
     const rawAuto = (workflow as any).autoIncludeNewLoras;
     const rawGroup = (workflow as any).presetGroup;
+    const templatePath = workflow.templatePath;
+    const rawEngine = (workflow as any).engine;
+    const rawRunOn = (workflow as any).runOn;
+    const rawCapabilities = (workflow as any).capabilities;
     return {
       id: workflow.id,
       name: workflow.name,
       description: workflow.description || undefined,
-      templatePath: workflow.templatePath,
+      templatePath,
       workflowType: (workflow.workflowType || 'i2v') as 'i2v' | 'fl2v',
       compatibleLoraIds: Array.isArray(workflow.compatibleLoraIds)
         ? workflow.compatibleLoraIds
         : (typeof workflow.compatibleLoraIds === 'string'
           ? JSON.parse(workflow.compatibleLoraIds)
           : []),
+      engine:
+        rawEngine === 'wan' || rawEngine === 'minimax'
+          ? rawEngine
+          : engineFromTemplatePath(templatePath),
+      runOn: rawRunOn === 'serverless' ? 'serverless' : 'auto',
+      capabilities: normalizeWorkflowCapabilities(rawCapabilities),
       quotaCost: typeof (workflow as any).quotaCost === 'number' ? (workflow as any).quotaCost : 1,
       quotaCostRules: normalizeQuotaCostRules((workflow as any).quotaCostRules),
       tags: Array.isArray(rawTags) ? rawTags : (typeof rawTags === 'string' ? JSON.parse(rawTags) : []),

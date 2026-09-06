@@ -2,6 +2,12 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/db';
 import { normalizeQuotaCostRules } from '$lib/quotaCost';
+import { normalizeWorkflowCapabilities, engineFromTemplatePath } from '$lib/workflowCapabilities';
+
+function parseEngine(raw: unknown, templatePath?: string): string {
+  if (raw === 'wan' || raw === 'minimax') return raw;
+  return engineFromTemplatePath(templatePath);
+}
 
 export const POST: RequestHandler = async ({ locals, request }) => {
   // Check authentication
@@ -15,7 +21,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
   }
 
   const body = await request.json();
-  const { id, name, description, templatePath, workflowType, isDefault, compatibleLoraIds, tags, autoIncludeNewLoras, presetGroup, quotaCost, quotaCostRules } = body;
+  const { id, name, description, templatePath, workflowType, isDefault, compatibleLoraIds, tags, autoIncludeNewLoras, presetGroup, quotaCost, quotaCostRules, engine, runOn, capabilities } = body;
 
   if (!id || !name || !templatePath) {
     throw error(400, 'id, name, and templatePath are required');
@@ -23,6 +29,16 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
   if (workflowType && !['i2v', 'fl2v', 'ref2v'].includes(workflowType)) {
     throw error(400, 'workflowType must be "i2v", "fl2v", or "ref2v"');
+  }
+
+  if (engine !== undefined && engine !== 'wan' && engine !== 'minimax') {
+    throw error(400, 'engine must be "wan" or "minimax"');
+  }
+  if (runOn !== undefined && runOn !== 'auto' && runOn !== 'serverless') {
+    throw error(400, 'runOn must be "auto" or "serverless"');
+  }
+  if (capabilities !== undefined && typeof capabilities !== 'object') {
+    throw error(400, 'capabilities must be an object');
   }
 
   if (!Array.isArray(compatibleLoraIds)) {
@@ -40,6 +56,9 @@ export const POST: RequestHandler = async ({ locals, request }) => {
       description,
       templatePath,
       workflowType: workflowType || 'i2v',
+      engine: parseEngine(engine, templatePath),
+      runOn: runOn || 'auto',
+      capabilities: normalizeWorkflowCapabilities(capabilities),
       isDefault: isDefault || false,
       compatibleLoraIds,
       tags: Array.isArray(tags) ? tags.map((t: string) => String(t).toLowerCase()) : [],
