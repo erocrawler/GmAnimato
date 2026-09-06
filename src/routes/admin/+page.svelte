@@ -51,6 +51,15 @@
   let workflowSelectedTagFilter = $state('all');
   let workflowSelectedGroupFilter = $state('all');
 
+  // Template peek modal state
+  let showPeekModal = $state(false);
+  let peekLoading = $state(false);
+  let peekError = $state('');
+  let peekPath = $state('');
+  let peekResult = $state<any>(null);
+  // The workflow row the peek is for (engine/type context for display).
+  let peekWorkflow = $state<any>(null);
+
   // LoRA bulk ops
   let showLoraBulkModal = $state(false);
   let bulkSelectedLoraIds = $state<string[]>([]);
@@ -644,6 +653,47 @@
     const allowed = workflowSteps.length ? workflowSteps : [...ENGINE_DEFAULT_CAPABILITIES[workflowEngine].steps];
     return Array.from(new Set([4, ...allowed])).sort((a, b) => a - b);
   })());
+
+  // ---- Template peek --------------------------------------------------------
+  // Asks the server to check the tmpl file exists and is a valid workflow
+  // template, then shows a report + pretty-printed content in a modal.
+  async function peekTemplate(templatePath: string, workflow?: any) {
+    const path = (templatePath || '').trim();
+    if (!path) {
+      showNotification('Template path is empty', 'error');
+      return;
+    }
+    peekPath = path;
+    peekWorkflow = workflow || null;
+    peekResult = null;
+    peekError = '';
+    showPeekModal = true;
+    peekLoading = true;
+    try {
+      const res = await fetch('/api/admin/template-peek', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templatePath: path }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        peekError = data?.error || `HTTP ${res.status}`;
+      } else {
+        peekResult = data;
+      }
+    } catch (err) {
+      peekError = String(err);
+    } finally {
+      peekLoading = false;
+    }
+  }
+  function closePeekModal() {
+    showPeekModal = false;
+    peekResult = null;
+    peekError = '';
+    peekPath = '';
+    peekWorkflow = null;
+  }
 
   function addWorkflowTag(tag: string) {
     if (!tag.trim()) return;
@@ -1263,6 +1313,7 @@
                     {#if !workflow.isDefault && !workflow.isDeleted}
                       <button class="btn btn-xs btn-outline" onclick={() => setDefaultWorkflow(workflow.id)}>Set Default {workflow.workflowType?.toUpperCase()}</button>
                     {/if}
+                    <button class="btn btn-xs btn-outline" onclick={() => peekTemplate(workflow.templatePath, workflow)} disabled={!workflow.templatePath}>Peek</button>
                     {#if !workflow.isDeleted}
                       <button class="btn btn-xs btn-outline" onclick={() => openWorkflowModal(workflow)}>Edit</button>
                     {/if}
@@ -2015,7 +2066,13 @@
         </label>
         <label class="form-control">
           <span class="label-text text-sm">Template Path</span>
-          <input type="text" bind:value={workflowTemplatePath} placeholder="data/..." class="input input-bordered input-sm w-full font-mono" />
+          <div class="flex gap-2">
+            <input type="text" bind:value={workflowTemplatePath} placeholder="data/..." class="input input-bordered input-sm w-full font-mono" />
+            <button type="button" class="btn btn-outline btn-sm shrink-0" onclick={() => peekTemplate(workflowTemplatePath)}
+              disabled={!workflowTemplatePath.trim() || peekLoading}>
+              {peekLoading ? '…' : 'Peek'}
+            </button>
+          </div>
         </label>
       </div>
 
@@ -2221,6 +2278,99 @@
       </div>
     </div>
     <button class="modal-backdrop" type="button" onclick={closeWorkflowModal} aria-label="Close modal"></button>
+  </div>
+{/if}
+
+<!-- Template Peek Modal -->
+{#if showPeekModal}
+  <div class="modal modal-open">
+    <div class="modal-box max-w-4xl">
+      <h3 class="font-bold text-lg mb-1 flex items-center gap-2 flex-wrap">
+        Template peek
+        {#if peekWorkflow}
+          <span class="badge badge-ghost badge-sm">{peekWorkflow.name}</span>
+          <span class="badge badge-ghost badge-sm">{peekWorkflow.workflowType?.toUpperCase()}</span>
+          <span class="badge badge-ghost badge-sm">engine: {(peekWorkflow as any).engine || 'auto'}</span>
+        {/if}
+      </h3>
+      <p class="text-xs opacity-60 font-mono mb-3 break-all">{peekPath}</p>
+
+      {#if peekError}
+        <div class="alert alert-error py-2 mb-3"><span>{peekError}</span></div>
+      {:else if peekLoading}
+        <div class="flex items-center gap-2 py-4"><span class="loading loading-spinner loading-sm"></span> Checking template…</div>
+      {:else if peekResult}
+        {#if peekResult.exists === false}
+          <div class="alert alert-error py-2 mb-3"><span>File not found: {peekResult.path}</span></div>
+        {:else if peekResult.error}
+          <div class="alert alert-error py-2 mb-3"><span>{peekResult.error}</span></div>
+        {:else}
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-center mb-3">
+            <div class="rounded-lg border border-base-300 p-2">
+              <div class="text-lg font-bold" class:text-success={peekResult.jsonValid} class:text-error={!peekResult.jsonValid}>{peekResult.jsonValid ? 'Valid' : 'Invalid'}</div>
+              <div class="text-xs opacity-60">JSON</div>
+            </div>
+            <div class="rounded-lg border border-base-300 p-2">
+              <div class="text-lg font-bold">{peekResult.nodeCount ?? 0}</div>
+              <div class="text-xs opacity-60">nodes</div>
+            </div>
+            <div class="rounded-lg border border-base-300 p-2">
+              <div class="text-lg font-bold capitalize">{peekResult.style}</div>
+              <div class="text-xs opacity-60">structure</div>
+            </div>
+            <div class="rounded-lg border border-base-300 p-2">
+              <div class="text-lg font-bold capitalize">{peekResult.engineGuess || 'unknown'}</div>
+              <div class="text-xs opacity-60">engine</div>
+            </div>
+          </div>
+
+          {#if peekResult.parseError}
+            <div class="alert alert-warning py-2 mb-2"><span class="text-xs">Parse error after placeholder substitution: {peekResult.parseError}</span></div>
+          {/if}
+
+          {#if !peekResult.rawValid}
+            <div class="text-xs opacity-70 mb-2">Raw file is not plain JSON (expected for .tmpl with bare placeholders like <code>{'{seed}'}</code>) — validated after substituting its <b>{peekResult.placeholders.length}</b> placeholder(s).</div>
+          {/if}
+
+          <div class="flex flex-wrap gap-1.5 mb-3">
+            {#if peekResult.placeholders?.length}
+              {#each peekResult.placeholders as ph}
+                <span class="badge badge-xs badge-outline font-mono">{'{' + ph + '}'}</span>
+              {/each}
+            {:else}
+              <span class="text-xs opacity-50">No {`{placeholders}`} found</span>
+            {/if}
+          </div>
+
+          {#if peekResult.checks}
+            <div class="flex flex-wrap gap-2 mb-3 text-xs">
+              <span class="badge badge-sm" class:badge-success={peekResult.checks.encoder} class:badge-error={!peekResult.checks.encoder}>encoder</span>
+              <span class="badge badge-sm" class:badge-success={peekResult.checks.sampler} class:badge-error={!peekResult.checks.sampler}>sampler</span>
+              <span class="badge badge-sm" class:badge-success={peekResult.checks.decoder} class:badge-error={!peekResult.checks.decoder}>decoder</span>
+              <span class="badge badge-sm" class:badge-success={peekResult.checks.videoOutput} class:badge-error={!peekResult.checks.videoOutput}>video output</span>
+            </div>
+          {/if}
+
+          {#if peekResult.classes?.length}
+            <details class="mb-3 text-xs">
+              <summary class="cursor-pointer opacity-70">Node types ({peekResult.classes.length})</summary>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-1 max-h-40 overflow-y-auto">
+                {#each peekResult.classes as c}
+                  <span class="font-mono truncate"><b>{c.count}</b>× {c.type}</span>
+                {/each}
+              </div>
+            </details>
+          {/if}
+
+          <pre class="rounded-lg bg-base-200 p-3 overflow-auto max-h-[45vh] text-[11px] leading-snug font-mono">{peekResult.preview}</pre>
+        {/if}
+      {/if}
+
+      <div class="modal-action">
+        <button class="btn btn-sm" onclick={closePeekModal}>Close</button>
+      </div>
+    </div>
+    <button class="modal-backdrop" type="button" onclick={closePeekModal} aria-label="Close modal"></button>
   </div>
 {/if}
 
