@@ -2351,6 +2351,28 @@
             </div>
           {/if}
 
+          {#if peekResult.baseModelNames?.length}
+            <div class="mb-3">
+              <div class="text-xs opacity-70 mb-1">Base model{peekResult.baseModelNames.length > 1 ? 's' : ''} loaded by this template:</div>
+              <div class="flex flex-wrap gap-1.5">
+                {#each peekResult.baseModelNames as m}
+                  <span class="badge badge-sm badge-primary font-mono break-all max-w-full">{m}</span>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          {#if peekResult.modelRefs?.length}
+            <details class="mb-3 text-xs">
+              <summary class="cursor-pointer opacity-70">Referenced model files ({peekResult.modelRefs.length})</summary>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-1 max-h-40 overflow-y-auto">
+                {#each peekResult.modelRefs as r}
+                  <span class="font-mono truncate" title={r.file}><span class="badge badge-ghost badge-xs mr-1">{r.kind}</span>{r.file}</span>
+                {/each}
+              </div>
+            </details>
+          {/if}
+
           {#if peekResult.classes?.length}
             <details class="mb-3 text-xs">
               <summary class="cursor-pointer opacity-70">Node types ({peekResult.classes.length})</summary>

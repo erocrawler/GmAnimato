@@ -157,6 +157,42 @@ export const POST: RequestHandler = async ({ locals, request }) => {
   if (allTypes.some((t) => /^MiniMax/i.test(t))) engineGuess = 'minimax';
   else if (allTypes.some((t) => /^Wan/i.test(t))) engineGuess = 'wan';
 
+  // ---- Loader references: which model/VAE/CLIP/LoRA files the template loads
+  // Maps each loader class to the input key holding its filename(s). This is
+  // how an admin verifies the template actually points at the intended base
+  // model (e.g. after a pruned -> unpruned rename) without opening the raw JSON.
+  const LOADER_KEYS: Record<string, { key: string; kind: string }> = {
+    UNETLoader: { key: 'unet_name', kind: 'diffusion' },
+    UnetLoaderGGUF: { key: 'unet_name', kind: 'diffusion' },
+    UNETLoaderMultiGPU: { key: 'unet_name', kind: 'diffusion' },
+    CheckpointLoaderSimple: { key: 'ckpt_name', kind: 'checkpoint' },
+    VAELoader: { key: 'vae_name', kind: 'vae' },
+    CLIPLoader: { key: 'clip_name', kind: 'clip' },
+    LoraLoaderModelOnly: { key: 'lora_name', kind: 'lora' },
+    LoraLoader: { key: 'lora_name', kind: 'lora' },
+    ControlNetLoader: { key: 'control_net_name', kind: 'controlnet' },
+    UpscaleModelLoader: { key: 'model_name', kind: 'upscale' },
+  };
+  const modelRefs: { kind: string; class: string; file: string }[] = [];
+  if (workflowMap) {
+    for (const [nodeId, node] of Object.entries(workflowMap) as [string, any][]) {
+      const def = LOADER_KEYS[node?.class_type];
+      if (!def || !node?.inputs) continue;
+      const raw = node.inputs[def.key];
+      const files = Array.isArray(raw) ? raw.filter((x: any) => typeof x === 'string') : typeof raw === 'string' ? [raw] : [];
+      for (const file of files) {
+        if (file) modelRefs.push({ kind: def.kind, class: node.class_type, file });
+      }
+    }
+  }
+  // Deduplicate (e.g. same VAE used by several nodes).
+  const uniqueModelRefs = Array.from(
+    new Map(modelRefs.map((r) => [`${r.kind}\u0000${r.file}`, r])).values(),
+  );
+  const baseModelNames = uniqueModelRefs
+    .filter((r) => r.kind === 'diffusion' || r.kind === 'checkpoint')
+    .map((r) => r.file);
+
   // Sentinel node-type checks that a workflow template normally needs.
   const ENCODER_TYPES = [
     'WanImageToVideo',
@@ -193,5 +229,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
     classes,
     engineGuess,
     checks,
+    modelRefs: uniqueModelRefs,
+    baseModelNames,
   });
 };
