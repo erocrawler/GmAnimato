@@ -128,6 +128,24 @@ export const FREE_STEP_MAX = 4 as const;
 /** A duration at or below this value is free; anything above is premium. */
 export const FREE_DURATION_MAX = 6 as const;
 
+/**
+ * The default sampler step a workflow runs at when the user doesn't make an
+ * explicit choice. WORKFLOW-DEFINED (this module), NOT a LoRA property: the
+ * engine's preferred step (WAN 4, MiniMax 8) when the workflow's capability
+ * allowlist includes it, else the cheapest allowed step. Mirrors the review
+ * UI's defaultIterationSteps so the builder and UI never disagree.
+ */
+export function workflowDefaultStep(
+  engine: WorkflowEngine,
+  capabilities?: WorkflowCapabilities | null,
+): number {
+  const caps = resolveCapabilities(engine, capabilities);
+  const preferred = ENGINE_DEFAULT_STEP[engine] ?? 4;
+  return (caps.steps as readonly number[]).includes(preferred)
+    ? preferred
+    : (caps.steps[0] ?? preferred);
+}
+
 /** i18n label key suffix for a step value under `review.iteration.*`. */
 export const STEP_LABEL_KEY: Record<number, string> = {
   4: 'fast',

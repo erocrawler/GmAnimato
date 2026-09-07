@@ -5,6 +5,7 @@ import type { Workflow } from './IDatabase';
 import type { LoraPreset } from './loraPresets';
 import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes } from './workflowUtils';
 import { probeVideoDimensions } from './videoValidation';
+import { workflowDefaultStep, engineFromTemplatePath } from './workflowCapabilities';
 
 interface Ref2VWorkflowParams {
   ref_video_name: string;
@@ -288,10 +289,19 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
       }
     }
 
-    // Reduce steps: distilled NFE — user-selected 4/8 when provided, else the
-    // LoRA preset's target `steps` (4-step / 8-step lightx2v), else 8.
+    // Reduce steps: distilled NFE — user's explicit choice when provided, else
+    // the workflow-defined default (engine default if its capability allowlist
+    // allows it, otherwise the cheapest allowed step). Step constraints live on
+    // the WORKFLOW, not on the LoRA.
     if (schedulerInputs) {
-      schedulerInputs.steps = params.iterationSteps ?? appliedLora.steps ?? 8;
+      const wfEngine =
+        params.workflow?.engine === 'wan' || params.workflow?.engine === 'minimax'
+          ? params.workflow.engine
+          : engineFromTemplatePath(params.workflow?.templatePath);
+      schedulerInputs.steps =
+        params.iterationSteps ??
+        workflowDefaultStep(wfEngine, params.workflow?.capabilities) ??
+        8;
     }
     console.log(`[Ref2V] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
   } else {

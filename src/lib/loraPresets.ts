@@ -25,7 +25,6 @@ export type LoraPreset = {
   presetGroup?: string; // model family — free-form, fully configurable
   tags?: string[]; // optional style — free-form
   autoAddToWorkflows?: boolean;
-  steps?: number; // target sampler steps when this LoRA is applied (e.g. speed-up LoRAs: 8 instead of 20)
 };
 
 // Suggestions only - not enforced. User can type any name. You mentioned 2-3 presets like wan22 / dasiwa-old / dasiwa-new - use whatever you want.
@@ -40,13 +39,12 @@ export const DEFAULT_LORA_PRESETS: LoraPreset[] = [
   // Group = wan22 so it only auto-applies to wan22 workflows, isConfigurable=false forces it ON
   { id: 'wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors', label: 'Light X2V (High Noise)', default: 0.4, min: 0, max: 1.5, step: 0.05, chain: 'high', isConfigurable: false, defaultEnabled: true, tags: ['lightx2v'], presetGroup: 'wan22', autoAddToWorkflows: false },
   { id: 'wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors', label: 'Light X2V (Low Noise)', default: 1, min: 0, max: 1.5, step: 0.05, chain: 'low', isConfigurable: false, defaultEnabled: true, tags: ['lightx2v'], presetGroup: 'wan22', autoAddToWorkflows: false },
-  // MiniMax H3 distilled turbo LoRAs (lightx2v). Required (isConfigurable=false),
-  // NFE-driven: `steps` is the LoRA's trained NFE — the builders use it as the
-  // scheduler step fallback (8-step FL2VA → 8, 4-step Ref2VA → 4). If lightx2v
-  // releases a newer variant (e.g. an 8-step Ref2VA), it drops in by adding a
-  // preset with the new filename + steps — no builder changes needed.
-  { id: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', label: 'Light X2V FL2VA Turbo (8-step)', default: 1, min: 0, max: 1.5, step: 0.05, isConfigurable: false, defaultEnabled: true, steps: 8, tags: ['lightx2v'], presetGroup: 'minimax', autoAddToWorkflows: false },
-  { id: 'minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors', label: 'Light X2V Ref2VA Turbo (4-step)', default: 1, min: 0, max: 1.5, step: 0.05, isConfigurable: false, defaultEnabled: true, steps: 4, tags: ['lightx2v'], presetGroup: 'minimax', autoAddToWorkflows: false },
+  // MiniMax H3 distilled turbo LoRAs (lightx2v). Required (isConfigurable=false).
+  // This list is NOT kept in lockstep with upstream releases (it's a local
+  // starting preset set); the DB/admin settings are the source of truth. Sampler
+  // steps are workflow-defined — see workflowCapabilities.workflowDefaultStep.
+  { id: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', label: 'Light X2V FL2VA Turbo (8-step)', default: 1, min: 0, max: 1.5, step: 0.05, isConfigurable: false, defaultEnabled: true, tags: ['lightx2v'], presetGroup: 'minimax', autoAddToWorkflows: false },
+  { id: 'minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors', label: 'Light X2V Ref2VA Turbo (4-step)', default: 1, min: 0, max: 1.5, step: 0.05, isConfigurable: false, defaultEnabled: true, tags: ['lightx2v'], presetGroup: 'minimax', autoAddToWorkflows: false },
   { id: 'wan22-video10-arcshot-16-sel-7-high.safetensors', label: 'Arcshot High', default: 0.8, min: 0, max: 1.5, step: 0.05, chain: 'high', isConfigurable: true, tags: ['realistic'], presetGroup: 'wan22', autoAddToWorkflows: false },
   { id: 'DR34ML4Y_I2V_14B_HIGH.safetensors', label: 'DR34ML4Y High', default: 1, min: 0, max: 1.5, step: 0.05, chain: 'high', isConfigurable: true, tags: ['realistic'], presetGroup: 'wan22', autoAddToWorkflows: false },
   { id: 'NSFW-22-H-e8.safetensors', label: 'NSFW-22 High', default: 1, min: 0, max: 1.5, step: 0.05, chain: 'high', isConfigurable: true, tags: ['nsfw'], presetGroup: 'wan22', autoAddToWorkflows: false },
@@ -72,7 +70,6 @@ export function normalizeLoraPresets(list?: LoraPreset[]): LoraPreset[] {
       presetGroup: typeof item.presetGroup === 'string' && item.presetGroup.trim() ? item.presetGroup.trim() : 'Custom',
       tags: Array.isArray(item.tags) ? item.tags.map((t: string) => String(t).toLowerCase().trim()).filter(Boolean) : [],
       autoAddToWorkflows: typeof item.autoAddToWorkflows === 'boolean' ? item.autoAddToWorkflows : false,
-      steps: typeof (item as any).steps === 'number' && (item as any).steps >= 1 ? (item as any).steps : undefined,
     }));
 }
 

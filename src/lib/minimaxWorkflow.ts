@@ -4,6 +4,7 @@ import probe from 'probe-image-size';
 import type { Workflow } from './IDatabase';
 import type { LoraPreset } from './loraPresets';
 import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes } from './workflowUtils';
+import { workflowDefaultStep, engineFromTemplatePath } from './workflowCapabilities';
 
 interface MiniMaxWorkflowParams {
   first_image_name: string;
@@ -111,9 +112,12 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
 
   // Speed-up LoRA (WAN lightx2v pattern): apply the workflow's required LoRA
   // (isConfigurable=false preset present in loraWeights) after the UNETLoader,
-  // and reduce sampler steps to the preset's `steps` (default 8). The LoRA
-  // filename is fully configurable via admin — no hardcoding. If none is
-  // configured, the workflow runs at the template's 20 steps with no LoRA.
+  // and run the sampler at the WORKFLOW's default step (engine + capabilities,
+  // see workflowCapabilities.workflowDefaultStep) unless the user explicitly
+  // picked steps. The LoRA filename is fully configurable via admin — no
+  // hardcoding, and step constraints live on the workflow, NOT on the LoRA. If
+  // none is configured, the workflow runs at the template's 20 steps with no
+  // LoRA.
   const schedulerNode = findNode(workflow, 'BasicScheduler');
   const guiderNode = findNode(workflow, 'BasicGuider');
   const unetLoaderNode = findNode(workflow, 'UNETLoader');
@@ -163,10 +167,18 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
       }
     }
 
-    // Steps = distilled NFE: user-selected 4/8 when provided, else the LoRA
-    // preset's target `steps` (4-step / 8-step lightx2v), else 8.
+    // Steps = distilled NFE: the user's explicit choice when provided, else the
+    // workflow-defined default (engine default if its capability allowlist
+    // allows it, otherwise the cheapest allowed step).
     if (schedulerInputs) {
-      schedulerInputs.steps = params.iterationSteps ?? appliedLora.steps ?? 8;
+      const wfEngine =
+        params.workflow?.engine === 'wan' || params.workflow?.engine === 'minimax'
+          ? params.workflow.engine
+          : engineFromTemplatePath(params.workflow?.templatePath);
+      schedulerInputs.steps =
+        params.iterationSteps ??
+        workflowDefaultStep(wfEngine, params.workflow?.capabilities) ??
+        8;
     }
     console.log(`[MiniMax] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
   } else {
