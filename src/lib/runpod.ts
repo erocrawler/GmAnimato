@@ -184,6 +184,33 @@ export function mapRunPodStatus(runpodStatus: string): InternalStatus {
       return 'completed';
     case 'FAILED':
       return 'failed';
+    // A cancelled job is released back to an editable draft. Cancellation is
+    // deliberate (a user reopening before the job runs, or an operator clearing
+    // the queue), so the useful outcome is "edit it and generate again" rather
+    // than a dead-end failure.
+    //
+    // Without this case the default below maps CANCELLED -> 'in_queue', which
+    // equals the status we're already in: the poll writes nothing, the
+    // status-poll timeout never arms (it requires 'processing' + dequeued_at),
+    // and the entry sits on "Queued..." forever with no way out.
+    //
+    // Spelling: RunPod's /cancel response example uses "CANCELLED" (double L)
+    // while the prose in the same doc section says "canceled" (single L). Both
+    // are accepted here because the documentation contradicts itself.
+    //
+    // Caveat: /status documents only IN_QUEUE/IN_PROGRESS/COMPLETED/FAILED, so
+    // it is unconfirmed whether a cancel is observable through the /status
+    // endpoint we actually poll. (TIMED_OUT is likewise absent from that list
+    // yet is referenced by /retry, so the list is probably not exhaustive.)
+    case 'CANCELLED':
+    case 'CANCELED':
+      return 'uploaded';
+    // Timed-out jobs genuinely failed. RunPod's /retry doc states it "only
+    // works for jobs with FAILED or TIMED_OUT status", so this maps to 'failed'
+    // where the existing retry path works unchanged.
+    case 'TIMED_OUT':
+    case 'TIMEOUT':
+      return 'failed';
     default:
       console.warn(`[RunPod] Unknown status: ${runpodStatus}, defaulting to in_queue`);
       return 'in_queue';

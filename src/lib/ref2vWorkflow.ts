@@ -37,6 +37,7 @@ interface Ref2VWorkflowParams {
   iterationSteps?: 4 | 8; // sampler steps (distilled turbo NFE: fast 4 / quality 8)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
+  useSageAttention?: boolean; // inject MiniMaxH3MemoryEfficientSageAttentionPatch
   workflow?: Workflow;
 }
 
@@ -255,8 +256,11 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
     .filter((p) => p.isConfigurable === false)
     .find((p) => params.loraWeights && Object.prototype.hasOwnProperty.call(params.loraWeights, p.id));
 
+  // Declared at function scope so the sage attention injection below can chain
+  // off the LoRA output when one was applied (mirrors minimaxWorkflow).
+  const loraNodeId = '105:1000:lora_speedup';
+
   if (appliedLora && unetLoaderNode && schedulerNode) {
-    const loraNodeId = '105:1000:lora_speedup';
     const strength =
       typeof params.loraWeights?.[appliedLora.id] === 'number'
         ? params.loraWeights![appliedLora.id]
@@ -306,6 +310,44 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
     console.log(`[Ref2V] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
   } else {
     console.log('[Ref2V] No speed-up LoRA configured — using template steps (20)');
+  }
+
+  // MiniMax H3 sage attention: inject MiniMaxH3MemoryEfficientSageAttentionPatch
+  // (from ComfyUI-KJNodes ltxv_nodes.py) into the model chain — ref2v uses the
+  // MiniMax H3 stack, so it needs the MiniMax patch node, NOT the WAN
+  // PathchSageAttentionKJ nodes used by i2v/fl2v. It takes the current model
+  // (the speed-up LoRA output if one was applied, else the UNETLoader) and
+  // re-emits the patched model, so we rewire the downstream consumer.
+  // Requires sageattention on the worker.
+  const sageAttentionNodeId = '105:1001:sage';
+  if (params.useSageAttention && unetLoaderNode && schedulerNode) {
+    const modelSourceId = appliedLora ? loraNodeId : unetLoaderNode;
+
+    workflow.input.workflow[sageAttentionNodeId] = {
+      inputs: {
+        model: [modelSourceId, 0],
+      },
+      class_type: 'MiniMaxH3MemoryEfficientSageAttentionPatch',
+      _meta: { title: 'MiniMax H3 Mem Eff Sage Attention Patch' },
+    };
+    workflow.input.node_weights[sageAttentionNodeId] = 1.0;
+
+    // Slot the sage patch between the current model source and the sigma-shift
+    // node (or scheduler/guider on templates without the shift node).
+    const shiftInputs = sigmaShiftNode ? getNodeInputs(workflow, sigmaShiftNode) : null;
+    if (shiftInputs && Array.isArray(shiftInputs.model)) {
+      shiftInputs.model = [sageAttentionNodeId, 0];
+    } else {
+      const schedulerInputs = getNodeInputs(workflow, schedulerNode);
+      const guiderInputs = guiderNode ? getNodeInputs(workflow, guiderNode) : null;
+      if (schedulerInputs && Array.isArray(schedulerInputs.model)) {
+        schedulerInputs.model = [sageAttentionNodeId, 0];
+      }
+      if (guiderInputs && Array.isArray(guiderInputs.model)) {
+        guiderInputs.model = [sageAttentionNodeId, 0];
+      }
+    }
+    console.log('[Ref2V] Applied MiniMaxH3MemoryEfficientSageAttentionPatch');
   }
 
   // Always generate at 480p for efficiency, then upscale to 720p if needed.

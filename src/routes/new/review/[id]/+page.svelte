@@ -482,9 +482,13 @@
     if (
       entry.status === "completed" ||
       entry.status === "failed" ||
-      entry.status === "deleted"
+      entry.status === "deleted" ||
+      // A cancelled job is released back to 'uploaded' (editable draft) — there
+      // is no job left to poll, so stop the interval instead of hitting the
+      // status endpoint every 5s for an entry that is simply awaiting edit.
+      entry.status === "uploaded"
     ) {
-      return; // Stop polling if completed or failed
+      return; // Stop polling once the entry is no longer in flight
     }
 
     try {
@@ -631,6 +635,39 @@
     } catch (err) {
       console.error("Failed to retry generation:", err);
       alert(get(_)("review.failedToRetry", { values: { error: String(err) } }));
+    }
+  }
+
+  // Flip a failed entry back to the editable 'uploaded' draft state so the
+  // prompt / settings can be changed before re-submitting. The review page
+  // becomes editable again as soon as entry.status updates.
+  async function reopenForEditing() {
+    if (busy) return;
+    busy = true;
+    message = "";
+    try {
+      const res = await fetch(`/api/video/${entry.id}/reopen`, {
+        method: "POST",
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (res.ok && payload.success) {
+        if (payload.entry) {
+          applyEntryUpdate(payload.entry);
+        } else {
+          entry = { ...entry, status: "uploaded" };
+        }
+        message = get(_)("review.reopened");
+      } else {
+        message = get(_)("review.reopenFailed", {
+          values: { error: payload.error || "unknown" },
+        });
+      }
+    } catch (err) {
+      message = get(_)("review.reopenFailed", {
+        values: { error: String(err) },
+      });
+    } finally {
+      busy = false;
     }
   }
 
@@ -1360,6 +1397,7 @@
         {relaySegmentPromptsValid}
         onDelete={deleteVideo}
         onRetry={retryGeneration}
+        onReopen={reopenForEditing}
         onGenerate={generate}
       />
     </div>

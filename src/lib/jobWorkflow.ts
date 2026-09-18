@@ -165,6 +165,7 @@ export async function buildJobWorkflow(options: BuildJobWorkflowOptions): Promis
       iterationSteps: video.iteration_steps as 4 | 8 | undefined,
       loraWeights,
       loraPresets: settings.loraPresets,
+      useSageAttention,
       workflow,
     });
 

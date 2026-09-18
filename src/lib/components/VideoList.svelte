@@ -242,7 +242,7 @@
               </div>
             {:else if v.status === 'failed'}
               <div class="card-actions justify-end mt-auto gap-1">
-                <a href="/new/review/{v.id}" class="btn {$layoutMode === 'compact' ? 'btn-xs' : 'btn-sm'} btn-warning">{$_('videos.actions.retry')}</a>
+                <a href="/new/review/{v.id}" class="btn {$layoutMode === 'compact' ? 'btn-xs' : 'btn-sm'} btn-primary">{$_('videos.actions.viewDetails')}</a>
                 {#if onDelete}
                   <button class="btn {$layoutMode === 'compact' ? 'btn-xs' : 'btn-sm'} btn-error" onclick={() => onDelete?.(v.id)}>{$_('common.delete')}</button>
                 {/if}

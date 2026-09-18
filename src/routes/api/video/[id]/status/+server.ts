@@ -135,6 +135,21 @@ export const GET: RequestHandler = async ({ params }) => {
             updateData.dequeued_at = new Date().toISOString();
           }
 
+          // A cancelled job maps to 'uploaded' (editable draft). The job
+          // linkage MUST be cleared in this same write: a worker that was
+          // already dispatched can still deliver a late webhook, and the
+          // webhook authorises purely on job_id — leaving it set would let that
+          // superseded job resurrect the draft as 'processing'/'completed'.
+          // (null, not undefined — updateVideo skips undefined on Postgres.)
+          if (mappedStatus === 'uploaded') {
+            updateData.job_id = null;
+            updateData.is_local_job = false;
+            updateData.progress_percentage = null;
+            updateData.progress_details = null;
+            updateData.dequeued_at = null;
+            updateData.processing_started_at = null;
+          }
+
           // Ref2V: refresh the entry poster with the first frame of the
           // generated result once the job completes (best-effort, covers the
           // case where the webhook was never delivered). Folded into the same

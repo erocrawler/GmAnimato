@@ -13,7 +13,12 @@ export const POST: RequestHandler = async ({ request, params }) => {
     }
 
     const body = await request.json();
-    const webhook_job_id = body?.id as string | undefined; // handler.py sends video id in 'id' field
+    // The worker echoes back the `id` it was dispatched with — handler.py sends
+    // `{"id": job_id, ...}`. For RunPod jobs that is the RunPod job id; for local
+    // jobs /api/worker/task hands out `job.job_id` (i.e. `local-<video id>`).
+    // Either way it must equal the video's stored job_id, which is what makes
+    // clearing job_id a valid way to reject a superseded attempt's webhook.
+    const webhook_job_id = body?.id as string | undefined;
     const status = body?.status as string | undefined;
     const files = body?.files as any[] | undefined;
 
