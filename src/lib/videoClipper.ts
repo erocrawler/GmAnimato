@@ -20,7 +20,7 @@
 // NOTE: prefer the BARE 'video/mp4' — Chrome's MediaRecorder REJECTS the
 // explicit codec string 'video/mp4;codecs=avc1.42E01E,mp4a.40.2' (isTypeSupported
 // says true but recording errors out with 0 chunks). Bare mp4 records fine.
-import { MAX_DURATION_SECONDS_FREE } from './mediaLimits';
+import { MAX_DURATION_SECONDS_FREE, MAX_REF_VIDEO_FPS } from './mediaLimits';
 const MIME_CANDIDATES = [
   'video/mp4',
   'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
@@ -239,7 +239,7 @@ export async function clipVideoToWebm(
       document.body?.appendChild(canvas);
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Canvas 2D context unavailable');
-      stream = canvas.captureStream(24);
+      stream = canvas.captureStream(MAX_REF_VIDEO_FPS);
       if (includeAudio) {
         try {
           const aStream = (video as any).captureStream?.() || (video as any).mozCaptureStream?.();

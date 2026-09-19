@@ -3,7 +3,13 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { MAX_DURATION_SECONDS_FREE } from './mediaLimits';
-import { ALLOWED_VIDEO_TYPES, MAX_REF_VIDEO_BYTES, MAX_VIDEO_LONG_EDGE } from './mediaLimits';
+import {
+  ALLOWED_VIDEO_TYPES,
+  MAX_REF_VIDEO_BYTES,
+  MAX_REF_VIDEO_FPS,
+  MAX_VIDEO_LONG_EDGE,
+  MIN_REF_VIDEO_FRAMES,
+} from './mediaLimits';
 
 // --- Reference audio (ref2v standalone <Audio 1>) --------------------------
 // A single standalone ref audio conditions the generated soundtrack. It is
@@ -100,16 +106,24 @@ export interface VideoTrimOptions {
   includeAudio?: boolean;
 }
 
-/** Run ffmpeg to downscale a video buffer to MAX_VIDEO_LONG_EDGE (aspect-preserving, even dims),
- *  re-encoding to h264+aac mp4. Audio is preserved when present (the ref2v workflow uses the ref video's
- *  soundtrack via ref_video_audios). When `opts.startSec`/`opts.endSec` are set the input is trimmed
- *  (accurate seek — decode from the nearest keyframe, so the window is precise at the cost of decoding
- *  up to `startSec` of source). Returns the new buffer + 'mp4' ext and whether audio is present. */
+/** Run ffmpeg to downscale a video buffer to MAX_VIDEO_LONG_EDGE (aspect-preserving, even dims)
+ *  and cap its frame rate at MAX_REF_VIDEO_FPS, re-encoding to h264+aac mp4. Audio is preserved
+ *  when present (the ref2v workflow uses the ref video's soundtrack via ref_video_audios). When
+ *  `opts.startSec`/`opts.endSec` are set the input is trimmed (accurate seek — decode from the
+ *  nearest keyframe, so the window is precise at the cost of decoding up to `startSec` of source).
+ *  Returns the new buffer + 'mp4' ext, whether audio is present, the frame count of the OUTPUT
+ *  (the video the model will actually receive), and whether the source frame rate exceeded the cap. */
 async function resizeVideoWithFfmpeg(
   buffer: Buffer,
   inputExt: string,
   opts: VideoTrimOptions = {},
-): Promise<{ buffer: Buffer; ext: string; hasAudio: boolean | null }> {
+): Promise<{
+  buffer: Buffer;
+  ext: string;
+  hasAudio: boolean | null;
+  frames: number | null;
+  fpsCapped: boolean;
+}> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ref2v-'));
   const inPath = path.join(tmpDir, `input.${inputExt}`);
   const outPath = path.join(tmpDir, 'output.mp4');
@@ -119,6 +133,12 @@ async function resizeVideoWithFfmpeg(
     // Cap the long edge at MAX_VIDEO_LONG_EDGE (landscape -> width, portrait -> height),
     // preserve aspect ratio via -2 (even dimensions), never upscale (min()).
     const scaleFilter = `scale='if(gt(iw,ih),min(${MAX_VIDEO_LONG_EDGE},iw),-2)':'if(gt(iw,ih),-2,min(${MAX_VIDEO_LONG_EDGE},ih))'`;
+    // Cap the frame rate at the model's rate. min() means downsample only —
+    // a 12fps source stays 12fps rather than being padded up to 24. This keeps
+    // the uploaded frame count equal to what VHS_LoadVideo's force_rate yields,
+    // so the frame guard on the output is exact.
+    const fpsFilter = `fps='min(source_fps,${MAX_REF_VIDEO_FPS})'`;
+    const vfFilter = `${scaleFilter},${fpsFilter}`;
     const startSec =
       opts.startSec !== undefined && Number.isFinite(opts.startSec) ? Math.max(0, opts.startSec) : 0;
     const endSec =
@@ -136,7 +156,7 @@ async function resizeVideoWithFfmpeg(
       '-y',
       '-i', inPath,
       ...trimArgs,
-      '-vf', scaleFilter,
+      '-vf', vfFilter,
       '-c:v', 'libx264',
       '-preset', 'veryfast',
       '-crf', '28',
@@ -164,7 +184,16 @@ async function resizeVideoWithFfmpeg(
     // Re-probe output when input had unknown audio presence to get accurate hasAudio.
     let outHasAudio = hasAudio;
     if (hasAudio === null) outHasAudio = await hasAudioStream(outPath);
-    return { buffer: out, ext: 'mp4', hasAudio: outHasAudio ?? hasAudio ?? false };
+    // Frame count of the actual output — this IS the video the ref2v model
+    // conditions on (trimming included). The mp4 muxer writes nb_frames, so
+    // this reads container metadata: immediate, no decode.
+    const frames = await probeVideoFrameCount(outPath);
+    // Was the source faster than the model's rate? Callers use this to force
+    // the re-encoded output through even when it isn't smaller: keeping the
+    // original would upload the uncapped frame rate.
+    const inFps = await probeVideoFrameRate(inPath);
+    const fpsCapped = inFps !== null && inFps > MAX_REF_VIDEO_FPS + 0.01;
+    return { buffer: out, ext: 'mp4', hasAudio: outHasAudio ?? hasAudio ?? false, frames, fpsCapped };
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -198,6 +227,20 @@ export async function validateAndConvertVideo(
   }
   const ext = videoExtFromMime(mime);
 
+  // The trim window (when one is requested) is what actually reaches the model,
+  // so both the length and the frame-count guards are evaluated against it.
+  const startSec =
+    opts.startSec !== undefined && Number.isFinite(opts.startSec) ? Math.max(0, opts.startSec) : 0;
+  const duration = await probeVideoDurationFromBuffer(buffer, ext);
+  // Window end: the requested end clamped to the source length (unknown length
+  // -> the requested end as-is, or null when no window was requested).
+  const endSec: number | null =
+    opts.endSec !== undefined && Number.isFinite(opts.endSec)
+      ? duration !== null
+        ? Math.min(opts.endSec, duration)
+        : opts.endSec
+      : duration;
+
   // Reject videos longer than the caller's ref2v clip cap (tier-based: free
   // 6s, paid 15s). The client clips before uploading, but guard any path that
   // bypasses that — a longer ref would condition the job on far more footage
@@ -205,13 +248,8 @@ export async function validateAndConvertVideo(
   // duration jitter on clips at the cap. When a server-side trim window is
   // provided (browser-unsupported containers like MKV), the EFFECTIVE trimmed
   // duration is what matters.
-  const duration = await probeVideoDurationFromBuffer(buffer, ext);
   if (duration !== null) {
-    const startSec =
-      opts.startSec !== undefined && Number.isFinite(opts.startSec) ? Math.max(0, opts.startSec) : 0;
-    const endSec =
-      opts.endSec !== undefined && Number.isFinite(opts.endSec) ? Math.min(opts.endSec, duration) : duration;
-    const effective = Math.max(0, endSec - startSec);
+    const effective = Math.max(0, (endSec ?? duration) - startSec);
     if (effective > maxSeconds + 0.5) {
       return {
         buffer,
@@ -222,11 +260,30 @@ export async function validateAndConvertVideo(
     }
   }
 
+  // Frame-count guard (pre-encode; needs only ffprobe): the model conditions on
+  // the ref video's decoded frame batch, so a clip carrying a handful of frames
+  // is unusable and fails the worker job. Rejecting here gives an immediate,
+  // actionable error instead of a later "workflow failed".
+  const framesError = await checkMinFramesFromBuffer(buffer, ext, startSec, endSec, duration);
+  if (framesError) {
+    return { buffer, ext: '', wasConverted: false, error: framesError };
+  }
+
   try {
     const resized = await resizeVideoWithFfmpeg(buffer, ext, opts);
-    // When the user asked to drop audio we MUST use the re-encoded output
-    // (the only way audio is stripped) even if it isn't smaller than the input.
-    const forceConvert = opts.includeAudio === false;
+    // Authoritative frame check on the converted output: it IS the video the
+    // model receives, so this catches a window that only looked long enough
+    // when estimated, and any ffmpeg truncation.
+    if (resized.frames !== null && resized.frames < MIN_REF_VIDEO_FRAMES) {
+      return { buffer, ext: '', wasConverted: false, error: minFramesMessage(resized.frames) };
+    }
+    // Re-encoding is mandatory when audio must be dropped (the only way audio
+    // is stripped), when a trim was requested, or when the source ran faster
+    // than the model's rate (the only way the fps cap is applied) — whenever
+    // the output isn't smaller than the input, keeping the original would
+    // upload untrimmed / uncapped footage.
+    const trims = startSec > 0.01 || (duration !== null && endSec !== null && endSec < duration - 0.05);
+    const forceConvert = opts.includeAudio === false || trims || resized.fpsCapped;
     // Only treat as "converted" if the output is actually smaller/valid.
     if (resized.buffer.length > 0 && (forceConvert || resized.buffer.length < buffer.length)) {
       return { buffer: resized.buffer, ext: resized.ext, wasConverted: true, hasAudio: resized.hasAudio ?? undefined };
@@ -347,6 +404,172 @@ async function probeVideoDurationFromBuffer(buffer: Buffer, ext: string): Promis
   try {
     await fs.writeFile(inPath, buffer);
     return await probeVideoDuration(inPath);
+  } catch {
+    return null;
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** Run ffprobe with the given args and return the parsed JSON stdout, or null
+ *  when ffprobe is missing, exits non-zero, or emits unparseable output. */
+async function ffprobeJson(args: string[]): Promise<any | null> {
+  const out = await new Promise<string | null>((resolve) => {
+    const chunks: Buffer[] = [];
+    const proc = spawn('ffprobe', args);
+    proc.stdout.on('data', (c: Buffer) => chunks.push(c));
+    proc.on('close', (code) => resolve(code === 0 ? Buffer.concat(chunks).toString() : null));
+    proc.on('error', () => resolve(null));
+  });
+  if (out === null) return null;
+  try {
+    return JSON.parse(out);
+  } catch {
+    return null;
+  }
+}
+
+/** Parse an ffprobe rational frame rate such as '24/1' or '30000/1001'. */
+function parseFrameRate(value: string): number | null {
+  const [numRaw, denRaw] = value.split('/');
+  const num = Number.parseFloat(numRaw);
+  const den = denRaw === undefined ? 1 : Number.parseFloat(denRaw);
+  if (!Number.isFinite(num) || !Number.isFinite(den) || num <= 0 || den <= 0) return null;
+  return num / den;
+}
+
+/**
+ * Probe a video's frame count with ffprobe (accepts a path or a URL).
+ *
+ * Fast path (default): reads the container's `nb_frames` — authoritative for
+ * mp4/mov — and otherwise derives duration x avg_frame_rate, which is exact by
+ * definition when the container reports an average rate. Both are immediate:
+ * no decoding.
+ *
+ * `accurate = true` decodes the stream and counts every frame
+ * (`-count_frames`): slow, but authoritative for containers that report
+ * nothing usable. Returns null when the count can't be determined.
+ */
+export async function probeVideoFrameCount(url: string, accurate = false): Promise<number | null> {
+  if (!accurate) {
+    const meta = await ffprobeJson([
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=nb_frames,avg_frame_rate:format=duration',
+      '-of', 'json',
+      url,
+    ]);
+    const stream = meta?.streams?.[0];
+    if (stream) {
+      const nbFrames = Number.parseInt(String(stream.nb_frames ?? ''), 10);
+      if (Number.isFinite(nbFrames) && nbFrames > 0) return nbFrames;
+      const fps = parseFrameRate(String(stream.avg_frame_rate ?? ''));
+      const seconds = Number.parseFloat(String(meta?.format?.duration ?? ''));
+      if (fps !== null && Number.isFinite(seconds) && seconds > 0) {
+        const estimated = Math.round(fps * seconds);
+        if (estimated > 0) return estimated;
+      }
+    }
+  }
+
+  const counted = await ffprobeJson([
+    '-v', 'error',
+    '-select_streams', 'v:0',
+    '-count_frames',
+    '-show_entries', 'stream=nb_read_frames',
+    '-of', 'json',
+    url,
+  ]);
+  const frames = Number.parseInt(String(counted?.streams?.[0]?.nb_read_frames ?? ''), 10);
+  return Number.isFinite(frames) && frames > 0 ? frames : null;
+}
+
+/** Probe a video's average frame rate with ffprobe (accepts a path or a URL).
+ *  Returns null when it can't be determined. */
+export async function probeVideoFrameRate(url: string): Promise<number | null> {
+  const meta = await ffprobeJson([
+    '-v', 'error',
+    '-select_streams', 'v:0',
+    '-show_entries', 'stream=avg_frame_rate',
+    '-of', 'json',
+    url,
+  ]);
+  const rate = parseFrameRate(String(meta?.streams?.[0]?.avg_frame_rate ?? ''));
+  return rate !== null && rate > 0 ? rate : null;
+}
+
+/**
+ * Frames the ref2v model will actually receive from a reference video.
+ *
+ * The worker's VHS_LoadVideo runs with `force_rate: MAX_REF_VIDEO_FPS`, so a
+ * source faster than that rate is decimated: the model sees
+ * `duration x MAX_REF_VIDEO_FPS` frames, NOT the container's own frame count.
+ * Counting the container would wrongly accept a short high-fps clip that the
+ * worker then decodes to fewer than MIN_REF_VIDEO_FRAMES frames. Sources at or
+ * below the cap (and sources whose rate can't be read) are counted as-is.
+ *
+ * Best-effort: returns null when the count can't be determined.
+ */
+export async function probeModelFrameCount(url: string, accurate = false): Promise<number | null> {
+  const frames = await probeVideoFrameCount(url, accurate);
+  if (frames === null) return null;
+  const fps = await probeVideoFrameRate(url);
+  if (fps === null || fps <= MAX_REF_VIDEO_FPS + 0.01) return frames;
+  const duration = await probeVideoDuration(url);
+  if (duration === null || duration <= 0) return frames;
+  return Math.max(1, Math.round(duration * MAX_REF_VIDEO_FPS));
+}
+
+/** Error message for a ref video that carries too few frames. */
+function minFramesMessage(frames: number): string {
+  return `ref video has only ${frames} frame${frames === 1 ? '' : 's'} — at least ${MIN_REF_VIDEO_FRAMES} are required. Please use a longer clip.`;
+}
+
+/**
+ * Frame-count guard for a ref video buffer. Counts the frames the MODEL will
+ * receive inside the EFFECTIVE trim window (the window is what actually reaches
+ * the model, at the model's frame rate) and returns an error message when that
+ * count is known to be under MIN_REF_VIDEO_FRAMES, otherwise null.
+ *
+ * Best-effort by design: an undeterminable count returns null so a valid
+ * upload is never blocked by a failed probe.
+ */
+async function checkMinFramesFromBuffer(
+  buffer: Buffer,
+  ext: string,
+  startSec: number,
+  endSec: number | null,
+  duration: number | null,
+): Promise<string | null> {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ref2v-frames-'));
+  const inPath = path.join(tmpDir, `input.${ext || 'mp4'}`);
+  try {
+    await fs.writeFile(inPath, buffer);
+
+    // Scale the source's frame count down to the trim window (a full-range
+    // window is simply the source's own count).
+    const inWindow = (total: number): number => {
+      if (duration === null || duration <= 0) return total;
+      const windowSec = Math.max(0, (endSec ?? duration) - startSec);
+      if (windowSec >= duration - 0.01) return total;
+      return Math.round(total * (windowSec / duration));
+    };
+
+    // probeModelFrameCount, not probeVideoFrameCount: a source faster than the
+    // model's rate is decimated by VHS_LoadVideo's force_rate, so counting the
+    // container alone would pass a short high-fps clip the worker then sees as
+    // fewer than MIN_REF_VIDEO_FRAMES frames.
+    let total = await probeModelFrameCount(inPath);
+    if (total === null) total = await probeModelFrameCount(inPath, true);
+    if (total === null) return null; // undeterminable -> don't block the upload
+    if (inWindow(total) >= MIN_REF_VIDEO_FRAMES) return null;
+
+    // Below the minimum on a cheap read — decode and count before rejecting a
+    // valid upload (nb_frames/avg_frame_rate can be wrong on some containers).
+    const accurate = await probeModelFrameCount(inPath, true);
+    const confirmed = accurate ?? total;
+    if (inWindow(confirmed) >= MIN_REF_VIDEO_FRAMES) return null;
+    return minFramesMessage(inWindow(confirmed));
   } catch {
     return null;
   } finally {

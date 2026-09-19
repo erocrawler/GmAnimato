@@ -4,7 +4,8 @@ import probe from 'probe-image-size';
 import type { Workflow } from './IDatabase';
 import type { LoraPreset } from './loraPresets';
 import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes } from './workflowUtils';
-import { probeVideoDimensions } from './videoValidation';
+import { probeVideoDimensions, probeModelFrameCount } from './videoValidation';
+import { MIN_REF_VIDEO_FRAMES } from './mediaLimits';
 import { workflowDefaultStep, engineFromTemplatePath } from './workflowCapabilities';
 
 interface Ref2VWorkflowParams {
@@ -126,6 +127,26 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   // passed the kickoff empty-prompt guard.
   if (!(params.input_prompt || '').trim()) {
     throw new Error('ref2v requires a non-empty prompt (empty_prompt)');
+  }
+
+  // Minimum frame count: the model conditions on the ref video's decoded frame
+  // batch, so a clip carrying only a handful of frames cannot be used and makes
+  // the worker job fail. Checked here as well as at upload time because a ref
+  // video can also arrive as a URL — /media/ reuse bypasses upload validation —
+  // or from a job queued before that check existed. Best-effort: an
+  // undeterminable count lets the job through rather than blocking it.
+  if (hasRefVideo && params.ref_video_url) {
+    let frames = await probeModelFrameCount(params.ref_video_url);
+    if (frames !== null && frames < MIN_REF_VIDEO_FRAMES) {
+      // The cheap read (nb_frames / avg_frame_rate) can be wrong or missing on
+      // some containers — decode and count before failing the job.
+      frames = (await probeModelFrameCount(params.ref_video_url, true)) ?? frames;
+      if (frames < MIN_REF_VIDEO_FRAMES) {
+        throw new Error(
+          `ref video has only ${frames} frames — at least ${MIN_REF_VIDEO_FRAMES} are required (ref_video_too_short)`,
+        );
+      }
+    }
   }
 
   // Add callback_url to input if provided

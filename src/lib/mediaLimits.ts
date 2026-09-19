@@ -37,3 +37,14 @@ export const ALLOWED_VIDEO_TYPES = new Set(['video/webm', 'video/mp4', 'video/qu
  *  videos only condition the output (generated at 480p), so a smaller upload
  *  is faster to upload and cheaper for the worker to decode (VHS_LoadVideo). */
 export const MAX_VIDEO_LONG_EDGE = 854;
+/** The ref2v model's frame rate. The worker's VHS_LoadVideo runs with
+ *  `force_rate: 24`, so the reference is resampled to this rate before it
+ *  conditions the generation. Uploads are capped to it (downsample only —
+ *  never upsampled, so a 12fps source stays 12fps) and the minimum-frame
+ *  guard counts frames at this rate. */
+export const MAX_REF_VIDEO_FPS = 24;
+/** Minimum frames a reference video must carry. The ref2v model conditions on
+ *  the video's decoded frame batch, so a clip holding only a handful of frames
+ *  (e.g. a fraction-of-a-second selection) is unusable and makes the worker job
+ *  fail. Guarded at upload time and again when the workflow is built. */
+export const MIN_REF_VIDEO_FRAMES = 5;
