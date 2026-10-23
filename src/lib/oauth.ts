@@ -55,6 +55,31 @@ export function getOAuthConfig(): OAuthConfig {
 }
 
 /**
+ * Resolve the OAuth redirect_uri for the current request.
+ *
+ * OAUTH_REDIRECT_URI stays the default (canonical) redirect. When the request
+ * arrives on another origin listed in OAUTH_ALLOWED_ORIGINS (comma-separated,
+ * e.g. "https://animato.gmgard.us"), the same callback path is used on that
+ * origin so the authorize -> callback -> token exchange round trip stays on one
+ * host (the oauth_state/oauth_verifier cookies are host-only). Unlisted
+ * origins fall back to the default, so a spoofed Host header cannot pick an
+ * arbitrary redirect_uri. Every allowed origin must also be registered on the
+ * GmGard OpenIddict client.
+ */
+export function resolveRedirectUri(requestOrigin?: string): string {
+  const config = getOAuthConfig();
+  if (!requestOrigin) return config.redirectUri;
+
+  const allowed = (env.OAUTH_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+  if (!allowed.includes(requestOrigin)) return config.redirectUri;
+
+  return `${requestOrigin}${new URL(config.redirectUri).pathname}`;
+}
+
+/**
  * Generate PKCE code verifier and challenge
  */
 export async function generatePKCE(): Promise<{ verifier: string; challenge: string }> {
@@ -95,11 +120,11 @@ function base64URLEncode(buffer: Uint8Array): string {
 /**
  * Generate authorization URL
  */
-export function getAuthorizationUrl(state: string, codeChallenge: string): string {
+export function getAuthorizationUrl(state: string, codeChallenge: string, requestOrigin?: string): string {
   const config = getOAuthConfig();
   const params = new URLSearchParams({
     client_id: config.clientId,
-    redirect_uri: config.redirectUri,
+    redirect_uri: resolveRedirectUri(requestOrigin),
     response_type: 'code',
     scope: 'openid profile email roles',
     state: state,
@@ -115,14 +140,15 @@ export function getAuthorizationUrl(state: string, codeChallenge: string): strin
  */
 export async function exchangeCodeForTokens(
   code: string,
-  codeVerifier: string
+  codeVerifier: string,
+  requestOrigin?: string
 ): Promise<OAuthTokenResponse> {
   const config = getOAuthConfig();
 
   const params = new URLSearchParams({
     grant_type: 'authorization_code',
     code: code,
-    redirect_uri: config.redirectUri,
+    redirect_uri: resolveRedirectUri(requestOrigin),
     client_id: config.clientId,
     client_secret: config.clientSecret,
     code_verifier: codeVerifier

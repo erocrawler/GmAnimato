@@ -36,7 +36,7 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
   try {
     // Exchange code for tokens
     console.log('Exchanging code for tokens...');
-    const tokens = await exchangeCodeForTokens(code, verifier);
+    const tokens = await exchangeCodeForTokens(code, verifier, url.origin);
     console.log('Token exchange successful, access_token:', tokens.access_token?.substring(0, 20) + '...');
     
     // Get user info from GmGard
