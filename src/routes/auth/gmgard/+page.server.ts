@@ -3,7 +3,7 @@ import { redirect } from '@sveltejs/kit';
 import { getAuthorizationUrl, generatePKCE } from '$lib/oauth';
 import { randomBytes } from 'crypto';
 
-export const load: PageServerLoad = async ({ cookies }) => {
+export const load: PageServerLoad = async ({ cookies, url }) => {
   // Start OAuth flow immediately on GET so link clicks work without a form submit
   const { verifier, challenge } = await generatePKCE();
   const state = randomBytes(32).toString('hex');
@@ -24,12 +24,12 @@ export const load: PageServerLoad = async ({ cookies }) => {
     maxAge: 600
   });
 
-  const authUrl = getAuthorizationUrl(state, challenge);
+  const authUrl = getAuthorizationUrl(state, challenge, url.origin);
   throw redirect(302, authUrl);
 };
 
 export const actions: Actions = {
-  default: async ({ cookies }) => {
+  default: async ({ cookies, url }) => {
     // Generate PKCE challenge
     const { verifier, challenge } = await generatePKCE();
     
@@ -54,7 +54,7 @@ export const actions: Actions = {
     });
     
     // Get authorization URL
-    const authUrl = getAuthorizationUrl(state, challenge);
+    const authUrl = getAuthorizationUrl(state, challenge, url.origin);
     
     // Redirect to GmGard authorization endpoint
     throw redirect(302, authUrl);
