@@ -1,9 +1,12 @@
 import type { Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
-import { getSessionByToken, getUserById, deleteSession, deleteExpiredSessions, getAllSponsorClaims, deleteSponsorClaim, expireSponsorClaim, updateSponsorClaim, updateUser, getAdminSettings } from '$lib/db';
+import { getSessionByToken, getUserById, deleteSession, deleteExpiredSessions, getAllSponsorClaims, deleteSponsorClaim, expireSponsorClaim, updateSponsorClaim, updateUser, getAdminSettings, getApiTokenByHash, touchApiToken } from '$lib/db';
 import { isSessionExpired, verifyJWT, JWT_ENABLED, generateJWT, SESSION_COOKIE_OPTIONS } from '$lib/session';
-import { building } from '$app/environment';
+import { building, dev } from '$app/environment';
 import { env } from '$env/dynamic/private';
+import { gatePatRequest, jsonError, wantsJsonUnauthorized } from '$lib/patAuth';
+import { patRateLimiter } from '$lib/rateLimit';
+import { isCrossSiteFormSubmission } from '$lib/csrf';
 
 /**
  * Schedule cleanup task to run at a specific time each day (3 AM server local time)
@@ -271,6 +274,9 @@ if (!building) {
  * Secure authentication middleware (Hybrid: JWT + Refresh Token Sessions)
  * 
  * Priority:
+ * 0. Personal access token (`Authorization: Bearer anim_pat_…`): authenticated
+ *    on its own, restricted to the video-flow allowlist, rate limited, and never
+ *    mixed with cookies (see src/lib/patAuth.ts)
  * 1. Try JWT from cookie (short-lived access token)
  * 2. Try JWT from Authorization header (API access token)
  * 3. Fall back to session token from DB (long-lived refresh token for token refresh)
@@ -282,6 +288,56 @@ export const handle: Handle = async ({ event, resolve }) => {
   const jwtCookie = event.cookies.get('session');
   const refreshCookie = event.cookies.get('refresh_token');
   const authHeader = event.request.headers.get('authorization');
+
+  // Priority 0: personal access token. A PAT request is decided entirely here
+  // (401 invalid/expired/revoked → 403 outside the allowlist → 429 rate limit)
+  // and ignores any cookies. Anything not carrying an anim_pat_ Bearer falls
+  // through to the unchanged cookie / JWT flow below.
+  try {
+    const gate = await gatePatRequest(
+      {
+        authorization: authHeader,
+        method: event.request.method,
+        pathname: event.url.pathname,
+        isDataRequest: event.isDataRequest,
+      },
+      { getApiTokenByHash, getUserById, touchApiToken },
+      patRateLimiter
+    );
+    if (gate.kind === 'reject') return gate.response;
+    if (gate.kind === 'ok') {
+      // Token requests are exempt from the form-origin check: they carry no
+      // ambient credentials (see src/lib/csrf.ts for the reasoning).
+      event.locals.user = {
+        id: gate.user.id,
+        username: gate.user.username,
+        email: gate.user.email,
+        roles: gate.user.roles,
+        created_at: gate.user.created_at,
+        updated_at: gate.user.updated_at,
+      };
+      event.locals.token = {
+        id: gate.token.id,
+        name: gate.token.name,
+        prefix: gate.token.prefix,
+        expires_at: gate.token.expires_at,
+      };
+      return await resolve(event);
+    }
+  } catch (err) {
+    console.error('[PAT] validation error:', err);
+    return jsonError(500, 'Token validation failed', 'server_error');
+  }
+
+  // Replacement for SvelteKit's built-in csrf.checkOrigin (disabled in
+  // svelte.config.js so that token requests above can skip it).
+  if (isCrossSiteFormSubmission(event.request, event.url.origin, { dev })) {
+    const message = `Cross-site ${event.request.method} form submissions are forbidden`;
+    if (event.request.headers.get('accept') === 'application/json') {
+      return new Response(JSON.stringify({ message }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response(message, { status: 403, headers: { 'Content-Type': 'text/plain' } });
+  }
 
   // Priority 1: Try JWT from cookie (primary)
   if (jwtCookie) {
@@ -414,6 +470,10 @@ export const handle: Handle = async ({ event, resolve }) => {
   const isPublic = publicRoutes.some((route) => pathname === route || pathname.startsWith(route + '/'));
   // Redirect to login if trying to access protected route without auth
   if (!isPublic && !event.locals.user) {
+    // Programmatic API clients get a 401 JSON; browsers keep the login redirect.
+    if (wantsJsonUnauthorized(pathname, event.request.headers)) {
+      return jsonError(401, 'Authentication required', 'unauthenticated');
+    }
     throw redirect(303, '/login');
   }
 

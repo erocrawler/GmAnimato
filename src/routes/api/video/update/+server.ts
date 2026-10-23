@@ -44,6 +44,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       });
     }
 
+    // Publishing changes gallery visibility, which is outside the token's
+    // video-creation scope: only cookie sessions may toggle it.
+    if (is_published !== undefined && locals.token) {
+      return new Response(JSON.stringify({ error: 'API tokens cannot change publish state', errorCode: 'token_scope' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     // Prevent publishing NSFW photo-realistic content to gallery
     if (is_published && existing.is_nsfw === true && existing.is_photo_realistic === true) {
       return new Response(

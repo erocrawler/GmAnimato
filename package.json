@@ -8,6 +8,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
+		"test": "vitest run",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"prisma:generate": "prisma generate",
@@ -34,7 +35,8 @@
 		"tailwindcss": "^4.1.17",
 		"tsx": "^4.20.6",
 		"typescript": "^5.9.3",
-		"vite": "^7.1.10"
+		"vite": "^7.1.10",
+		"vitest": "^5.0.5"
 	},
 	"dependencies": {
 		"@aws-sdk/client-s3": "^3.486.0",

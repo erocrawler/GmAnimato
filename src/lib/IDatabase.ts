@@ -96,6 +96,27 @@ export type Session = {
   created_at: string;
 };
 
+/** Personal access token record. Only the SHA-256 hash of the secret is stored. */
+export type ApiToken = {
+  id: string;
+  user_id: string;
+  name: string;
+  token_hash: string;
+  prefix: string; // first 8 chars of the random part, for display only
+  created_at: string;
+  expires_at: string; // mandatory — tokens never live forever
+  last_used_at?: string | null;
+  revoked_at?: string | null;
+};
+
+export type CreateApiTokenInput = {
+  user_id: string;
+  name: string;
+  token_hash: string;
+  prefix: string;
+  expires_at: Date;
+};
+
 import type { LoraPreset } from './loraPresets';
 import type { WorkflowEngine, WorkflowRunOn, WorkflowCapabilities } from './workflowCapabilities';
 
@@ -254,6 +275,13 @@ export interface IDatabase {
   deleteExpiredSessions(): Promise<number>;
   deleteUserSessions(userId: string): Promise<number>;
   
+  // API token (PAT) methods
+  createApiToken(input: CreateApiTokenInput): Promise<ApiToken>;
+  getApiTokenByHash(tokenHash: string): Promise<ApiToken | undefined>;
+  listApiTokensByUser(userId: string): Promise<ApiToken[]>; // newest first, includes expired/revoked
+  revokeApiToken(id: string, userId: string): Promise<boolean>; // true when a live token owned by userId was revoked
+  touchApiToken(id: string, usedAt: Date): Promise<void>; // update last_used_at
+
   // Admin settings methods
   getAdminSettings(): Promise<AdminSettings>;
   updateAdminSettings(patch: Partial<Omit<AdminSettings, 'id'>>): Promise<AdminSettings>;

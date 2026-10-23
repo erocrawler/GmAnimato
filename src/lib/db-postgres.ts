@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
-import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic, Workflow, SponsorClaim } from './IDatabase';
+import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic, Workflow, SponsorClaim, ApiToken, CreateApiTokenInput } from './IDatabase';
 import { DEFAULT_LORA_PRESETS, normalizeLoraPresets } from './loraPresets';
 import { normalizeQuotaCostRules } from './quotaCost';
 import { normalizeWorkflowCapabilities, engineFromTemplatePath } from './workflowCapabilities';
@@ -867,6 +867,73 @@ export class PostgresDatabase implements IDatabase {
       where: { userId },
     });
     return result.count;
+  }
+
+  // ==================== API Token Methods ====================
+
+  private mapToApiToken(row: {
+    id: string;
+    userId: string;
+    name: string;
+    tokenHash: string;
+    prefix: string;
+    createdAt: Date;
+    expiresAt: Date;
+    lastUsedAt: Date | null;
+    revokedAt: Date | null;
+  }): ApiToken {
+    return {
+      id: row.id,
+      user_id: row.userId,
+      name: row.name,
+      token_hash: row.tokenHash,
+      prefix: row.prefix,
+      created_at: row.createdAt.toISOString(),
+      expires_at: row.expiresAt.toISOString(),
+      last_used_at: row.lastUsedAt ? row.lastUsedAt.toISOString() : null,
+      revoked_at: row.revokedAt ? row.revokedAt.toISOString() : null,
+    };
+  }
+
+  async createApiToken(input: CreateApiTokenInput): Promise<ApiToken> {
+    const row = await this.prisma.apiToken.create({
+      data: {
+        userId: input.user_id,
+        name: input.name,
+        tokenHash: input.token_hash,
+        prefix: input.prefix,
+        expiresAt: input.expires_at,
+      },
+    });
+    return this.mapToApiToken(row);
+  }
+
+  async getApiTokenByHash(tokenHash: string): Promise<ApiToken | undefined> {
+    const row = await this.prisma.apiToken.findUnique({ where: { tokenHash } });
+    return row ? this.mapToApiToken(row) : undefined;
+  }
+
+  async listApiTokensByUser(userId: string): Promise<ApiToken[]> {
+    const rows = await this.prisma.apiToken.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((r) => this.mapToApiToken(r));
+  }
+
+  async revokeApiToken(id: string, userId: string): Promise<boolean> {
+    const result = await this.prisma.apiToken.updateMany({
+      where: { id, userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return result.count > 0;
+  }
+
+  async touchApiToken(id: string, usedAt: Date): Promise<void> {
+    await this.prisma.apiToken.updateMany({
+      where: { id },
+      data: { lastUsedAt: usedAt },
+    });
   }
 
   // ==================== Admin Settings Methods ====================

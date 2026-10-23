@@ -222,6 +222,28 @@ export async function deleteUserSessions(userId: string) {
   return db.deleteUserSessions(userId);
 }
 
+// ==================== API Token Functions ====================
+
+export async function createApiToken(input: import('./IDatabase').CreateApiTokenInput) {
+  return db.createApiToken(input);
+}
+
+export async function getApiTokenByHash(tokenHash: string) {
+  return db.getApiTokenByHash(tokenHash);
+}
+
+export async function listApiTokensByUser(userId: string) {
+  return db.listApiTokensByUser(userId);
+}
+
+export async function revokeApiToken(id: string, userId: string) {
+  return db.revokeApiToken(id, userId);
+}
+
+export async function touchApiToken(id: string, usedAt: Date) {
+  return db.touchApiToken(id, usedAt);
+}
+
 // ==================== Sponsor Claim Functions ====================
 
 export async function getSponsorClaimByUsername(sponsorUsername: string) {

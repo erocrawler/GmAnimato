@@ -329,6 +329,88 @@
       changingPassword = false;
     }
   }
+  // API tokens (personal access tokens for the video flow)
+  type ApiTokenRow = {
+    id: string;
+    name: string;
+    display: string;
+    created_at: string;
+    expires_at: string;
+    last_used_at: string | null;
+    status: 'active' | 'expired' | 'revoked';
+  };
+  let maxActiveTokens = $state(5);
+  let apiTokens = $state<ApiTokenRow[]>([]);
+  let tokenName = $state('');
+  let tokenExpiryDays = $state(30);
+  let creatingToken = $state(false);
+  let newTokenValue = $state('');
+  let copiedToken = $state(false);
+  let activeTokenCount = $derived(apiTokens.filter((t) => t.status === 'active').length);
+
+  async function loadApiTokens() {
+    try {
+      const res = await fetch('/api/profile/tokens');
+      if (!res.ok) throw new Error(String(res.status));
+      const result = await res.json();
+      apiTokens = result.tokens ?? [];
+      if (typeof result.max_active === 'number') maxActiveTokens = result.max_active;
+    } catch (err) {
+      console.error('Failed to load API tokens:', err);
+      showNotification($_('profile.apiTokens.loadError'), 'error');
+    }
+  }
+
+  async function createApiToken() {
+    creatingToken = true;
+    try {
+      const res = await fetch('/api/profile/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: tokenName.trim(), expiresInDays: tokenExpiryDays }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showNotification(result.error || $_('profile.apiTokens.createError'), 'error');
+        return;
+      }
+      newTokenValue = result.token;
+      copiedToken = false;
+      tokenName = '';
+      await loadApiTokens();
+    } catch (err) {
+      showNotification($_('profile.apiTokens.createError'), 'error');
+    } finally {
+      creatingToken = false;
+    }
+  }
+
+  async function copyNewToken() {
+    try {
+      await navigator.clipboard.writeText(newTokenValue);
+      copiedToken = true;
+    } catch {
+      // Clipboard API unavailable (http / permissions): the value is selectable in the box.
+    }
+  }
+
+  async function revokeApiToken(id: string) {
+    if (!confirm($_('profile.apiTokens.revokeConfirm'))) return;
+    try {
+      const res = await fetch(`/api/profile/tokens/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(String(res.status));
+      showNotification($_('profile.apiTokens.revoked'), 'success');
+      await loadApiTokens();
+    } catch (err) {
+      showNotification($_('profile.apiTokens.revokeError'), 'error');
+    }
+  }
+
+  function formatTokenTime(iso: string | null) {
+    return iso ? new Date(iso).toLocaleString() : $_('profile.apiTokens.neverUsed');
+  }
+
+  onMount(loadApiTokens);
 </script>
 
 <div class="container mx-auto p-6 max-w-4xl">
@@ -775,6 +857,91 @@
     </div>
   {/if}
   
+  <!-- API Tokens (video flow only; cookie session required to manage) -->
+  <div class="card bg-base-200 shadow-xl mb-6">
+    <div class="card-body">
+      <h2 class="card-title text-2xl mb-2">{$_('profile.apiTokens.title')}</h2>
+      <p class="text-sm opacity-70 mb-4">{$_('profile.apiTokens.description')}</p>
+
+      {#if newTokenValue}
+        <div class="alert alert-warning mb-4 flex-col items-stretch gap-2">
+          <h3 class="font-bold">{$_('profile.apiTokens.createdTitle')}</h3>
+          <p class="text-sm">{$_('profile.apiTokens.createdWarning')}</p>
+          <input class="input input-bordered font-mono text-sm w-full" readonly value={newTokenValue} onfocus={(e) => e.currentTarget.select()} />
+          <div class="flex gap-2 justify-end">
+            <button type="button" class="btn btn-sm" onclick={copyNewToken}>
+              {copiedToken ? $_('profile.apiTokens.copied') : $_('profile.apiTokens.copy')}
+            </button>
+            <button type="button" class="btn btn-sm btn-primary" onclick={() => (newTokenValue = '')}>
+              {$_('profile.apiTokens.dismiss')}
+            </button>
+          </div>
+        </div>
+      {/if}
+
+      <form class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end" onsubmit={(e) => { e.preventDefault(); createApiToken(); }}>
+        <div class="form-control">
+          <label class="label" for="token-name"><span class="label-text">{$_('profile.apiTokens.nameLabel')}</span></label>
+          <input id="token-name" class="input input-bordered" bind:value={tokenName} maxlength="50" required placeholder={$_('profile.apiTokens.namePlaceholder')} />
+        </div>
+        <div class="form-control">
+          <label class="label" for="token-expiry"><span class="label-text">{$_('profile.apiTokens.expiryLabel')}</span></label>
+          <select id="token-expiry" class="select select-bordered" bind:value={tokenExpiryDays}>
+            <option value={7}>{$_('profile.apiTokens.days7')}</option>
+            <option value={30}>{$_('profile.apiTokens.days30')}</option>
+            <option value={90}>{$_('profile.apiTokens.days90')}</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary" disabled={creatingToken || activeTokenCount >= maxActiveTokens}>
+          {creatingToken ? $_('profile.apiTokens.creating') : $_('profile.apiTokens.create')}
+        </button>
+      </form>
+      <p class="text-xs opacity-60 mt-2">{$_('profile.apiTokens.limitHint', { values: { max: maxActiveTokens } })}</p>
+
+      <h3 class="font-semibold mt-6 mb-2">{$_('profile.apiTokens.listTitle')}</h3>
+      {#if apiTokens.length === 0}
+        <p class="text-sm opacity-60">{$_('profile.apiTokens.empty')}</p>
+      {:else}
+        <div class="overflow-x-auto">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>{$_('profile.apiTokens.colName')}</th>
+                <th>{$_('profile.apiTokens.colToken')}</th>
+                <th>{$_('profile.apiTokens.colExpires')}</th>
+                <th>{$_('profile.apiTokens.colLastUsed')}</th>
+                <th>{$_('profile.apiTokens.colStatus')}</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each apiTokens as t (t.id)}
+                <tr class:opacity-50={t.status !== 'active'}>
+                  <td>{t.name}</td>
+                  <td class="font-mono text-xs">{t.display}</td>
+                  <td>{new Date(t.expires_at).toLocaleString()}</td>
+                  <td>{formatTokenTime(t.last_used_at)}</td>
+                  <td>
+                    <span class="badge badge-sm" class:badge-success={t.status === 'active'} class:badge-ghost={t.status !== 'active'}>
+                      {t.status === 'active' ? $_('profile.apiTokens.statusActive') : t.status === 'expired' ? $_('profile.apiTokens.statusExpired') : $_('profile.apiTokens.statusRevoked')}
+                    </span>
+                  </td>
+                  <td class="text-right">
+                    {#if t.status === 'active'}
+                      <button type="button" class="btn btn-xs btn-error btn-outline" onclick={() => revokeApiToken(t.id)}>
+                        {$_('profile.apiTokens.revoke')}
+                      </button>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </div>
+  </div>
+
   <!-- Change Password (hidden for GmGard OAuth users) -->
   {#if !isGmGardUser}
     <div class="card bg-base-200 shadow-xl">

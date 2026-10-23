@@ -508,6 +508,7 @@ export class JsonFileDatabase implements IDatabase {
     
     users.splice(idx, 1);
     await this.writeAllUsers(users);
+    this.dropApiTokensForUser(id);
     return true;
   }
 
@@ -627,6 +628,63 @@ export class JsonFileDatabase implements IDatabase {
       }
     }
     return count;
+  }
+
+  // ==================== API Token Methods ====================
+  // In-memory only, like sessions: JSON storage is for local development.
+
+  private apiTokens: Map<string, import('./IDatabase').ApiToken> = new Map();
+
+  async createApiToken(input: import('./IDatabase').CreateApiTokenInput): Promise<import('./IDatabase').ApiToken> {
+    for (const t of this.apiTokens.values()) {
+      if (t.token_hash === input.token_hash) throw new Error('duplicate token hash');
+    }
+    const token: import('./IDatabase').ApiToken = {
+      id: `apitoken_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      user_id: input.user_id,
+      name: input.name,
+      token_hash: input.token_hash,
+      prefix: input.prefix,
+      created_at: new Date().toISOString(),
+      expires_at: input.expires_at.toISOString(),
+      last_used_at: null,
+      revoked_at: null,
+    };
+    this.apiTokens.set(token.id, token);
+    return token;
+  }
+
+  async getApiTokenByHash(tokenHash: string): Promise<import('./IDatabase').ApiToken | undefined> {
+    for (const t of this.apiTokens.values()) {
+      if (t.token_hash === tokenHash) return { ...t };
+    }
+    return undefined;
+  }
+
+  async listApiTokensByUser(userId: string): Promise<import('./IDatabase').ApiToken[]> {
+    return [...this.apiTokens.values()]
+      .filter((t) => t.user_id === userId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((t) => ({ ...t }));
+  }
+
+  async revokeApiToken(id: string, userId: string): Promise<boolean> {
+    const t = this.apiTokens.get(id);
+    if (!t || t.user_id !== userId || t.revoked_at) return false;
+    t.revoked_at = new Date().toISOString();
+    return true;
+  }
+
+  async touchApiToken(id: string, usedAt: Date): Promise<void> {
+    const t = this.apiTokens.get(id);
+    if (t) t.last_used_at = usedAt.toISOString();
+  }
+
+  // Tokens belong to a user: drop them when the user is deleted (Postgres does this via ON DELETE CASCADE).
+  private dropApiTokensForUser(userId: string) {
+    for (const [id, t] of this.apiTokens.entries()) {
+      if (t.user_id === userId) this.apiTokens.delete(id);
+    }
   }
 
   // ==================== Sponsor Claim Methods (JSON DB: Stub Implementation) ====================

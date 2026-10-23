@@ -12,6 +12,13 @@ declare global {
 				created_at: string;
 				updated_at?: string;
 			};
+			// Set only for requests authenticated with a personal access token
+			token?: {
+				id: string;
+				name: string;
+				prefix: string;
+				expires_at: string;
+			};
 		}
 		// interface PageData {}
 		// interface PageState {}
