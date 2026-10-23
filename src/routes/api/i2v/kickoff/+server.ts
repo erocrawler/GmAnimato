@@ -4,11 +4,12 @@ import { env } from '$env/dynamic/private';
 import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { submitJob } from '$lib/local-queue';
-import { filterLoraWeights, isMiniMaxWorkflow, getWorkflowCapabilities, getWorkflowEngine, getWorkflowRunOn } from '$lib/workflows';
+import { filterLoraWeights, withRequiredLoras, isMiniMaxWorkflow, getWorkflowCapabilities, getWorkflowEngine, getWorkflowRunOn } from '$lib/workflows';
 import { computeWorkflowQuotaCost } from '$lib/quotaCost';
 import { toOriginalUrl } from '$lib/serverImageUrl';
 import { evaluatePromptProperties } from '$lib/imageRecognition';
 import { maxAllowedDurationSeconds, MAX_DURATION_SECONDS_PAID } from '$lib/mediaLimits';
+import { normalizeLoraPresets } from '$lib/loraPresets';
 
 async function delay(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
@@ -358,7 +359,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 
     // Filter LoRA weights to only compatible ones for the selected workflow
-    const filteredLoraWeights = loraWeights ? filterLoraWeights(loraWeights, workflow) : undefined;
+    // and make sure the workflow's required (non-configurable) LoRAs are always applied.
+    const filteredLoraWeights = withRequiredLoras(
+      loraWeights ? filterLoraWeights(loraWeights, workflow) : undefined,
+      workflow,
+      normalizeLoraPresets(settings.loraPresets)
+    );
 
     // Generate seed for reproducibility
     const seed = Math.floor(Math.random() * 1000000);

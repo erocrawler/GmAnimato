@@ -82,6 +82,25 @@ export function isLoraCompatible(loraId: string, workflow: Workflow): boolean {
 }
 
 /**
+ * Required LoRAs (presets with isConfigurable=false, e.g. the speed-up LoRA)
+ * are not optional: the web UI always sends them, so the server enforces the
+ * same for every client. Any compatible required preset is set to its default
+ * weight, replacing a client-supplied value (including 0) or filling in an
+ * omitted one; without it the job would run the slow, undistilled template.
+ */
+export function withRequiredLoras(
+  loraWeights: Record<string, number> | undefined,
+  workflow: Workflow,
+  presets: ReadonlyArray<{ id: string; default: number; isConfigurable?: boolean }>
+): Record<string, number> | undefined {
+  const required = presets.filter((p) => p.isConfigurable === false && isLoraCompatible(p.id, workflow));
+  if (required.length === 0) return loraWeights;
+  const out: Record<string, number> = { ...(loraWeights ?? {}) };
+  for (const p of required) out[p.id] = p.default;
+  return out;
+}
+
+/**
  * Filter LoRA weights to only include compatible ones for a workflow
  */
 export function filterLoraWeights(
