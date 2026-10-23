@@ -1,5 +1,21 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { getVideoById, deleteVideo } from '$lib/db';
+import { errorResponse, jsonResponse, serializeVideoDetail } from '$lib/agentApi';
+
+/**
+ * GET /api/video/{id} — detail of one video (owner or admin; anyone else gets a
+ * 404 so ids cannot be probed).
+ */
+export const GET: RequestHandler = async ({ params, locals }) => {
+  if (!locals.user) return errorResponse(401, 'Authentication required', 'unauthenticated');
+  const id = params.id;
+  const video = id ? await getVideoById(id) : undefined;
+  const isAdmin = locals.user.roles?.includes('admin');
+  if (!video || video.status === 'deleted' || (video.user_id !== locals.user.id && !isAdmin)) {
+    return errorResponse(404, 'not found', 'not_found');
+  }
+  return jsonResponse(serializeVideoDetail(video));
+};
 
 export const DELETE: RequestHandler = async ({ params, locals }) => {
   try {

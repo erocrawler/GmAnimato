@@ -1,0 +1,334 @@
+import { env } from '$env/dynamic/private';
+import { uploadBufferToS3 } from '$lib/s3';
+import { Buffer } from 'buffer';
+import { validateAndConvertImage } from '$lib/imageValidation';
+import {
+  validateAndConvertVideo,
+  extractVideoPoster,
+  probeVideoDuration,
+  hasAudioFromBuffer,
+  validateAndConvertReferenceAudio
+} from '$lib/videoValidation';
+import { createVideoEntryForReview } from '$lib/videoEntryCreation';
+import { getAdminSettings } from '$lib/db';
+import { toOriginalUrl } from '$lib/serverImageUrl';
+import { maxAllowedDurationSeconds } from '$lib/mediaLimits';
+import { isSafeMediaPath } from '$lib/mediaPath';
+
+/**
+ * Shared "upload -> draft" logic for the /new form action and POST /api/uploads.
+ * Validation (image/video/audio checks, duration cap by tier, ref counts) lives
+ * here once; both entry points only differ in how they authenticate and how
+ * they present the result.
+ */
+
+const MAX_REF_IMAGES = 6;
+
+/**
+ * Ref2V reference-video length cap = the max allowed OUTPUT duration for the
+ * user's tier (free 6s / advanced 15s) — a ref longer than the max output
+ * can't be followed meaningfully, so the upload limit simply IS that cap.
+ */
+export async function resolveMaxRefVideoSeconds(userRoles: string[] | undefined): Promise<number> {
+  try {
+    const settings = await getAdminSettings();
+    const hasAdvanced = (userRoles ?? []).some((roleName) =>
+      settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
+    );
+    return maxAllowedDurationSeconds(hasAdvanced);
+  } catch (e) {
+    console.error('[New] Failed to resolve ref video max length:', e);
+    return maxAllowedDurationSeconds(false);
+  }
+}
+
+export type UploadFormOptions = {
+  /**
+   * API mode (POST /api/uploads): ref videos may only be referenced as
+   * in-site /media/... paths, never as external URLs the server would fetch.
+   */
+  apiMode?: boolean;
+};
+
+export type UploadFormResult = { success: true; entry: any } | { error: string };
+
+export async function createDraftFromUploadForm(
+  form: FormData,
+  user: { id: string; roles?: string[] },
+  opts: UploadFormOptions = {}
+): Promise<UploadFormResult> {
+  const mode = form.get('mode')?.toString() || 'i2v';
+  // Ref2V reference-video length cap by tier (free 6s, advanced/paid 15s).
+  const maxRefVideoSeconds = await resolveMaxRefVideoSeconds(user.roles);
+
+  if (mode === 'fl2v') {
+    // Handle FL2V mode with two images
+    const firstFile = form.get('first_image') as File | null;
+    const lastFile = form.get('last_image') as File | null;
+
+    if (!firstFile || !lastFile) return { error: 'missing files' };
+
+    // Process first image
+    const firstArrayBuffer = await firstFile.arrayBuffer();
+    let firstBuffer: Buffer<ArrayBufferLike> = Buffer.from(firstArrayBuffer);
+    const firstResult = await validateAndConvertImage(firstBuffer);
+    if (firstResult.error) {
+      return { error: `First image: ${firstResult.error}` };
+    }
+    firstBuffer = firstResult.buffer;
+    const firstExt = firstResult.ext || undefined;
+
+    // Process last image
+    const lastArrayBuffer = await lastFile.arrayBuffer();
+    let lastBuffer: Buffer<ArrayBufferLike> = Buffer.from(lastArrayBuffer);
+    const lastResult = await validateAndConvertImage(lastBuffer);
+    if (lastResult.error) {
+      return { error: `Last image: ${lastResult.error}` };
+    }
+    lastBuffer = lastResult.buffer;
+    const lastExt = lastResult.ext || undefined;
+
+    // Upload both images to S3
+    const firstS3Url = await uploadBufferToS3(firstBuffer, firstExt);
+    const lastS3Url = await uploadBufferToS3(lastBuffer, lastExt);
+
+    // Create review entry for the uploaded images
+    const result = await createVideoEntryForReview({
+      userId: user.id,
+      mode: 'fl2v',
+      originalImageUrl: firstS3Url,
+      lastImageUrl: lastS3Url
+    });
+
+    if (!result.success) {
+      return { error: result.error ?? 'Failed to create video entry' };
+    }
+
+    return { success: true, entry: result.entry };
+  } else if (mode === 'ref2v') {
+    // Handle Ref2V mode: optional reference video (client-clipped webm OR a
+    // user-provided URL) + up to 6 optional reference images. Refs are ALL
+    // optional — with none provided the workflow degrades to pure t2v.
+    const refVideoFile = form.get('ref_video') as File | null;
+    const refVideoUrlInput = form.get('ref_video_url')?.toString()?.trim() || '';
+    if (refVideoFile && refVideoFile.size > 0) {
+      console.log(`[Ref2V action] received ref_video: ${refVideoFile.name} (${refVideoFile.size}b)`);
+    }
+
+    // Upload ref video (if any) to S3. The buffer is validated + downscaled
+    // to ~480p (long edge ≤854, aspect preserved, audio kept) via ffmpeg,
+    // mirroring how ref images are validated/converted. Cross-origin URLs
+    // can't be clipped client-side, so they're passed through as-is.
+    let refVideoUrl = '';
+    let refVideoName = '';
+    let refVideoHasAudio: boolean | undefined;
+    if (refVideoFile && refVideoFile.size > 0) {
+      const rawVideoBuffer = Buffer.from(await refVideoFile.arrayBuffer());
+      // Client-clipped files arrive as a final mp4/webm (no trim needed).
+      // Browser-unsupported containers (e.g. MKV in Chromium) arrive raw with
+      // a trim window — the server ffmpeg clips them here.
+      const clipStart = Number(form.get('ref_video_start')?.toString());
+      const clipEnd = Number(form.get('ref_video_end')?.toString());
+      const videoResult = await validateAndConvertVideo(rawVideoBuffer, refVideoFile.type, maxRefVideoSeconds, {
+        startSec: Number.isFinite(clipStart) && clipStart > 0 ? clipStart : undefined,
+        endSec: Number.isFinite(clipEnd) && clipEnd > 0 ? clipEnd : undefined,
+        includeAudio: form.get('ref_video_include_audio')?.toString() !== 'false',
+      });
+      if (videoResult.error) {
+        return { error: videoResult.error };
+      }
+      refVideoUrl = await uploadBufferToS3(videoResult.buffer, videoResult.ext || 'webm');
+      refVideoName = refVideoFile.name || `ref_video.${videoResult.ext || 'webm'}`;
+      refVideoHasAudio = videoResult.hasAudio;
+    } else if (refVideoUrlInput) {
+      // Reused video without local re-encode (default trim) or cross-origin URL.
+      // Normalize an absolute URL that points at our own /media/ proxy
+      // (e.g. https://animato.gmgard.moe/media/wan/xxx.mp4) to the relative
+      // /media/... form. The app's /media/ route requires a session and
+      // would 403; the S3 object behind it is publicly readable, so probing
+      // the S3 URL directly works from any host.
+      const absMediaMatch = refVideoUrlInput.match(/^https?:\/\/[^/]+\/(media\/.+)$/i);
+      const normalizedInput = absMediaMatch ? `/${absMediaMatch[1]}` : refVideoUrlInput;
+
+      const isMediaProxy = normalizedInput.startsWith('/media/');
+      const isHttpUrl = /^https?:\/\//i.test(normalizedInput);
+      if (opts.apiMode && !isSafeMediaPath(normalizedInput)) {
+        // API clients may only reference videos already on this site
+        // (see /api/video/resolve-ref); never make the server fetch an
+        // arbitrary external URL on their behalf.
+        return { error: 'ref_video_url must be a /media/... path (use /api/video/resolve-ref to get one)' };
+      }
+      if (!isHttpUrl && !isMediaProxy) {
+        return { error: 'ref video URL must be an http(s) URL' };
+      }
+      if (isHttpUrl) {
+        const urlDuration = await probeVideoDuration(normalizedInput);
+        if (urlDuration !== null && urlDuration > maxRefVideoSeconds + 0.5) {
+          return {
+            error: `ref video is ${Math.round(urlDuration)}s — max ${maxRefVideoSeconds}s. Please use a shorter clip or download it first.`
+          };
+        }
+      }
+      if (isMediaProxy) {
+        // /media/ reuse: keep the proxied URL as-is to avoid re-upload, but
+        // probe hasAudio so we know whether to keep the audio line in the workflow.
+        refVideoUrl = normalizedInput;
+        refVideoName = 'ref_video.webm';
+        try {
+          // Resolve /media/ to S3 URL for server-side probing (same logic as src/routes/media/[...path]/+server.ts)
+          const s3Endpoint = env.S3_ENDPOINT;
+          const mediaPath = normalizedInput.slice('/media/'.length);
+          const s3Url = s3Endpoint ? `${s3Endpoint}/${mediaPath}` : normalizedInput;
+          const mediaResp = await fetch(s3Url);
+          if (mediaResp.ok) {
+            const ab = await mediaResp.arrayBuffer();
+            const buf = Buffer.from(ab);
+            const hasAudio = await hasAudioFromBuffer(buf);
+            if (hasAudio !== null) refVideoHasAudio = hasAudio;
+          }
+        } catch (e) {
+          console.warn('[Ref2V] Failed to probe hasAudio for /media/ ref video:', e);
+        }
+      } else if (isHttpUrl) {
+        try {
+          const resp = await fetch(normalizedInput);
+          if (!resp.ok) throw new Error(`fetch ref_video_url failed: ${resp.status}`);
+          const buf = Buffer.from(await resp.arrayBuffer());
+          const ct = resp.headers.get('content-type') || 'video/webm';
+          const videoResult2 = await validateAndConvertVideo(buf, ct, maxRefVideoSeconds);
+          if (videoResult2.error) return { error: videoResult2.error };
+          refVideoUrl = await uploadBufferToS3(videoResult2.buffer, videoResult2.ext || 'webm');
+          refVideoName = `ref_video.${videoResult2.ext || 'webm'}`;
+          refVideoHasAudio = videoResult2.hasAudio;
+        } catch (e) {
+          return { error: `ref_video_url fetch failed: ${String(e)}` };
+        }
+      } else {
+        refVideoUrl = normalizedInput;
+        refVideoName = 'ref_video.webm';
+      }
+    }
+
+    // Process up to 6 ref images
+    const refImageUrls: string[] = [];
+    const refImageNames: string[] = [];
+    for (let i = 1; i <= MAX_REF_IMAGES; i++) {
+      const imgFile = form.get(`ref_image_${i}`) as File | null;
+      if (!imgFile || imgFile.size === 0) continue;
+
+      let imgBuffer: Buffer<ArrayBufferLike> = Buffer.from(await imgFile.arrayBuffer());
+      const imgResult = await validateAndConvertImage(imgBuffer);
+      if (imgResult.error) {
+        return { error: `Ref image ${i}: ${imgResult.error}` };
+      }
+      imgBuffer = imgResult.buffer;
+      const imgExt = imgResult.ext || undefined;
+      const url = await uploadBufferToS3(imgBuffer, imgExt);
+      refImageUrls.push(url);
+      refImageNames.push(imgFile.name || `ref_image_${i}.${imgExt || 'png'}`);
+    }
+
+    // Optional standalone reference audio (≤15s, single clip). Rides the same
+    // generic upload path as the other refs; the server re-encodes it to PCM
+    // WAV (best-effort) so ComfyUI's core LoadAudio node can read it, and
+    // rejects anything longer than the cap — never silently accept it.
+    const refAudioFile = form.get('ref_audio') as File | null;
+    let refAudioUrl = '';
+    let refAudioName = '';
+    if (refAudioFile && refAudioFile.size > 0) {
+      const rawAudioBuffer = Buffer.from(await refAudioFile.arrayBuffer());
+      const audioResult = await validateAndConvertReferenceAudio(rawAudioBuffer, refAudioFile.type);
+      if (audioResult.error) {
+        return { error: audioResult.error };
+      }
+      const storedExt = audioResult.ext || 'wav';
+      refAudioUrl = await uploadBufferToS3(audioResult.buffer, storedExt);
+      const base = (refAudioFile.name || 'ref_audio').replace(/\.[^.]+$/, '');
+      refAudioName = `${base}.${storedExt}`;
+    }
+
+    // Poster/thumbnail: prefer the first ref image (it carries the intended
+    // look and a probeable aspect); fall back to a server-side ffmpeg frame
+    // extracted from the ref video when no ref images were provided.
+    let posterUrl = '';
+    if (refImageUrls.length > 0) {
+      posterUrl = refImageUrls[0];
+    }
+    if (!posterUrl && refVideoUrl) {
+      try {
+        // ffmpeg needs an absolute, fetchable URL — convert the proxied
+        // /media/... path to the S3 endpoint URL (same as jobWorkflow).
+        const posterFrame = await extractVideoPoster(toOriginalUrl(refVideoUrl));
+        if (posterFrame) {
+          posterUrl = await uploadBufferToS3(posterFrame, 'png');
+        }
+      } catch (e) {
+        console.warn('[Ref2V] Server poster extraction failed for', refVideoUrl, e);
+      }
+    }
+    // Still no poster and no ref video? Pure text-to-video ref2v — leave empty, no hard error.
+
+    // Client-carried ref video duration (seconds) so the review page can
+    // offer "follow video duration" and the worker can match the output.
+    const refVideoDurationInput = Number(form.get('ref_video_duration')?.toString());
+    const refVideoDuration =
+      Number.isFinite(refVideoDurationInput) && refVideoDurationInput > 0
+        ? refVideoDurationInput
+        : undefined;
+
+    const result = await createVideoEntryForReview({
+      userId: user.id,
+      mode: 'ref2v',
+      originalImageUrl: posterUrl,
+      additionalOptions: {
+        ref2v: true,
+        ref_video_url: refVideoUrl,
+        ref_video_name: refVideoName,
+        ...(refVideoHasAudio !== undefined ? { ref_video_has_audio: refVideoHasAudio } : {}),
+        ...(refVideoDuration !== undefined ? { ref_video_duration: refVideoDuration } : {}),
+        ref_audio_url: refAudioUrl,
+        ref_audio_name: refAudioName,
+        ref_image_urls: refImageUrls,
+        ref_image_names: refImageNames
+      }
+    });
+
+    if (!result.success) {
+      return { error: result.error ?? 'Failed to create video entry' };
+    }
+
+    return { success: true, entry: result.entry };
+  } else {
+    // Handle I2V mode with single image
+    const file = form.get('image') as File | null;
+
+    if (!file) return { error: 'no file' };
+
+    const arrayBuffer = await file.arrayBuffer();
+    let buffer: Buffer<ArrayBufferLike> = Buffer.from(arrayBuffer);
+
+    const validationResult = await validateAndConvertImage(buffer);
+    if (validationResult.error) {
+      return { error: validationResult.error };
+    }
+    buffer = validationResult.buffer;
+    const ext = validationResult.ext || undefined;
+
+    // Upload to S3; helper returns a public URL
+    const s3Url = await uploadBufferToS3(buffer, ext);
+
+    // Create review entry for the uploaded image
+    const result = await createVideoEntryForReview({
+      userId: user.id,
+      mode: 'i2v',
+      originalImageUrl: s3Url
+    });
+
+    if (!result.success) {
+      return { error: result.error ?? 'Failed to create video entry' };
+    }
+
+    return { success: true, entry: result.entry };
+  }
+
+}
