@@ -88,3 +88,15 @@ describe('FailureLockout (login)', () => {
     expect(l.lockedFor('k')).toBe(0);
   });
 });
+
+describe('authRateLimiter', () => {
+  it('allows 10 attempts per key per minute, then refuses with Retry-After', async () => {
+    const { authRateLimiter, AUTH_LIMIT_PER_MINUTE } = await import('../src/lib/rateLimit');
+    const key = `1.2.3.4|test-${Math.random()}`;
+    for (let i = 0; i < AUTH_LIMIT_PER_MINUTE; i++) expect(authRateLimiter.consume(key).allowed).toBe(true);
+    const r = authRateLimiter.consume(key);
+    expect(r.allowed).toBe(false);
+    if (!r.allowed) expect(r.retryAfterSeconds).toBeGreaterThanOrEqual(1);
+    expect(authRateLimiter.consume('1.2.3.4|someone-else').allowed).toBe(true);
+  });
+});

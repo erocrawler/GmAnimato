@@ -121,3 +121,7 @@ export class FailureLockout {
 }
 
 export const loginLockout = new FailureLockout();
+
+/** Password login / register attempts: 10 per minute per client address + username. */
+export const AUTH_LIMIT_PER_MINUTE = 10;
+export const authRateLimiter = new TokenBucketLimiter(AUTH_LIMIT_PER_MINUTE, 60_000);

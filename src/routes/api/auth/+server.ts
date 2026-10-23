@@ -2,6 +2,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { authenticateUser, registerUser } from '$lib/auth';
 import { validateUser, formatValidationErrors } from '$lib/validation';
 import { getAdminSettings, createSession } from '$lib/db';
+import { authRateLimiter } from '$lib/rateLimit';
 import {
   generateJWT,
   generateSessionToken,
@@ -10,7 +11,9 @@ import {
   JWT_ENABLED,
 } from '$lib/session';
 
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async ({ request, cookies, getClientAddress }) => {
+  let ip = 'unknown';
+  try { ip = getClientAddress(); } catch { /* no address available */ }
   const body = await request.json();
   const action = body.action as string | undefined; // 'login' or 'register'
   const username = body.username as string | undefined;
@@ -30,6 +33,14 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
     return new Response(
       JSON.stringify({ error: formatValidationErrors(validationErrors), errorCode: 'validation_error' }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  const limit = authRateLimiter.consume(`${ip}|${username.toLowerCase()}`);
+  if (!limit.allowed) {
+    return new Response(
+      JSON.stringify({ error: 'Too many attempts, try again later', errorCode: 'rate_limited' }),
+      { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': String(limit.retryAfterSeconds) } }
     );
   }
 

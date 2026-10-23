@@ -26,8 +26,11 @@ async function submitNewRunPodJob(runpodConfig: any, video: any, origin: string)
   return await submitRunPodJob(runpodConfig, payload);
 }
 
-export const POST: RequestHandler = async ({ params, request }) => {
+export const POST: RequestHandler = async ({ params, request, locals }) => {
   try {
+    if (!locals.user) {
+      return new Response(JSON.stringify({ error: 'unauthenticated' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    }
     const id = params.id;
     if (!id) {
       return new Response(JSON.stringify({ error: 'missing id' }), { 
@@ -42,6 +45,15 @@ export const POST: RequestHandler = async ({ params, request }) => {
       return new Response(JSON.stringify({ error: 'not found' }), { 
         status: 404, 
         headers: { 'Content-Type': 'application/json' } 
+      });
+    }
+
+    const isAdmin = locals.user.roles?.includes('admin');
+    if (video.user_id !== locals.user.id && !isAdmin) {
+      // Same answer as a missing id so ids cannot be probed.
+      return new Response(JSON.stringify({ error: 'not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' }
       });
     }
 
