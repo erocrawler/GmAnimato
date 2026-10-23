@@ -77,7 +77,8 @@
         "description": "发布到视频库"
       }
     },
-    "footer": "GmAnimato — 图像转视频生成器 © 2025"
+    "footer": "GmAnimato — 图像转视频生成器 © 2025",
+    "agentsLink": "给 AI Agent"
   },
   "auth": {
     "login": {
@@ -640,6 +641,7 @@
     "accountInformation": "账户信息",
     "changePassword": "更改密码",
     "apiTokens": {
+      "agentHint": "想让 AI Agent 帮你生成视频？把这个文件交给它即可开始：",
       "title": "API 令牌",
       "description": "个人访问令牌可让脚本或 AI Agent 代表你创建视频（上传、提交、查询状态、下载）。令牌不能修改你的资料或密码，也不能管理令牌。所有令牌都有有效期：创建时选择 7、30 或 90 天，不会自动续期，到期后请重新创建。",
       "nameLabel": "令牌名称",

@@ -77,7 +77,11 @@
 		<!-- Footer -->
 		<footer class="footer footer-center p-4 bg-base-200 text-base-content">
 			<aside>
-				<p>{$_('home.footer')}</p>
+				<p>
+					{$_('home.footer')}
+					<span class="opacity-50 mx-1">·</span>
+					<a href="/llms.txt" class="link link-hover">{$_('home.agentsLink')}</a>
+				</p>
 			</aside>
 		</footer>
 	</div>

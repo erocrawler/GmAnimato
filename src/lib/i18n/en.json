@@ -77,7 +77,8 @@
         "description": "Publish to the Gallery"
       }
     },
-    "footer": "GmAnimato — Image-to-Video Generator © 2025"
+    "footer": "GmAnimato — Image-to-Video Generator © 2025",
+    "agentsLink": "For AI agents"
   },
   "auth": {
     "login": {
@@ -642,6 +643,7 @@
     "changePassword": "Change Password",
     "apiTokens": {
       "title": "API Tokens",
+      "agentHint": "Using an AI agent? Give it this file to get started:",
       "description": "Personal access tokens let scripts and AI agents create videos on your behalf (upload, submit, check status, download). A token can NOT change your profile or password, or manage tokens. Every token expires: choose 7, 30 or 90 days — there is no auto-renewal, so create a new one when it runs out.",
       "nameLabel": "Token name",
       "namePlaceholder": "e.g. my-agent",

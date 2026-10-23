@@ -861,7 +861,11 @@
   <div class="card bg-base-200 shadow-xl mb-6">
     <div class="card-body">
       <h2 class="card-title text-2xl mb-2">{$_('profile.apiTokens.title')}</h2>
-      <p class="text-sm opacity-70 mb-4">{$_('profile.apiTokens.description')}</p>
+      <p class="text-sm opacity-70 mb-2">{$_('profile.apiTokens.description')}</p>
+      <p class="text-sm opacity-70 mb-4">
+        {$_('profile.apiTokens.agentHint')}
+        <a href="/skill.md" target="_blank" rel="noopener" class="link link-primary font-mono">/skill.md</a>
+      </p>
 
       {#if newTokenValue}
         <div class="alert alert-warning mb-4 flex-col items-stretch gap-2">

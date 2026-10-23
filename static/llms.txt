@@ -1,0 +1,27 @@
+# GmAnimato
+
+> GmAnimato (https://animato.gmgard.moe, also https://animato.gmgard.us) generates short AI videos from images, reference clips and prompts (image-to-video, first/last-frame, reference-to-video). These static docs are public. The API needs a personal access token that the user creates on their Profile page.
+
+## Skill
+- [Agent skill (step-by-step: auth, upload, prompt, submit, poll, download, reuse)](/skill.md): the file an AI agent should load first.
+- [Skill reference (endpoint matrix, field tables, limits, errors)](/skill-reference.md): details the skill points to.
+- [Everything in one file](/llms-full.txt): skill.md + skill-reference.md concatenated for single-fetch agents.
+
+## API
+All calls send `Authorization: Bearer anim_pat_…`.
+- [GET /api/auth/session](/api/auth/session): who am I and when the token expires.
+- [GET /api/quota](/api/quota): daily credits used / limit / remaining.
+- [GET /api/workflows](/api/workflows): available models with allowed steps, durations, resolutions, required LoRAs and cost.
+- [GET /api/videos](/api/videos): your videos, paged.
+- [POST /api/uploads](/api/uploads): create a draft from images / reference clips (i2v, fl2v, ref2v).
+- [POST /api/i2v/kickoff](/api/i2v/kickoff): submit a draft for generation.
+- [POST /api/video/update](/api/video/update): save the prompt of a draft.
+- [POST /api/video/reuse](/api/video/reuse): create a new draft from an existing video's inputs.
+- [POST /api/video/resolve-ref](/api/video/resolve-ref): turn a finished video id/URL into a reusable reference-video URL.
+- Per-video routes (need an id, so not linked): `GET /api/video/{id}`, `GET /api/video/{id}/status`, `POST /api/video/{id}/reopen`, `POST /api/video/{id}/retry`, `GET /api/video/{id}/download?format=gif|webp`, `GET /media/{bucket}/{file}` (video file).
+
+## Pages
+- [Create a video](/new): the web UI the API mirrors.
+- [My videos](/videos): list of your generations.
+- [Profile](/profile): create and revoke API tokens.
+- [Gallery](/gallery): published videos.
