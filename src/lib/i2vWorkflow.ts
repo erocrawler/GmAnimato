@@ -14,7 +14,7 @@ interface WorkflowParams {
   callback_url?: string;
   iterationSteps?: 4 | 6 | 8;
   videoDuration?: 4 | 6 | 10;
-  videoResolution?: '480p' | '720p';
+  videoResolution?: '480p' | '720p' | '768p';
   loraWeights?: Record<string, number>;
   loraPresets?: LoraPreset[];
   motionScale?: number; // 0.5 to 2.0, optional

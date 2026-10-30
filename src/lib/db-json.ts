@@ -328,7 +328,7 @@ export class JsonFileDatabase implements IDatabase {
     return localJobs[0];
   }
 
-  async claimLocalJob(userId?: string): Promise<VideoEntry | null> {
+  async claimLocalJob(userId?: string, opts?: { allowH3TwoStage?: boolean }): Promise<VideoEntry | null> {
     // For JSON file database, we use a simple approach
     // Note: This is not truly atomic and is only suitable for single-worker scenarios
     // For production with multiple workers, use PostgreSQL
@@ -336,7 +336,8 @@ export class JsonFileDatabase implements IDatabase {
     const localJobs = rows.filter(v =>
       v.is_local_job === true &&
       v.status === 'in_queue' &&
-      (!userId || v.user_id === userId)
+      (!userId || v.user_id === userId) &&
+      !(opts?.allowH3TwoStage === false && v.video_resolution === '768p')
     );
     
     if (localJobs.length === 0) return null;

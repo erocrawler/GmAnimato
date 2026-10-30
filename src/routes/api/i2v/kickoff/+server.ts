@@ -8,7 +8,7 @@ import { filterLoraWeights, withRequiredLoras, isMiniMaxWorkflow, getWorkflowCap
 import { computeWorkflowQuotaCost } from '$lib/quotaCost';
 import { toOriginalUrl } from '$lib/serverImageUrl';
 import { evaluatePromptProperties } from '$lib/imageRecognition';
-import { maxAllowedDurationSeconds, MAX_DURATION_SECONDS_PAID } from '$lib/mediaLimits';
+import { maxAllowedDurationSeconds, MAX_DURATION_SECONDS_PAID, MAX_DURATION_768P_SECONDS } from '$lib/mediaLimits';
 import { normalizeLoraPresets } from '$lib/loraPresets';
 
 async function delay(ms: number) {
@@ -173,9 +173,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
-    // Extract video resolution (480p or 720p)
+    // Extract video resolution (480p / 720p = ESRGAN 2x / 768p = MiniMax H3 two-stage)
     const videoResolution = body?.videoResolution;
-    const allowedResolutions = ['480p', '720p'] as const;
+    const allowedResolutions = ['480p', '720p', '768p'] as const;
     type VideoResolution = (typeof allowedResolutions)[number];
     let resolution: VideoResolution | undefined;
 
@@ -339,6 +339,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       resolution = '480p';
     }
 
+    // 768p is the MiniMax H3 two-stage mode: H3 workflows only, and capped at
+    // MAX_DURATION_768P_SECONDS until longer clips are validated on every worker.
+    if (resolution === '768p') {
+      if (!isMiniMaxWorkflow(workflow)) {
+        return new Response(JSON.stringify({
+          error: '768p resolution is only available with MiniMax H3 models.'
+        }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      }
+      if ((videoDuration ?? 0) > MAX_DURATION_768P_SECONDS) {
+        return new Response(JSON.stringify({
+          error: `768p resolution supports up to ${MAX_DURATION_768P_SECONDS}-second videos.`
+        }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+
     // Max (15s) duration is a MiniMax H3-only option
     if (videoDuration === MAX_DURATION_SECONDS_PAID && !isMiniMaxWorkflow(workflow)) {
       return new Response(JSON.stringify({
@@ -476,10 +491,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
-    // Enforce role requirement for 720p resolution
-    if (resolution === '720p' && !hasAdvancedFeatures) {
+    // Enforce role requirement for the premium resolutions (everything above 480p)
+    if (resolution !== undefined && resolution !== '480p' && !hasAdvancedFeatures) {
       return new Response(JSON.stringify({ 
-        error: '720p resolution is available to users with advanced features only.' 
+        error: `${resolution} resolution is available to users with advanced features only.` 
       }), { 
         status: 403, 
         headers: { 'Content-Type': 'application/json' } 

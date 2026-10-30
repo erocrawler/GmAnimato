@@ -436,8 +436,10 @@
       "help": "选择输出质量",
       "standard": "480p",
       "standardDesc": "标准质量",
-      "hd": "720p",
-      "hdDesc": "高清（处理时间较长）"
+      "hd": "ESRGAN 2×",
+      "hdDesc": "480p 生成后放大 2 倍（处理时间较长）",
+      "hd768": "768p",
+      "hd768Desc": "原生高清（H3 两段式，处理时间较长）"
     },
     "additionalOptions": {
       "title": "附加选项",

@@ -2,6 +2,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { claimLocalJob, getAdminSettings, updateVideo } from '$lib/db';
 import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
+import { H3_TWO_STAGE_CAPABILITY } from '$lib/h3TwoStage';
 
 /**
  * GET /api/worker/task
@@ -60,9 +61,18 @@ export const GET: RequestHandler = async ({ request }) => {
       console.log(`[Worker] No capabilities declared, using env default (sage attention: ${useSageAttention})`);
     }
 
+    // 768p (MiniMax H3 two-stage) needs ComfyUI with MiniMaxH3LatentUpscaleWithModel,
+    // comfy-kitchen >= 0.2.40 and the latent upscaler weights. A worker that declares
+    // its capabilities must list 'h3_latent_upscale'; an undeclared worker follows the
+    // ENABLE_H3_TWO_STAGE_LOCAL env (default off, so old workers never get 768p jobs).
+    const allowH3TwoStage =
+      declaredCapabilities.length > 0
+        ? declaredCapabilities.includes(H3_TWO_STAGE_CAPABILITY)
+        : env.ENABLE_H3_TWO_STAGE_LOCAL === 'true';
+
     // Atomically claim the oldest local job in the queue
     // This prevents race conditions where two workers claim the same job
-    const job = await claimLocalJob(requestedUserId);
+    const job = await claimLocalJob(requestedUserId, { allowH3TwoStage });
     
     if (!job) {
       return new Response(

@@ -3,7 +3,8 @@ import path from 'path';
 import probe from 'probe-image-size';
 import type { Workflow } from './IDatabase';
 import type { LoraPreset } from './loraPresets';
-import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes } from './workflowUtils';
+import { findNode, getNodeInputs, calculateVideoDimensions, calculateH3TwoStageDimensions, add720pUpscaleNodes } from './workflowUtils';
+import { applyH3TwoStage } from './h3TwoStage';
 import { workflowDefaultStep, engineFromTemplatePath } from './workflowCapabilities';
 
 interface MiniMaxWorkflowParams {
@@ -15,7 +16,7 @@ interface MiniMaxWorkflowParams {
   seed: number;
   callback_url?: string;
   videoDuration?: 4 | 6 | 10 | 15; // seconds; frames derived via ComfyMathExpression (24fps)
-  videoResolution?: '480p' | '720p';
+  videoResolution?: '480p' | '720p' | '768p';
   iterationSteps?: 4 | 8; // sampler steps (distilled turbo NFE: fast 4 / quality 8)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
@@ -134,7 +135,12 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
     .filter((p) => p.isConfigurable === false)
     .find((p) => params.loraWeights && Object.prototype.hasOwnProperty.call(params.loraWeights, p.id));
 
-  if (appliedLora && unetLoaderNode && schedulerNode) {
+  // Templates that wire their own LoRA (the Flex recipes: LoRA + ManualSigmas, no
+  // BasicScheduler) are self-contained — never inject the admin speed-up LoRA on
+  // top of them (Flex must not be stacked with turbo).
+  const templateLoraNode = findNode(workflow, 'LoraLoaderModelOnly');
+
+  if (appliedLora && unetLoaderNode && schedulerNode && !templateLoraNode) {
     const strength =
       typeof params.loraWeights?.[appliedLora.id] === 'number'
         ? params.loraWeights![appliedLora.id]
@@ -191,8 +197,11 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
   // and re-emits the patched model, so we rewire BasicScheduler.model and
   // BasicGuider.model to its output. Requires sageattention on the worker.
   const sageAttentionNodeId = '105:1001:sage';
-  if (params.useSageAttention && unetLoaderNode && schedulerNode) {
-    const modelSourceId = appliedLora ? loraNodeId : unetLoaderNode;
+  if (params.useSageAttention && unetLoaderNode && (schedulerNode || guiderNode)) {
+    // Chain off whatever currently feeds the sigma-shift/guider: the speed-up LoRA
+    // injected above, a LoRA wired in the template itself (Flex), or the UNETLoader.
+    const chainHeadModel = (sigmaShiftNode ? getNodeInputs(workflow, sigmaShiftNode)?.model : null) ?? (guiderNode ? getNodeInputs(workflow, guiderNode)?.model : null);
+    const modelSourceId = Array.isArray(chainHeadModel) ? (chainHeadModel[0] as string) : appliedLora ? loraNodeId : unetLoaderNode;
 
     workflow.input.workflow[sageAttentionNodeId] = {
       inputs: {
@@ -209,7 +218,7 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
     if (shiftInputs && Array.isArray(shiftInputs.model)) {
       shiftInputs.model = [sageAttentionNodeId, 0];
     } else {
-      const schedulerInputs = getNodeInputs(workflow, schedulerNode);
+      const schedulerInputs = schedulerNode ? getNodeInputs(workflow, schedulerNode) : null;
       const guiderInputs = guiderNode ? getNodeInputs(workflow, guiderNode) : null;
       if (schedulerInputs && Array.isArray(schedulerInputs.model)) {
         schedulerInputs.model = [sageAttentionNodeId, 0];
@@ -239,6 +248,7 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
 
   // Always generate at 480p for efficiency, then upscale to 720p if needed
   const resolution = params.videoResolution ?? '480p';
+  let twoStageDims: ReturnType<typeof calculateH3TwoStageDimensions> | null = null;
   let gen480pWidth: number;
   let gen480pHeight: number;
   let originalImageWidth: number;
@@ -248,6 +258,9 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
     const dimensions = await probe(params.first_image_url);
     originalImageWidth = dimensions.width;
     originalImageHeight = dimensions.height;
+    if (resolution === '768p') {
+      twoStageDims = calculateH3TwoStageDimensions(dimensions.width, dimensions.height);
+    }
 
     // Always calculate for 480p generation — MiniMax H3 requires multiples
     // of 32 (floor rounding mirrors the official ResolutionSelector), unlike
@@ -281,7 +294,15 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
     }
   }
 
-  // Add upscale nodes after VAE decode if 720p is requested
+  // 768p: two-stage latent-lift graph (native size, no ESRGAN). Falls back to
+  // 16:9 1344x768 when the first frame could not be probed.
+  if (resolution === '768p') {
+    const dims = twoStageDims ?? { highWidth: 1344, highHeight: 768, lowWidth: 672, lowHeight: 384 };
+    const staged = applyH3TwoStage(workflow, { ...dims, seed: params.seed });
+    console.log(`[MiniMax] 768p two-stage ${staged.lowSteps}+${staged.highSteps} at ${dims.lowWidth}x${dims.lowHeight} -> ${dims.highWidth}x${dims.highHeight}`);
+  }
+
+  // Add upscale nodes after VAE decode if 720p (ESRGAN 2x) is requested
   if (resolution === '720p') {
     add720pUpscaleNodes(
       workflow,

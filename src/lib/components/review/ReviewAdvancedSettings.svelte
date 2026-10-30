@@ -6,7 +6,7 @@
   import { _ } from "svelte-i18n";
   import type { Workflow } from "$lib/IDatabase";
   import type { LoraPreset } from "$lib/loraPresets";
-  import { maxAllowedDurationSeconds } from "$lib/mediaLimits";
+  import { maxAllowedDurationSeconds, MAX_DURATION_768P_SECONDS } from "$lib/mediaLimits";
   import { getWorkflowEngine, getWorkflowCapabilities } from "$lib/workflows";
   import {
     ENGINE_DEFAULT_CAPABILITIES,
@@ -56,7 +56,7 @@
 
   type IterationSteps = 4 | 6 | 8;
   type VideoDuration = 4 | 6 | 10 | 15;
-  type VideoResolution = "480p" | "720p";
+  type VideoResolution = "480p" | "720p" | "768p";
 
   let stepOptions: {
     value: IterationSteps;
@@ -72,6 +72,7 @@
   }[] = [
     { value: "480p", label: "", description: "", requiresPaid: false },
     { value: "720p", label: "", description: "", requiresPaid: true },
+    { value: "768p", label: "", description: "", requiresPaid: true },
   ];
 
   // Iteration steps — built from the workflow's capability allowlist. WAN uses
@@ -103,8 +104,8 @@
 
   $: resolutionOptions = caps.resolutions.map((value) => ({
     value,
-    label: $_(`review.resolution.${value === "480p" ? "standard" : "hd"}`),
-    description: $_(`review.resolution.${value === "480p" ? "standardDesc" : "hdDesc"}`),
+    label: $_(`review.resolution.${value === "480p" ? "standard" : value === "768p" ? "hd768" : "hd"}`),
+    description: $_(`review.resolution.${value === "480p" ? "standardDesc" : value === "768p" ? "hd768Desc" : "hdDesc"}`),
     requiresPaid: value !== "480p",
   }));
 
@@ -150,7 +151,10 @@
   // premium-only. For ref2v with a known reference length, a "Follow video
   // duration" radio is prepended (value FOLLOW_DURATION). Free tier caps output
   // at 6s, so the follow option reflects the capped value.
-  $: followMaxSec = maxAllowedDurationSeconds(canUseQuality);
+  $: followMaxSec = Math.min(
+    maxAllowedDurationSeconds(canUseQuality),
+    videoResolution === "768p" ? MAX_DURATION_768P_SECONDS : Infinity,
+  );
   $: followDurationSec = Math.min(followMaxSec, refVideoDurationSec);
   $: followDurationCapped = refVideoDurationSec > followMaxSec;
   $: durationOptions = ((): DurationOption[] => {
@@ -196,7 +200,7 @@
         });
       } else if (value === 15) {
         // 15s is a MiniMax H3 premium-only option.
-        if (!canUseQuality || !isMiniMax) continue;
+        if (!canUseQuality || !isMiniMax || videoResolution === "768p") continue;
         opts.push({
           value: 15 as VideoDuration,
           label,
@@ -251,7 +255,7 @@
     }
   }
 
-  $: if (!canUseQuality && videoResolution === "720p") videoResolution = "480p";
+  $: if (!canUseQuality && videoResolution !== "480p") videoResolution = "480p";
 
   // Free tier: durations above 6s are advanced features — snap down to 6s when
   // the workflow allows it so a radio is always checked. Premium-only durations

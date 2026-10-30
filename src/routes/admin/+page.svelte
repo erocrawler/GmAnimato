@@ -2142,7 +2142,8 @@
                       onchange={(e) => updateQuotaCostRuleWhen(ri, { exactResolution: e.currentTarget.value === '' ? undefined : e.currentTarget.value })}>
                       <option value="">(any)</option>
                       <option value="480p">480p</option>
-                      <option value="720p">720p</option>
+                      <option value="720p">720p (ESRGAN 2x)</option>
+                      <option value="768p">768p (H3 two-stage)</option>
                     </select>
                   </label>
                 </div>

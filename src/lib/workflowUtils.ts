@@ -74,17 +74,18 @@ export function getNodeInputs(workflow: any, nodeId: string | null): any {
  * Calculate video dimensions based on image aspect ratio and resolution
  * @param imageWidth Original image width
  * @param imageHeight Original image height
- * @param resolution Target resolution (480p or 720p)
+ * @param resolution Target resolution (480p, 720p or 768p)
  * @param options Optional rounding config (default: multiples of 16, nearest — WAN)
  * @returns {width, height} Video dimensions (rounded per options)
  */
 export function calculateVideoDimensions(
   imageWidth: number,
   imageHeight: number,
-  resolution: '480p' | '720p',
+  resolution: '480p' | '720p' | '768p',
   options: CalculateVideoDimensionsOptions = {}
 ): { width: number; height: number } {
-  const totalPixels = resolution === '720p' ? 921600 : 409600;
+  // 768p = 1344x768 at 16:9 (the MiniMax H3 two-stage native size).
+  const totalPixels = resolution === '768p' ? 1032192 : resolution === '720p' ? 921600 : 409600;
   const roundToMultiple = options.roundToMultiple ?? 16;
   const roundFn = options.rounding === 'floor' ? Math.floor : Math.round;
   
@@ -116,6 +117,25 @@ export function calculateVideoDimensions(
     width: finalWidth,
     height: finalHeight
   };
+}
+
+/**
+ * Dimensions for the MiniMax H3 768p two-stage mode.
+ *
+ * The HIGH size targets 1,032,192 px (1344x768 at 16:9) with nearest-32
+ * rounding (floor would turn 1344x761.99 into 1344x736 for 16:9). The LOW size
+ * is exactly half the edges, so the latent upscaler lifts a 2x grid and both
+ * stay multiples of 16 (the VAE's spatial stride).
+ */
+export function calculateH3TwoStageDimensions(
+  imageWidth: number,
+  imageHeight: number
+): { highWidth: number; highHeight: number; lowWidth: number; lowHeight: number } {
+  const { width, height } = calculateVideoDimensions(imageWidth, imageHeight, '768p', {
+    roundToMultiple: 32,
+    rounding: 'nearest'
+  });
+  return { highWidth: width, highHeight: height, lowWidth: width / 2, lowHeight: height / 2 };
 }
 
 /**

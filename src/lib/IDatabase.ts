@@ -252,7 +252,8 @@ export interface IDatabase {
   isVideoLikedByUser(videoId: string, userId: string): Promise<boolean>;
   getDailyQuotaUsage(userId: string, date: Date): Promise<number>;
   getOldestLocalJob(): Promise<VideoEntry | null>;
-  claimLocalJob(userId?: string): Promise<VideoEntry | null>; // Atomically claim a job for processing (optionally scoped to a user)
+  /** Atomically claim a job for processing (optionally scoped to a user). `allowH3TwoStage: false` skips 768p jobs for workers that cannot run the H3 latent-upscale graph. */
+  claimLocalJob(userId?: string, opts?: { allowH3TwoStage?: boolean }): Promise<VideoEntry | null>;
   getLocalJobStats(): Promise<{ inQueue: number; processing: number; completed: number; failed: number }>;
   getOldestMigrationCandidate(settings: AdminSettings): Promise<VideoEntry | null>; // Find oldest eligible job for RunPod migration
   claimJobForMigration(settings: AdminSettings): Promise<VideoEntry | null>; // Atomically claim and mark job for migration

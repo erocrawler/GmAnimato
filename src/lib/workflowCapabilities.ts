@@ -23,7 +23,7 @@ export type WorkflowRunOn = 'auto' | 'serverless';
 
 export type CapabilityStep = 4 | 6 | 8;
 export type CapabilityDuration = 4 | 6 | 10 | 15;
-export type CapabilityResolution = '480p' | '720p';
+export type CapabilityResolution = '480p' | '720p' | '768p';
 
 export interface WorkflowCapabilities {
   steps?: CapabilityStep[];
@@ -39,7 +39,7 @@ export interface WorkflowCapabilities {
 
 export const KNOWN_STEPS: readonly CapabilityStep[] = [4, 6, 8];
 export const KNOWN_DURATIONS: readonly CapabilityDuration[] = [4, 6, 10, 15];
-export const KNOWN_RESOLUTIONS: readonly CapabilityResolution[] = ['480p', '720p'];
+export const KNOWN_RESOLUTIONS: readonly CapabilityResolution[] = ['480p', '720p', '768p'];
 
 /** Central per-engine defaults (used when capabilities are empty/partial). */
 export const ENGINE_DEFAULT_CAPABILITIES: Record<WorkflowEngine, Required<WorkflowCapabilities>> = {
@@ -79,7 +79,7 @@ export function normalizeWorkflowCapabilities(raw: unknown): WorkflowCapabilitie
   }
   if (Array.isArray(v.resolutions)) {
     out.resolutions = v.resolutions.filter(
-      (r): r is CapabilityResolution => r === '480p' || r === '720p',
+      (r): r is CapabilityResolution => r === '480p' || r === '720p' || r === '768p',
     );
   }
   if (v.freeSteps !== undefined) {
