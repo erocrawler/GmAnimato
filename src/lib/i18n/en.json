@@ -403,7 +403,11 @@
     "resetAll": "Reset All to Defaults",
     "workflow": {
       "title": "Workflow",
-      "help": "Select the AI model and workflow for video generation"
+      "help": "Select the AI model and workflow for video generation",
+      "group": {
+        "wan": "Wan 2.2",
+        "minimax": "MiniMax H3"
+      }
     },
     "iteration": {
       "title": "Iteration steps (fast, balanced)",

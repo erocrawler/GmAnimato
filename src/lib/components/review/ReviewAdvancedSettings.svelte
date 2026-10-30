@@ -6,7 +6,7 @@
   import { _ } from "svelte-i18n";
   import type { Workflow } from "$lib/IDatabase";
   import type { LoraPreset } from "$lib/loraPresets";
-  import { maxAllowedDurationSeconds, MAX_DURATION_768P_SECONDS } from "$lib/mediaLimits";
+  import { maxAllowedDurationSeconds } from "$lib/mediaLimits";
   import { getWorkflowEngine, getWorkflowCapabilities } from "$lib/workflows";
   import {
     ENGINE_DEFAULT_CAPABILITIES,
@@ -102,6 +102,15 @@
       ? ENGINE_DEFAULT_STEP[engine]
       : (caps.steps[0] ?? 4);
 
+  // Model dropdown: group the workflows by engine family (Wan / MiniMax H3).
+  // A single family renders as a plain list.
+  $: workflowGroups = (["wan", "minimax"] as const)
+    .map((engineKey) => ({
+      engine: engineKey,
+      items: filteredWorkflows.filter((w) => getWorkflowEngine(w) === engineKey),
+    }))
+    .filter((g) => g.items.length > 0);
+
   $: resolutionOptions = caps.resolutions.map((value) => ({
     value,
     label: $_(`review.resolution.${value === "480p" ? "standard" : value === "768p" ? "hd768" : "hd"}`),
@@ -151,10 +160,7 @@
   // premium-only. For ref2v with a known reference length, a "Follow video
   // duration" radio is prepended (value FOLLOW_DURATION). Free tier caps output
   // at 6s, so the follow option reflects the capped value.
-  $: followMaxSec = Math.min(
-    maxAllowedDurationSeconds(canUseQuality),
-    videoResolution === "768p" ? MAX_DURATION_768P_SECONDS : Infinity,
-  );
+  $: followMaxSec = maxAllowedDurationSeconds(canUseQuality);
   $: followDurationSec = Math.min(followMaxSec, refVideoDurationSec);
   $: followDurationCapped = refVideoDurationSec > followMaxSec;
   $: durationOptions = ((): DurationOption[] => {
@@ -200,7 +206,7 @@
         });
       } else if (value === 15) {
         // 15s is a MiniMax H3 premium-only option.
-        if (!canUseQuality || !isMiniMax || videoResolution === "768p") continue;
+        if (!canUseQuality || !isMiniMax) continue;
         opts.push({
           value: 15 as VideoDuration,
           label,
@@ -325,9 +331,19 @@
           bind:value={selectedWorkflowId}
           disabled={!isEditable}
         >
-          {#each filteredWorkflows as workflow}
-            <option value={workflow.id}>{workflow.name}</option>
-          {/each}
+          {#if workflowGroups.length > 1}
+            {#each workflowGroups as group}
+              <optgroup label={$_(`review.workflow.group.${group.engine}`)}>
+                {#each group.items as workflow}
+                  <option value={workflow.id}>{workflow.name}</option>
+                {/each}
+              </optgroup>
+            {/each}
+          {:else}
+            {#each filteredWorkflows as workflow}
+              <option value={workflow.id}>{workflow.name}</option>
+            {/each}
+          {/if}
         </select>
         {#if filteredWorkflows.find((w) => w.id === selectedWorkflowId)?.description}
           <p class="text-xs opacity-70">

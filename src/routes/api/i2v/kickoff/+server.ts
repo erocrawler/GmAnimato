@@ -8,7 +8,7 @@ import { filterLoraWeights, withRequiredLoras, isMiniMaxWorkflow, getWorkflowCap
 import { computeWorkflowQuotaCost } from '$lib/quotaCost';
 import { toOriginalUrl } from '$lib/serverImageUrl';
 import { evaluatePromptProperties } from '$lib/imageRecognition';
-import { maxAllowedDurationSeconds, MAX_DURATION_SECONDS_PAID, MAX_DURATION_768P_SECONDS } from '$lib/mediaLimits';
+import { maxAllowedDurationSeconds, MAX_DURATION_SECONDS_PAID } from '$lib/mediaLimits';
 import { normalizeLoraPresets } from '$lib/loraPresets';
 
 async function delay(ms: number) {
@@ -339,19 +339,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       resolution = '480p';
     }
 
-    // 768p is the MiniMax H3 two-stage mode: H3 workflows only, and capped at
-    // MAX_DURATION_768P_SECONDS until longer clips are validated on every worker.
-    if (resolution === '768p') {
-      if (!isMiniMaxWorkflow(workflow)) {
-        return new Response(JSON.stringify({
-          error: '768p resolution is only available with MiniMax H3 models.'
-        }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-      }
-      if ((videoDuration ?? 0) > MAX_DURATION_768P_SECONDS) {
-        return new Response(JSON.stringify({
-          error: `768p resolution supports up to ${MAX_DURATION_768P_SECONDS}-second videos.`
-        }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-      }
+    // 768p is the MiniMax H3 two-stage mode: H3 workflows only.
+    if (resolution === '768p' && !isMiniMaxWorkflow(workflow)) {
+      return new Response(JSON.stringify({
+        error: '768p resolution is only available with MiniMax H3 models.'
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
     // Max (15s) duration is a MiniMax H3-only option

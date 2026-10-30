@@ -17,10 +17,6 @@
 export const MAX_DURATION_SECONDS_FREE = 6;
 export const MAX_DURATION_SECONDS_PAID = 15;
 
-/** The 768p MiniMax H3 two-stage mode is capped at this output duration. 6s is
- *  validated everywhere; 15s only on the local L40S worker (serverless untested). */
-export const MAX_DURATION_768P_SECONDS = 10;
-
 /** The max allowed duration for a tier: 6s free, 15s advanced. */
 export function maxAllowedDurationSeconds(hasAdvancedFeatures: boolean): 6 | 15 {
   return hasAdvancedFeatures ? MAX_DURATION_SECONDS_PAID : MAX_DURATION_SECONDS_FREE;

@@ -402,7 +402,11 @@
     "resetAll": "重置为默认值",
     "workflow": {
       "title": "工作流",
-      "help": "选择AI模型和视频生成工作流"
+      "help": "选择AI模型和视频生成工作流",
+      "group": {
+        "wan": "Wan 2.2",
+        "minimax": "MiniMax H3"
+      }
     },
     "iteration": {
       "title": "迭代步数（快速、均衡）",
