@@ -304,6 +304,68 @@ describe('i2v/fl2v 768p (MiniMax builder)', () => {
   });
 });
 
+describe('both official flavours x every resolution build a valid graph (turbo and Pika Flex rows side by side)', () => {
+  const dangling = (wf: any) => {
+    const g: Graph = wf.input.workflow;
+    const bad: string[] = [];
+    for (const [id, n] of Object.entries(g)) {
+      for (const [key, v] of Object.entries((n as any).inputs ?? {})) {
+        if (Array.isArray(v) && typeof v[0] === 'string' && typeof v[1] === 'number' && !g[v[0]]) bad.push(`${id}.${key}->${v[0]}`);
+      }
+    }
+    return bad;
+  };
+  const flexPresets = {
+    r2v: { ...turboPreset, id: 'pika_h3_flex_ref2va_v1_bf16.safetensors' },
+    i2v: { ...turboPreset, id: 'pika_h3_flex_fl2va_v1_bf16.safetensors' },
+  };
+  const rows = [
+    { name: 'r2v turbo', kind: 'r2v', tmpl: 'data/minimax_ref2v_template.json.tmpl', preset: turboPreset, steps: 8 },
+    { name: 'r2v flex', kind: 'r2v', tmpl: 'data/minimax_ref2v_flex.json.tmpl', preset: flexPresets.r2v, steps: 6 },
+    { name: 'i2v/fl2v turbo', kind: 'i2v', tmpl: 'data/minimax_h3.json.tmpl', preset: turboPreset, steps: 8 },
+    { name: 'i2v/fl2v flex', kind: 'i2v', tmpl: 'data/minimax_h3_flex.json.tmpl', preset: flexPresets.i2v, steps: 6 },
+  ] as const;
+
+  for (const row of rows) {
+    for (const res of ['480p', '720p', '768p'] as const) {
+      for (const sage of [false, true]) {
+        it(`${row.name} @ ${res}${sage ? ' + sage' : ''}`, async () => {
+          const common = {
+            videoResolution: res,
+            useSageAttention: sage,
+            iterationSteps: row.steps as any,
+            loraPresets: [row.preset as any],
+            loraWeights: { [row.preset.id]: 1 },
+            workflow: { templatePath: row.tmpl, engine: 'minimax' } as any,
+          };
+          const wf: any =
+            row.kind === 'r2v'
+              ? await buildRef2VWorkflow({ ...r2vBase, ...common })
+              : await buildMiniMaxWorkflow({
+                  first_image_name: 'first.jpg',
+                  first_image_url: 'http://example.invalid/first.jpg',
+                  input_prompt: 'x',
+                  seed: 3,
+                  videoDuration: 6,
+                  ...common,
+                });
+          expect(dangling(wf)).toEqual([]);
+          const samplers = nodesOf(wf, 'SamplerCustomAdvanced').length;
+          expect(samplers).toBe(res === '768p' ? 2 : 1);
+          expect(nodesOf(wf, 'MiniMaxH3LatentUpscaleWithModel')).toHaveLength(res === '768p' ? 1 : 0);
+          expect(nodesOf(wf, 'ImageUpscaleWithModel')).toHaveLength(res === '720p' ? 1 : 0);
+          // exactly one LoRA, the row's own preset
+          const loras = nodesOf(wf, 'LoraLoaderModelOnly');
+          expect(loras).toHaveLength(1);
+          expect(loras[0][1].inputs.lora_name).toBe(row.preset.id);
+          // sage: one patch per sampling stage, none without sage
+          expect(nodesOf(wf, 'MiniMaxH3MemoryEfficientSageAttentionPatch')).toHaveLength(sage ? samplers : 0);
+        });
+      }
+    }
+  }
+});
+
 describe('capabilities, quota rules and workers', () => {
   it('lets a workflow opt in to 768p and keeps the engine defaults unchanged', () => {
     expect(normalizeWorkflowCapabilities({ resolutions: ['480p', '720p', '768p', '1080p'] }).resolutions).toEqual([
