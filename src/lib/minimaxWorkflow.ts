@@ -188,7 +188,11 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
     }
     console.log(`[MiniMax] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
   } else {
-    console.log('[MiniMax] No speed-up LoRA configured — using template steps (20)');
+    console.log(
+      templateLoraNode
+        ? '[MiniMax] Template carries its own LoRA (Flex) — no speed-up LoRA injected'
+        : '[MiniMax] No speed-up LoRA configured — using template steps (20)'
+    );
   }
 
   // MiniMax H3 sage attention: inject MiniMaxH3MemoryEfficientSageAttentionPatch

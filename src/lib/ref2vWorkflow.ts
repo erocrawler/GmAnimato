@@ -336,7 +336,11 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
     }
     console.log(`[Ref2V] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
   } else {
-    console.log('[Ref2V] No speed-up LoRA configured — using template steps (20)');
+    console.log(
+      templateLoraNode
+        ? '[Ref2V] Template carries its own LoRA (Flex) — no speed-up LoRA injected'
+        : '[Ref2V] No speed-up LoRA configured — using template steps (20)'
+    );
   }
 
   // MiniMax H3 sage attention: inject MiniMaxH3MemoryEfficientSageAttentionPatch
