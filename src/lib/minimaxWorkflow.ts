@@ -145,10 +145,6 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
   if (templateLoraNode && appliedLora) {
     const templateLoraInputs = getNodeInputs(workflow, templateLoraNode);
     if (templateLoraInputs) {
-      const templateDefault = String(templateLoraInputs.lora_name ?? '');
-      if (/flex/i.test(templateDefault) && !/flex/i.test(appliedLora.id)) {
-        console.warn(`[MiniMax] Flex template but the workflow's required LoRA is ${appliedLora.id} — check the workflow's required LoRA`);
-      }
       templateLoraInputs.lora_name = appliedLora.id;
       templateLoraInputs.strength_model =
         typeof params.loraWeights?.[appliedLora.id] === 'number'
