@@ -346,6 +346,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
+    // 768p is validated only at 6+ steps (Flex 3+3, hybrids 6+2); 4 steps would
+    // split 3+1, which has never produced a checked render. Reject an explicit
+    // 4, otherwise snap up to the cheapest allowed step that is >= 6.
+    if (resolution === '768p' && iterationSteps < 6) {
+      const candidates = (caps.steps as readonly number[]).filter((n) => n >= 6).sort((a, b) => a - b);
+      if (stepExplicit || candidates.length === 0) {
+        return new Response(JSON.stringify({
+          error: `768p requires at least 6 iteration steps on ${workflow.name}; please pick a higher step count.`
+        }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      }
+      iterationSteps = candidates[0] as IterationSteps;
+    }
+
     // Max (15s) duration is a MiniMax H3-only option
     if (videoDuration === MAX_DURATION_SECONDS_PAID && !isMiniMaxWorkflow(workflow)) {
       return new Response(JSON.stringify({

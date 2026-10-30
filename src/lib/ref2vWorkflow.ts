@@ -36,7 +36,7 @@ interface Ref2VWorkflowParams {
   /** Output aspect ratio. 'video' follows the reference media (default); the
    *  presets override it. MiniMax H3 supports roughly 0.45-2.2. */
   ref2vAspect?: 'video' | '16:9' | '4:3' | 'square' | '3:4' | '9:16';
-  iterationSteps?: 4 | 8; // sampler steps (distilled turbo NFE: fast 4 / quality 8)
+  iterationSteps?: 4 | 6 | 8; // sampler steps (Flex 6; distilled turbo NFE: fast 4 / quality 8)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
   useSageAttention?: boolean; // inject MiniMaxH3MemoryEfficientSageAttentionPatch

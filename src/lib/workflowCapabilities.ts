@@ -156,6 +156,7 @@ export const STEP_LABEL_KEY: Record<number, string> = {
 /** MiniMax-specific step description keys (fall back to steps.* otherwise). */
 export const MINIMAX_STEP_DESC_KEY: Record<number, string> = {
   4: 'minimaxStepsFast',
+  6: 'minimaxStepsFlex',
   8: 'minimaxStepsQuality',
 };
 

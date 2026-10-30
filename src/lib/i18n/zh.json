@@ -420,6 +420,7 @@
         "quality": "8步"
       },
       "minimaxStepsFast": "4步",
+      "minimaxStepsFlex": "6步",
       "minimaxStepsBalanced": "8步",
       "minimaxStepsQuality": "8步"
     },

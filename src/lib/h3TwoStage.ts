@@ -72,6 +72,11 @@ export function applyH3TwoStage(workflow: any, opts: H3TwoStageOptions): H3TwoSt
   const weights = (workflow.input.node_weights ??= {}) as Record<string, number>;
   const added: string[] = [];
   const add = (id: string, node: any, weight?: number) => {
+    if (wf[id]) {
+      // Fixed ids (105:3000:*): a second transform of the same graph would silently overwrite
+      // the first one's nodes instead of producing a valid two-pass graph.
+      throw new Error(`H3 two-stage transform: node id ${id} already exists`);
+    }
     wf[id] = node;
     if (weight !== undefined) weights[id] = weight;
     added.push(id);

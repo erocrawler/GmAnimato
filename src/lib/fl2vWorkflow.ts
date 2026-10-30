@@ -100,6 +100,10 @@ export async function buildFL2VWorkflow(params: FL2VWorkflowParams): Promise<obj
 
   // Always generate at 480p for efficiency, then upscale to 720p if needed
   const resolution = params.videoResolution ?? '480p';
+  if (resolution === '768p') {
+    // Wan has no native 720p/768p path yet; fail loudly instead of billing for a 480p render.
+    throw new Error('Wan workflows do not support 768p yet');
+  }
   let gen480pWidth: number;
   let gen480pHeight: number;
   let originalImageWidth: number;

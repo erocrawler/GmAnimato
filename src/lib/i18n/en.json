@@ -421,6 +421,7 @@
         "quality": "8 steps"
       },
       "minimaxStepsFast": "4 steps",
+      "minimaxStepsFlex": "6 steps",
       "minimaxStepsBalanced": "8 steps",
       "minimaxStepsQuality": "8 steps"
     },
