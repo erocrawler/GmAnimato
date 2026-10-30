@@ -90,7 +90,7 @@ describe('ref2v 768p — Flex recipe (ManualSigmas 3+3, lcm, no turbo)', () => {
       ...r2vBase,
       videoResolution: '768p',
       workflow: { templatePath: 'data/minimax_ref2v_flex.json.tmpl' } as any,
-      // an admin-configured turbo preset must NOT be stacked on Flex
+      // the workflow's required LoRA (admin preset) is what fills the template LoRA node
       loraPresets: [turboPreset as any],
       loraWeights: { [turboPreset.id]: 1 },
       ...extra,
@@ -146,12 +146,28 @@ describe('ref2v 768p — Flex recipe (ManualSigmas 3+3, lcm, no turbo)', () => {
     expect(conds).toEqual([...encodeIds].sort());
   });
 
-  it('never stacks the speed-up turbo LoRA on top of the template LoRA', async () => {
+  it('takes its LoRA from the workflow\'s required LoRA (single LoRA node, never stacked)', async () => {
     const wf = await build();
     const loras = nodesOf(wf, 'LoraLoaderModelOnly');
     expect(loras).toHaveLength(1);
-    expect(loras[0][1].inputs.lora_name).toBe('pika_h3_flex_ref2va_v1_bf16.safetensors');
+    // the required preset (here the turbo test preset) fills the template LoRA node
+    expect(loras[0][1].inputs.lora_name).toBe(turboPreset.id);
+    expect(loras[0][1].inputs.strength_model).toBe(1);
     expect(nodesOf(wf, 'MiniMaxH3SigmaShift')).toHaveLength(0);
+  });
+
+  it('uses the template default LoRA when the workflow has no required LoRA configured', async () => {
+    const wf = await build({ loraPresets: [], loraWeights: undefined });
+    const loras = nodesOf(wf, 'LoraLoaderModelOnly');
+    expect(loras).toHaveLength(1);
+    expect(loras[0][1].inputs.lora_name).toBe('pika_h3_flex_ref2va_v1_bf16.safetensors');
+  });
+
+  it('honours the configured strength of the required LoRA', async () => {
+    const flexPreset = { ...turboPreset, id: 'pika_h3_flex_ref2va_v1_bf16.safetensors' };
+    const wf = await build({ loraPresets: [flexPreset], loraWeights: { [flexPreset.id]: 0.8 } });
+    const [, lora] = one(wf, 'LoraLoaderModelOnly');
+    expect(lora.inputs).toMatchObject({ lora_name: flexPreset.id, strength_model: 0.8 });
   });
 
   it('adds one sage patch per stage, both chained off the Flex LoRA, only when asked', async () => {

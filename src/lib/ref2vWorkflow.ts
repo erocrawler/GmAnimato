@@ -282,10 +282,27 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   // off the LoRA output when one was applied (mirrors minimaxWorkflow).
   const loraNodeId = '105:1000:lora_speedup';
 
-  // Templates that wire their own LoRA (the Flex recipes: LoRA + ManualSigmas, no
-  // BasicScheduler) are self-contained — never inject the admin speed-up LoRA on
-  // top of them (Flex must not be stacked with turbo).
+  // Templates that wire their own LoRA node (the Flex recipes: LoRA + ManualSigmas +
+  // lcm, no BasicScheduler) take the workflow's required LoRA THROUGH that node:
+  // the admin-configured required LoRA (isConfigurable=false) fills its lora_name
+  // and strength, the template value is only the default. It is the same single
+  // admin-managed LoRA either way — no second LoRA node is injected, so turbo can
+  // never be stacked on a Flex recipe.
   const templateLoraNode = findNode(workflow, 'LoraLoaderModelOnly');
+  if (templateLoraNode && appliedLora) {
+    const templateLoraInputs = getNodeInputs(workflow, templateLoraNode);
+    if (templateLoraInputs) {
+      const templateDefault = String(templateLoraInputs.lora_name ?? '');
+      if (/flex/i.test(templateDefault) && !/flex/i.test(appliedLora.id)) {
+        console.warn(`[Ref2V] Flex template but the workflow's required LoRA is ${appliedLora.id} — check the workflow's required LoRA`);
+      }
+      templateLoraInputs.lora_name = appliedLora.id;
+      templateLoraInputs.strength_model =
+        typeof params.loraWeights?.[appliedLora.id] === 'number'
+          ? params.loraWeights![appliedLora.id]
+          : (appliedLora.default ?? 1);
+    }
+  }
 
   if (appliedLora && unetLoaderNode && schedulerNode && !templateLoraNode) {
     const strength =
@@ -338,7 +355,7 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   } else {
     console.log(
       templateLoraNode
-        ? '[Ref2V] Template carries its own LoRA (Flex) — no speed-up LoRA injected'
+        ? `[Ref2V] Template LoRA node (Flex) uses ${appliedLora ? `required LoRA ${appliedLora.id}` : 'the template default'}`
         : '[Ref2V] No speed-up LoRA configured — using template steps (20)'
     );
   }
