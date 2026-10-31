@@ -283,25 +283,7 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   // off the LoRA output when one was applied (mirrors minimaxWorkflow).
   const loraNodeId = '105:1000:lora_speedup';
 
-  // Templates that wire their own LoRA node (the Flex recipes: LoRA + ManualSigmas +
-  // lcm, no BasicScheduler) take the workflow's required LoRA THROUGH that node:
-  // the admin-configured required LoRA (isConfigurable=false) fills its lora_name
-  // and strength, the template value is only the default. It is the same single
-  // admin-managed LoRA either way — no second LoRA node is injected, so turbo can
-  // never be stacked on a Flex recipe.
-  const templateLoraNode = findNode(workflow, 'LoraLoaderModelOnly');
-  if (templateLoraNode && appliedLora) {
-    const templateLoraInputs = getNodeInputs(workflow, templateLoraNode);
-    if (templateLoraInputs) {
-      templateLoraInputs.lora_name = appliedLora.id;
-      templateLoraInputs.strength_model =
-        typeof params.loraWeights?.[appliedLora.id] === 'number'
-          ? params.loraWeights![appliedLora.id]
-          : (appliedLora.default ?? 1);
-    }
-  }
-
-  if (appliedLora && unetLoaderNode && schedulerNode && !templateLoraNode) {
+  if (appliedLora && unetLoaderNode) {
     const strength =
       typeof params.loraWeights?.[appliedLora.id] === 'number'
         ? params.loraWeights![appliedLora.id]
@@ -320,8 +302,8 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
 
     // Rewire the model chain through the LoRA: slot it between the UNETLoader
     // and the sigma-shift node (or scheduler/guider on templates without it).
-    const schedulerInputs = getNodeInputs(workflow, schedulerNode);
-    const guiderInputs = getNodeInputs(workflow, guiderNode);
+    const schedulerInputs = schedulerNode ? getNodeInputs(workflow, schedulerNode) : null;
+    const guiderInputs = guiderNode ? getNodeInputs(workflow, guiderNode) : null;
     const shiftInputs = sigmaShiftNode ? getNodeInputs(workflow, sigmaShiftNode) : null;
     if (shiftInputs && Array.isArray(shiftInputs.model) && shiftInputs.model[0] === unetLoaderNode) {
       shiftInputs.model = [loraNodeId, 0];
@@ -334,7 +316,8 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
       }
     }
 
-    // Reduce steps: distilled NFE — user's explicit choice when provided, else
+    // Reduce steps (templates driven by a BasicScheduler; the Flex templates carry their own
+    // ManualSigmas schedule and have no scheduler): distilled NFE — user's explicit choice when provided, else
     // the workflow-defined default (engine default if its capability allowlist
     // allows it, otherwise the cheapest allowed step). Step constraints live on
     // the WORKFLOW, not on the LoRA.
@@ -350,11 +333,7 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
     }
     console.log(`[Ref2V] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
   } else {
-    console.log(
-      templateLoraNode
-        ? `[Ref2V] Template LoRA node (Flex) uses ${appliedLora ? `required LoRA ${appliedLora.id}` : 'the template default'}`
-        : '[Ref2V] No speed-up LoRA configured — using template steps (20)'
-    );
+    console.log('[Ref2V] No required speed-up LoRA configured for this workflow');
   }
 
   // User-selected style LoRAs: chained after the required (speed-up / template) LoRA,

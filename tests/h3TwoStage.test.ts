@@ -146,7 +146,7 @@ describe('ref2v 768p — Flex recipe (ManualSigmas 3+3, lcm, no turbo)', () => {
     expect(conds).toEqual([...encodeIds].sort());
   });
 
-  it('takes its LoRA from the workflow\'s required LoRA (single LoRA node, never stacked)', async () => {
+  it('injects the workflow\'s required LoRA like the turbo recipe does (single LoRA node, no recipe special case)', async () => {
     const wf = await build();
     const loras = nodesOf(wf, 'LoraLoaderModelOnly');
     expect(loras).toHaveLength(1);
@@ -156,11 +156,9 @@ describe('ref2v 768p — Flex recipe (ManualSigmas 3+3, lcm, no turbo)', () => {
     expect(nodesOf(wf, 'MiniMaxH3SigmaShift')).toHaveLength(0);
   });
 
-  it('uses the template default LoRA when the workflow has no required LoRA configured', async () => {
+  it('injects no LoRA when the workflow has no required LoRA configured (a mis-configured row is not defended in code)', async () => {
     const wf = await build({ loraPresets: [], loraWeights: undefined });
-    const loras = nodesOf(wf, 'LoraLoaderModelOnly');
-    expect(loras).toHaveLength(1);
-    expect(loras[0][1].inputs.lora_name).toBe('pika_h3_flex_ref2va_v1_bf16.safetensors');
+    expect(nodesOf(wf, 'LoraLoaderModelOnly')).toHaveLength(0);
   });
 
   it('honours the configured strength of the required LoRA', async () => {
