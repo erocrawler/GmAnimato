@@ -475,6 +475,52 @@ describe('style LoRAs reach the H3 graph (chained like the Wan builders do)', ()
   });
 });
 
+describe('sampler steps are independent of the LoRA (hybrid rows with a built-in turbo)', () => {
+  const build = (extra: Record<string, unknown> = {}) =>
+    buildMiniMaxWorkflow({
+      first_image_name: 'first.jpg',
+      first_image_url: 'http://example.invalid/first.jpg',
+      input_prompt: 'x',
+      seed: 1,
+      videoDuration: 6,
+      videoResolution: '480p',
+      // no required LoRA at all (Dasiwa-style checkpoint)
+      loraPresets: [],
+      loraWeights: undefined,
+      workflow: { templatePath: 'data/minimax_h3.json.tmpl', engine: 'minimax', capabilities: { steps: [4, 8], freeSteps: 8 } } as any,
+      ...extra,
+    }) as Promise<any>;
+  const steps = (wf: any) => one(wf, 'BasicScheduler')[1].inputs.steps;
+
+  it('uses the chosen 4 or 8 steps even when no LoRA is configured', async () => {
+    expect(steps(await build({ iterationSteps: 4 }))).toBe(4);
+    expect(steps(await build({ iterationSteps: 8 }))).toBe(8);
+  });
+
+  it('falls back to the workflow default step (8) when no step is passed', async () => {
+    expect(steps(await build())).toBe(8);
+  });
+
+  it('still rewrites steps for LoRA-driven rows, and r2v follows the same rule', async () => {
+    const wf: any = await buildRef2VWorkflow({
+      ...r2vBase,
+      iterationSteps: 4,
+      workflow: { templatePath: 'data/minimax_ref2v_template.json.tmpl', engine: 'minimax' } as any,
+      loraPresets: [],
+      loraWeights: undefined,
+    });
+    expect(steps(wf)).toBe(4);
+    const withLora: any = await buildRef2VWorkflow({
+      ...r2vBase,
+      iterationSteps: 8,
+      workflow: { templatePath: 'data/minimax_ref2v_template.json.tmpl', engine: 'minimax' } as any,
+      loraPresets: [turboPreset as any],
+      loraWeights: { [turboPreset.id]: 1 },
+    });
+    expect(steps(withLora)).toBe(8);
+  });
+});
+
 describe('capabilities, quota rules and workers', () => {
   it('lets a workflow opt in to 768p and keeps the engine defaults unchanged', () => {
     expect(normalizeWorkflowCapabilities({ resolutions: ['480p', '720p', '768p', '1080p'] }).resolutions).toEqual([

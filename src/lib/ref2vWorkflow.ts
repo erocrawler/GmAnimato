@@ -316,24 +316,29 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
       }
     }
 
-    // Reduce steps (templates driven by a BasicScheduler; the Flex templates carry their own
-    // ManualSigmas schedule and have no scheduler): distilled NFE — user's explicit choice when provided, else
-    // the workflow-defined default (engine default if its capability allowlist
-    // allows it, otherwise the cheapest allowed step). Step constraints live on
-    // the WORKFLOW, not on the LoRA.
-    if (schedulerInputs) {
+    console.log(`[Ref2V] Applied speed-up LoRA ${appliedLora.id} (strength ${strength})`);
+  } else {
+    console.log('[Ref2V] No required speed-up LoRA configured for this workflow');
+  }
+
+  // Sampler steps: independent of the LoRA. Templates driven by a BasicScheduler get the user's choice
+  // (4 fast / 8 quality), else the workflow-defined default (engine default if its capability allowlist
+  // has it, otherwise the cheapest allowed step). Hybrid rows whose turbo is built into the checkpoint have
+  // no required LoRA — their step option used to be silently ignored (always the template's steps).
+  // Flex templates have no scheduler (ManualSigmas carries the schedule).
+  if (schedulerNode) {
+    const schedulerStepInputs = getNodeInputs(workflow, schedulerNode);
+    if (schedulerStepInputs) {
       const wfEngine =
         params.workflow?.engine === 'wan' || params.workflow?.engine === 'minimax'
           ? params.workflow.engine
           : engineFromTemplatePath(params.workflow?.templatePath);
-      schedulerInputs.steps =
+      schedulerStepInputs.steps =
         params.iterationSteps ??
         workflowDefaultStep(wfEngine, params.workflow?.capabilities) ??
         8;
+      console.log(`[Ref2V] Sampler steps: ${schedulerStepInputs.steps}`);
     }
-    console.log(`[Ref2V] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
-  } else {
-    console.log('[Ref2V] No required speed-up LoRA configured for this workflow');
   }
 
   // User-selected style LoRAs: chained after the required (speed-up / template) LoRA,
