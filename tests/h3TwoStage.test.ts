@@ -366,6 +366,117 @@ describe('both official flavours x every resolution build a valid graph (turbo a
   }
 });
 
+describe('style LoRAs reach the H3 graph (chained like the Wan builders do)', () => {
+  const styleA = { id: 'styleA.safetensors', label: 'A', default: 1, min: 0, max: 1.5, step: 0.05, isConfigurable: true };
+  const styleB = { id: 'styleB.safetensors', label: 'B', default: 1, min: 0, max: 1.5, step: 0.05, isConfigurable: true };
+  const styleOff = { id: 'styleOff.safetensors', label: 'Off', default: 1, min: 0, max: 1.5, step: 0.05, isConfigurable: true };
+  const flexR2v = { ...turboPreset, id: 'pika_h3_flex_ref2va_v1_bf16.safetensors' };
+
+  // model chain feeding a guider, head first: [node classes/ids ...] down to the UNETLoader
+  const walk = (wf: any, startRef: [string, number]) => {
+    const g: Graph = wf.input.workflow;
+    const out: string[] = [];
+    let cur = startRef[0];
+    while (g[cur]) {
+      out.push(cur);
+      const next = g[cur].inputs?.model;
+      if (!Array.isArray(next)) break;
+      cur = next[0];
+    }
+    return out;
+  };
+
+  const buildR2v = (tmpl: string, req: any, extra: Record<string, unknown> = {}) =>
+    buildRef2VWorkflow({
+      ...r2vBase,
+      videoResolution: '480p',
+      iterationSteps: 8,
+      workflow: { templatePath: tmpl, engine: 'minimax' } as any,
+      loraPresets: [req, styleA, styleB, styleOff] as any[],
+      loraWeights: { [req.id]: 1, [styleA.id]: 0.7, [styleB.id]: 0.4 },
+      ...extra,
+    }) as Promise<any>;
+
+  it('turbo recipe: required LoRA -> style A -> style B -> sage -> shift -> guider, strengths honoured, disabled one absent', async () => {
+    const wf = await buildR2v('data/minimax_ref2v_template.json.tmpl', turboPreset, { useSageAttention: true });
+    const g: Graph = wf.input.workflow;
+    const names = nodesOf(wf, 'LoraLoaderModelOnly').map(([, n]) => n.inputs.lora_name).sort();
+    expect(names).toEqual([styleA.id, styleB.id, turboPreset.id].sort());
+    const [, guider] = one(wf, 'BasicGuider');
+    const chain = walk(wf, guider.inputs.model).map((id) => g[id].class_type + (g[id].inputs?.lora_name ? ':' + g[id].inputs.lora_name : ''));
+    expect(chain).toEqual([
+      'MiniMaxH3SigmaShift',
+      'MiniMaxH3MemoryEfficientSageAttentionPatch',
+      'LoraLoaderModelOnly:styleB.safetensors',
+      'LoraLoaderModelOnly:styleA.safetensors',
+      'LoraLoaderModelOnly:' + turboPreset.id,
+      'UNETLoader',
+    ]);
+    const strength = (name: string) => nodesOf(wf, 'LoraLoaderModelOnly').find(([, n]) => n.inputs.lora_name === name)![1].inputs.strength_model;
+    expect(strength(styleA.id)).toBe(0.7);
+    expect(strength(styleB.id)).toBe(0.4);
+    expect(names).not.toContain(styleOff.id);
+  });
+
+  it('Flex recipe: the style LoRAs chain after the Flex LoRA that the template wires (no sigma shift there)', async () => {
+    const wf = await buildR2v('data/minimax_ref2v_flex.json.tmpl', flexR2v, { useSageAttention: true });
+    const g: Graph = wf.input.workflow;
+    const [, guider] = one(wf, 'BasicGuider');
+    const chain = walk(wf, guider.inputs.model).map((id) => g[id].class_type + (g[id].inputs?.lora_name ? ':' + g[id].inputs.lora_name : ''));
+    expect(chain).toEqual([
+      'MiniMaxH3MemoryEfficientSageAttentionPatch',
+      'LoraLoaderModelOnly:styleB.safetensors',
+      'LoraLoaderModelOnly:styleA.safetensors',
+      'LoraLoaderModelOnly:' + flexR2v.id,
+      'UNETLoader',
+    ]);
+  });
+
+  it('768p: both stages sit on the same style LoRAs (they are upstream of the per-stage shift/sage clones)', async () => {
+    const wf = await buildR2v('data/minimax_ref2v_template.json.tmpl', turboPreset, { videoResolution: '768p', useSageAttention: true });
+    const g: Graph = wf.input.workflow;
+    expect(nodesOf(wf, 'LoraLoaderModelOnly')).toHaveLength(3);
+    const heads = nodesOf(wf, 'BasicGuider').map(([, gd]) => {
+      const chain = walk(wf, gd.inputs.model);
+      // drop the cloned shift/sage nodes, keep what is shared
+      return chain.filter((id) => g[id].class_type === 'LoraLoaderModelOnly').join(',');
+    });
+    expect(new Set(heads).size).toBe(1);
+  });
+
+  it('i2v/fl2v builders chain them too, and nothing changes when no style LoRA is enabled', async () => {
+    const build = (weights: Record<string, number>) =>
+      buildMiniMaxWorkflow({
+        first_image_name: 'first.jpg',
+        first_image_url: 'http://example.invalid/first.jpg',
+        input_prompt: 'x',
+        seed: 1,
+        videoDuration: 6,
+        videoResolution: '480p',
+        iterationSteps: 8,
+        workflow: { templatePath: 'data/minimax_h3.json.tmpl', engine: 'minimax' } as any,
+        loraPresets: [turboPreset, styleA] as any[],
+        loraWeights: weights,
+      }) as Promise<any>;
+    const withStyle = await build({ [turboPreset.id]: 1, [styleA.id]: 0.5 });
+    expect(nodesOf(withStyle, 'LoraLoaderModelOnly').map(([, n]) => n.inputs.lora_name).sort()).toEqual([styleA.id, turboPreset.id].sort());
+    const without = await build({ [turboPreset.id]: 1 });
+    expect(nodesOf(without, 'LoraLoaderModelOnly').map(([, n]) => n.inputs.lora_name)).toEqual([turboPreset.id]);
+  });
+
+  it('never leaves a dangling model link', async () => {
+    for (const tmpl of ['data/minimax_ref2v_template.json.tmpl', 'data/minimax_ref2v_flex.json.tmpl']) {
+      const wf = await buildR2v(tmpl, tmpl.includes('flex') ? flexR2v : turboPreset, { videoResolution: '768p', useSageAttention: true });
+      const g: Graph = wf.input.workflow;
+      for (const [id, n] of Object.entries(g)) {
+        for (const [key, v] of Object.entries(n.inputs ?? {})) {
+          if (Array.isArray(v) && typeof v[0] === 'string' && typeof v[1] === 'number') expect(g[v[0]], `${id}.${key}`).toBeDefined();
+        }
+      }
+    }
+  });
+});
+
 describe('capabilities, quota rules and workers', () => {
   it('lets a workflow opt in to 768p and keeps the engine defaults unchanged', () => {
     expect(normalizeWorkflowCapabilities({ resolutions: ['480p', '720p', '768p', '1080p'] }).resolutions).toEqual([

@@ -5,6 +5,7 @@ import type { Workflow } from './IDatabase';
 import type { LoraPreset } from './loraPresets';
 import { findNode, getNodeInputs, calculateVideoDimensions, calculateH3TwoStageDimensions, add720pUpscaleNodes } from './workflowUtils';
 import { applyH3TwoStage } from './h3TwoStage';
+import { applyH3StyleLoras } from './h3StyleLoras';
 import { probeVideoDimensions, probeModelFrameCount } from './videoValidation';
 import { MIN_REF_VIDEO_FRAMES } from './mediaLimits';
 import { workflowDefaultStep, engineFromTemplatePath } from './workflowCapabilities';
@@ -355,6 +356,10 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
         : '[Ref2V] No speed-up LoRA configured — using template steps (20)'
     );
   }
+
+  // User-selected style LoRAs: chained after the required (speed-up / template) LoRA,
+  // before the sigma-shift and the sage patch.
+  applyH3StyleLoras(workflow, params.loraPresets, params.loraWeights);
 
   // MiniMax H3 sage attention: inject MiniMaxH3MemoryEfficientSageAttentionPatch
   // (from ComfyUI-KJNodes ltxv_nodes.py) into the model chain — ref2v uses the
