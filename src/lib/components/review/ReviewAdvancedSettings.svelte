@@ -122,6 +122,10 @@
 
   // 768p (H3 two-stage) needs at least H3_TWO_STAGE_MIN_STEPS steps: hide it for a workflow that
   // has no such step, and block the lower steps while 768p is selected (the server rejects them).
+  // Strength is adjustable only for optional LoRAs whose preset has a real range.
+  const isLoraStrengthAdjustable = (lora: { isConfigurable?: boolean; min?: number; max?: number }) =>
+    lora.isConfigurable !== false && (lora.max ?? 1.5) > (lora.min ?? 0);
+
   const isStepBlocked = (value: number, resolution: string) =>
     resolution === "768p" && value < H3_TWO_STAGE_MIN_STEPS;
 
@@ -548,18 +552,21 @@
                 >
               {/if}
             </div>
-            <input
-              type="range"
-              min={lora.min ?? 0}
-              max={lora.max ?? 1.5}
-              step={lora.step ?? 0.05}
-              value={loraWeights[lora.id] ?? lora.default}
-              on:input={(event) =>
-                updateLoraWeight(lora.id, +event.currentTarget.value)}
-              disabled={!isEditable ||
-                (lora.isConfigurable !== false && !loraEnabled[lora.id])}
-              class="range range-sm"
-            />
+            <!-- No slider when the strength cannot be changed: a required LoRA is forced to its preset
+                 default by the server, and a preset with max <= min has nothing to adjust. -->
+            {#if isLoraStrengthAdjustable(lora)}
+              <input
+                type="range"
+                min={lora.min ?? 0}
+                max={lora.max ?? 1.5}
+                step={lora.step ?? 0.05}
+                value={loraWeights[lora.id] ?? lora.default}
+                on:input={(event) =>
+                  updateLoraWeight(lora.id, +event.currentTarget.value)}
+                disabled={!isEditable || !loraEnabled[lora.id]}
+                class="range range-sm"
+              />
+            {/if}
           </div>
         {/each}
       </div>
