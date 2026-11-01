@@ -32,6 +32,8 @@ export interface VideoProcessResult {
   ext: string;
   wasConverted: boolean;
   hasAudio?: boolean;
+  /** Effective clipped duration (seconds) of the video the model receives, or null when unknown. */
+  durationSec?: number | null;
   error?: string;
 }
 
@@ -259,6 +261,10 @@ export async function validateAndConvertVideo(
       };
     }
   }
+  // Effective clipped duration of the footage the model receives. Callers use
+  // it as the server-side fallback for ref_video_duration when the client
+  // didn't send one (e.g. agent uploads).
+  const durationSec = duration !== null ? Math.max(0, (endSec ?? duration) - startSec) : null;
 
   // Frame-count guard (pre-encode; needs only ffprobe): the model conditions on
   // the ref video's decoded frame batch, so a clip carrying a handful of frames
@@ -286,10 +292,10 @@ export async function validateAndConvertVideo(
     const forceConvert = opts.includeAudio === false || trims || resized.fpsCapped;
     // Only treat as "converted" if the output is actually smaller/valid.
     if (resized.buffer.length > 0 && (forceConvert || resized.buffer.length < buffer.length)) {
-      return { buffer: resized.buffer, ext: resized.ext, wasConverted: true, hasAudio: resized.hasAudio ?? undefined };
+      return { buffer: resized.buffer, ext: resized.ext, wasConverted: true, hasAudio: resized.hasAudio ?? undefined, durationSec };
     }
     // Even when we keep the original buffer (not smaller), expose hasAudio if we could probe it.
-    return { buffer, ext, wasConverted: false, hasAudio: resized.hasAudio ?? undefined };
+    return { buffer, ext, wasConverted: false, hasAudio: resized.hasAudio ?? undefined, durationSec };
   } catch (e) {
     // A trim window was explicitly requested (browser-undecodable container
     // like MKV, or a client clip that failed and fell back to server trim) —
@@ -398,7 +404,7 @@ export async function probeVideoDimensions(url: string): Promise<{ width: number
 }
 
 /** Probe a video buffer's duration by writing it to a temp file and ffprobing. */
-async function probeVideoDurationFromBuffer(buffer: Buffer, ext: string): Promise<number | null> {
+export async function probeVideoDurationFromBuffer(buffer: Buffer, ext: string): Promise<number | null> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ref2v-probe-'));
   const inPath = path.join(tmpDir, `probe.${ext || 'mp4'}`);
   try {

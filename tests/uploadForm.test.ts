@@ -10,9 +10,10 @@ vi.mock('$lib/db', () => ({ getAdminSettings: async () => ({ roles: [] }) }));
 vi.mock('$lib/s3', () => ({ uploadBufferToS3: async () => '/media/b/uploaded.png' }));
 vi.mock('$lib/imageValidation', () => ({ validateAndConvertImage: async (b: Buffer) => ({ buffer: b, ext: 'png' }) }));
 vi.mock('$lib/videoValidation', () => ({
-  validateAndConvertVideo: async (b: Buffer) => ({ buffer: b, ext: 'webm', hasAudio: false }),
+  validateAndConvertVideo: async (b: Buffer) => ({ buffer: b, ext: 'webm', hasAudio: false, durationSec: 5.5 }),
   extractVideoPoster: async () => null,
   probeVideoDuration: h.probe,
+  probeVideoDurationFromBuffer: async () => 7.25,
   hasAudioFromBuffer: async () => false,
   validateAndConvertReferenceAudio: async (b: Buffer) => ({ buffer: b, ext: 'wav' }),
 }));
@@ -72,5 +73,24 @@ describe('createDraftFromUploadForm', () => {
     const r = await createDraftFromUploadForm(form, user);
     expect(h.probe).toHaveBeenCalledWith('https://cdn.example/clip.mp4');
     expect('error' in r && r.error).toContain('max 6s');
+  });
+
+  it('server fills ref_video_duration when the client sends none (file upload)', async () => {
+    const form = new FormData();
+    form.set('mode', 'ref2v');
+    form.set('ref_video', new Blob([new Uint8Array([1, 2, 3])], { type: 'video/mp4' }), 'clip.mp4');
+    const r = await createDraftFromUploadForm(form, user, { apiMode: true });
+    expect('success' in r).toBe(true);
+    expect(h.create.mock.calls[0][0].additionalOptions.ref_video_duration).toBe(5.5);
+  });
+
+  it('client duration wins over the server probe', async () => {
+    const form = new FormData();
+    form.set('mode', 'ref2v');
+    form.set('ref_video', new Blob([new Uint8Array([1, 2, 3])], { type: 'video/mp4' }), 'clip.mp4');
+    form.set('ref_video_duration', '4.2');
+    const r = await createDraftFromUploadForm(form, user, { apiMode: true });
+    expect('success' in r).toBe(true);
+    expect(h.create.mock.calls[0][0].additionalOptions.ref_video_duration).toBe(4.2);
   });
 });

@@ -6,6 +6,7 @@ import {
   validateAndConvertVideo,
   extractVideoPoster,
   probeVideoDuration,
+  probeVideoDurationFromBuffer,
   hasAudioFromBuffer,
   validateAndConvertReferenceAudio
 } from '$lib/videoValidation';
@@ -122,6 +123,12 @@ export async function createDraftFromUploadForm(
     let refVideoUrl = '';
     let refVideoName = '';
     let refVideoHasAudio: boolean | undefined;
+    // Server-probed fallback for ref_video_duration when the client didn't
+    // send one (e.g. agent uploads). Client value wins when present.
+    let serverVideoDurationSec: number | null = null;
+    const noteServerDuration = (v: number | null | undefined) => {
+      if (typeof v === 'number' && Number.isFinite(v) && v > 0) serverVideoDurationSec = v;
+    };
     if (refVideoFile && refVideoFile.size > 0) {
       const rawVideoBuffer = Buffer.from(await refVideoFile.arrayBuffer());
       // Client-clipped files arrive as a final mp4/webm (no trim needed).
@@ -137,6 +144,7 @@ export async function createDraftFromUploadForm(
       if (videoResult.error) {
         return { error: videoResult.error };
       }
+      noteServerDuration(videoResult.durationSec);
       refVideoUrl = await uploadBufferToS3(videoResult.buffer, videoResult.ext || 'webm');
       refVideoName = refVideoFile.name || `ref_video.${videoResult.ext || 'webm'}`;
       refVideoHasAudio = videoResult.hasAudio;
@@ -185,6 +193,13 @@ export async function createDraftFromUploadForm(
             const buf = Buffer.from(ab);
             const hasAudio = await hasAudioFromBuffer(buf);
             if (hasAudio !== null) refVideoHasAudio = hasAudio;
+            // Same buffer, one extra ffprobe: fills ref_video_duration for
+            // /media/ reuse uploads that carry no client duration.
+            try {
+              noteServerDuration(await probeVideoDurationFromBuffer(buf, 'mp4'));
+            } catch (e) {
+              console.warn('[Ref2V] Failed to probe duration for /media/ ref video:', e);
+            }
           }
         } catch (e) {
           console.warn('[Ref2V] Failed to probe hasAudio for /media/ ref video:', e);
@@ -197,6 +212,7 @@ export async function createDraftFromUploadForm(
           const ct = resp.headers.get('content-type') || 'video/webm';
           const videoResult2 = await validateAndConvertVideo(buf, ct, maxRefVideoSeconds);
           if (videoResult2.error) return { error: videoResult2.error };
+          noteServerDuration(videoResult2.durationSec);
           refVideoUrl = await uploadBufferToS3(videoResult2.buffer, videoResult2.ext || 'webm');
           refVideoName = `ref_video.${videoResult2.ext || 'webm'}`;
           refVideoHasAudio = videoResult2.hasAudio;
@@ -270,11 +286,16 @@ export async function createDraftFromUploadForm(
 
     // Client-carried ref video duration (seconds) so the review page can
     // offer "follow video duration" and the worker can match the output.
+    // When the client sends none (e.g. agent uploads), fall back to the
+    // server-probed duration of the footage the model actually receives.
     const refVideoDurationInput = Number(form.get('ref_video_duration')?.toString());
-    const refVideoDuration =
+    const clientVideoDuration =
       Number.isFinite(refVideoDurationInput) && refVideoDurationInput > 0
         ? refVideoDurationInput
         : undefined;
+    const refVideoDuration =
+      clientVideoDuration ??
+      (serverVideoDurationSec !== null ? Math.round(serverVideoDurationSec * 100) / 100 : undefined);
 
     const result = await createVideoEntryForReview({
       userId: user.id,
