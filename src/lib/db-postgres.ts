@@ -5,6 +5,74 @@ import { normalizeQuotaCostRules } from './quotaCost';
 import { normalizeWorkflowCapabilities, engineFromTemplatePath } from './workflowCapabilities';
 import { PrismaPg } from '@prisma/adapter-pg'
 
+// ==================== Video field table (single source of truth, B) ====================
+// VideoEntry (snake_case, app side) <-> Prisma Video (camelCase, DB side).
+// Add a field here once; createVideoEntry / updateVideo / mapToVideoEntry all
+// walk this table, so `data.field = patch.field` can never be forgotten again.
+// The Record type below fails compilation when VideoEntry gains a field that is
+// not listed here (except likesCount, which is derived, not a column).
+type VideoAppField = Exclude<keyof VideoEntry, 'likesCount'>;
+type VideoFieldDef = {
+  prisma: keyof Prisma.VideoUncheckedUpdateInput;
+  toDb?: (v: any) => any;
+  fromDb?: (v: any) => any;
+  read?: 'raw' | 'orUndefined' | 'nullish';
+  createDefault?: unknown;
+  skipCreate?: boolean;
+  skipUpdate?: boolean;
+};
+function parseJsonStringArray(value: unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item): item is string => typeof item === 'string');
+      }
+    } catch (error) {
+      console.error('[DB] Failed to parse JSON array:', error);
+    }
+  }
+  return [];
+}
+const VIDEO_FIELD_TABLE: Record<VideoAppField, VideoFieldDef> = {
+  id: { prisma: 'id', skipUpdate: true },
+  user_id: { prisma: 'userId' },
+  workflow_id: { prisma: 'workflowId', read: 'orUndefined' },
+  original_image_url: { prisma: 'originalImageUrl' },
+  last_image_url: { prisma: 'lastImageUrl', read: 'orUndefined' },
+  prompt: { prisma: 'prompt', read: 'orUndefined' },
+  tags: { prisma: 'tags', toDb: (v) => (v ? JSON.stringify(v) : null), fromDb: (v) => parseJsonStringArray(v) },
+  suggested_prompts: { prisma: 'suggestedPrompts', toDb: (v) => (v ? JSON.stringify(v) : null), fromDb: (v) => parseJsonStringArray(v) },
+  is_photo_realistic: { prisma: 'isPhotoRealistic', read: 'nullish' },
+  is_nsfw: { prisma: 'isNsfw', read: 'nullish' },
+  status: { prisma: 'status' },
+  job_id: { prisma: 'jobId', read: 'orUndefined' },
+  is_local_job: { prisma: 'isLocalJob', read: 'nullish', createDefault: false },
+  final_video_url: { prisma: 'finalVideoUrl', read: 'orUndefined' },
+  is_published: { prisma: 'isPublished', read: 'orUndefined', createDefault: false },
+  processing_time_ms: { prisma: 'processingTimeMs', read: 'nullish', skipCreate: true },
+  processing_started_at: { prisma: 'processingStartedAt', toDb: (v) => (v ? new Date(v) : null), fromDb: (v) => (v ? v.toISOString() : undefined) },
+  dequeued_at: { prisma: 'dequeuedAt', toDb: (v) => (v ? new Date(v) : null), fromDb: (v) => (v ? v.toISOString() : undefined) },
+  progress_percentage: { prisma: 'progressPercentage', read: 'nullish', skipCreate: true },
+  progress_details: { prisma: 'progressDetails', read: 'orUndefined', skipCreate: true },
+  iteration_steps: { prisma: 'iterationSteps', read: 'nullish' },
+  video_duration: { prisma: 'videoDuration', read: 'nullish' },
+  video_resolution: { prisma: 'videoResolution', read: 'orUndefined' },
+  quota_cost: { prisma: 'quotaCost', read: 'nullish' },
+  validation_metadata: { prisma: 'validationMetadata', read: 'orUndefined' },
+  additional_options: { prisma: 'additionalOptions', read: 'orUndefined' },
+  lora_weights: { prisma: 'loraWeights', read: 'orUndefined' },
+  seed: { prisma: 'seed', read: 'nullish' },
+  created_at: { prisma: 'createdAt', toDb: (v) => (v ? new Date(v) : undefined), fromDb: (v) => (v ? v.toISOString() : undefined), skipCreate: true, skipUpdate: true },
+};
+const videoToDb = (def: VideoFieldDef, v: any) => (def.toDb ? def.toDb(v) : v);
+const videoFromDb = (def: VideoFieldDef, v: any) =>
+  def.fromDb ? def.fromDb(v) : def.read === 'orUndefined' ? v || undefined : def.read === 'nullish' ? v ?? undefined : v;
+
 export class PostgresDatabase implements IDatabase {
   public prisma: PrismaClient;
 
@@ -18,33 +86,12 @@ export class PostgresDatabase implements IDatabase {
   // ==================== Video Methods ====================
 
   async createVideoEntry(entry: Omit<VideoEntry, 'id' | 'created_at'> & { id?: string }): Promise<VideoEntry> {
-    const data: any = {
-      id: entry.id,
-      userId: entry.user_id,
-      workflowId: entry.workflow_id,
-      originalImageUrl: entry.original_image_url,
-      lastImageUrl: entry.last_image_url,
-      prompt: entry.prompt,
-      tags: entry.tags ? JSON.stringify(entry.tags) : null,
-      suggestedPrompts: entry.suggested_prompts ? JSON.stringify(entry.suggested_prompts) : null,
-      isPhotoRealistic: entry.is_photo_realistic,
-      isNsfw: entry.is_nsfw,
-      status: entry.status,
-      jobId: entry.job_id,
-      isLocalJob: entry.is_local_job ?? false,
-      finalVideoUrl: entry.final_video_url,
-      isPublished: entry.is_published ?? false,
-      iterationSteps: entry.iteration_steps,
-      videoDuration: entry.video_duration,
-      videoResolution: entry.video_resolution,
-      validationMetadata: entry.validation_metadata,
-      additionalOptions: entry.additional_options,
-      loraWeights: entry.lora_weights,
-      seed: entry.seed,
-      quotaCost: entry.quota_cost, // undefined -> column default (1)
-      processingStartedAt: entry.processing_started_at ? new Date(entry.processing_started_at) : null,
-      dequeuedAt: entry.dequeued_at ? new Date(entry.dequeued_at) : null,
-    };
+    const data: any = {};
+    for (const [app, def] of Object.entries(VIDEO_FIELD_TABLE) as [VideoAppField, VideoFieldDef][]) {
+      if (def.skipCreate) continue;
+      const v = (entry as any)[app];
+      data[def.prisma] = v == null && 'createDefault' in def ? def.createDefault : videoToDb(def, v);
+    }
 
     const video = await this.prisma.video.create({
       data,
@@ -366,34 +413,12 @@ export class PostgresDatabase implements IDatabase {
   async updateVideo(id: string, patch: Partial<VideoEntry>): Promise<VideoEntry | null> {
     try {
       const data: any = {};
-      
-      if (patch.user_id !== undefined) data.userId = patch.user_id;
-      if (patch.workflow_id !== undefined) data.workflowId = patch.workflow_id;
-      if (patch.original_image_url !== undefined) data.originalImageUrl = patch.original_image_url;
-      if (patch.last_image_url !== undefined) data.lastImageUrl = patch.last_image_url;
-      if (patch.prompt !== undefined) data.prompt = patch.prompt;
-      if (patch.tags !== undefined) data.tags = patch.tags ? JSON.stringify(patch.tags) : null;
-      if (patch.suggested_prompts !== undefined) data.suggestedPrompts = patch.suggested_prompts ? JSON.stringify(patch.suggested_prompts) : null;
-      if (patch.is_photo_realistic !== undefined) data.isPhotoRealistic = patch.is_photo_realistic;
-      if (patch.is_nsfw !== undefined) data.isNsfw = patch.is_nsfw;
-      if (patch.status !== undefined) data.status = patch.status;
-      if (patch.job_id !== undefined) data.jobId = patch.job_id;
-      if (patch.is_local_job !== undefined) data.isLocalJob = patch.is_local_job;
-      if (patch.final_video_url !== undefined) data.finalVideoUrl = patch.final_video_url;
-      if (patch.is_published !== undefined) data.isPublished = patch.is_published;
-      if (patch.processing_time_ms !== undefined) data.processingTimeMs = patch.processing_time_ms;
-      if (patch.processing_started_at !== undefined) data.processingStartedAt = patch.processing_started_at ? new Date(patch.processing_started_at) : null;
-      if (patch.dequeued_at !== undefined) data.dequeuedAt = patch.dequeued_at ? new Date(patch.dequeued_at) : null;
-      if (patch.progress_percentage !== undefined) data.progressPercentage = patch.progress_percentage;
-      if (patch.progress_details !== undefined) data.progressDetails = patch.progress_details;
-      if (patch.iteration_steps !== undefined) data.iterationSteps = patch.iteration_steps;
-      if (patch.video_duration !== undefined) data.videoDuration = patch.video_duration;
-      if (patch.video_resolution !== undefined) data.videoResolution = patch.video_resolution;
-      if (patch.validation_metadata !== undefined) data.validationMetadata = patch.validation_metadata;
-      if (patch.additional_options !== undefined) data.additionalOptions = patch.additional_options;
-      if (patch.lora_weights !== undefined) data.loraWeights = patch.lora_weights;
-      if (patch.seed !== undefined) data.seed = patch.seed;
-      if (patch.quota_cost !== undefined) data.quotaCost = patch.quota_cost;
+      for (const [app, def] of Object.entries(VIDEO_FIELD_TABLE) as [VideoAppField, VideoFieldDef][]) {
+        if (def.skipUpdate) continue;
+        const v = (patch as any)[app];
+        if (v === undefined) continue;
+        data[def.prisma] = videoToDb(def, v);
+      }
 
       const video = await this.prisma.video.update({
         where: { id },
@@ -1126,58 +1151,15 @@ export class PostgresDatabase implements IDatabase {
   // ==================== Mapping Methods ====================
 
   private safeParseJsonArray(value: unknown): string[] {
-    if (!value) return [];
-
-    if (Array.isArray(value)) {
-      return value.filter((item): item is string => typeof item === 'string');
-    }
-
-    if (typeof value === 'string') {
-      try {
-        const parsed = JSON.parse(value);
-        if (Array.isArray(parsed)) {
-          return parsed.filter((item): item is string => typeof item === 'string');
-        }
-      } catch (error) {
-        console.error('[DB] Failed to parse JSON array:', error);
-      }
-    }
-
-    return [];
+    return parseJsonStringArray(value);
   }
 
   private mapToVideoEntry(video: any): VideoEntry {
-    return {
-      id: video.id,
-      user_id: video.userId,
-      workflow_id: video.workflowId || undefined,
-      original_image_url: video.originalImageUrl,
-      last_image_url: video.lastImageUrl || undefined,
-      prompt: video.prompt || undefined,
-      tags: this.safeParseJsonArray(video.tags),
-      suggested_prompts: this.safeParseJsonArray(video.suggestedPrompts),
-      is_photo_realistic: video.isPhotoRealistic ?? undefined,
-      is_nsfw: video.isNsfw ?? undefined,
-      status: video.status as VideoEntry['status'],
-      job_id: video.jobId || undefined,
-      is_local_job: video.isLocalJob ?? undefined,
-      final_video_url: video.finalVideoUrl || undefined,
-      is_published: video.isPublished || undefined,
-      processing_time_ms: video.processingTimeMs ?? undefined,
-      processing_started_at: video.processingStartedAt ? video.processingStartedAt.toISOString() : undefined,
-      dequeued_at: video.dequeuedAt ? video.dequeuedAt.toISOString() : undefined,
-      progress_percentage: video.progressPercentage ?? undefined,
-      progress_details: video.progressDetails || undefined,
-      iteration_steps: video.iterationSteps ?? undefined,
-      video_duration: video.videoDuration ?? undefined,
-      video_resolution: video.videoResolution || undefined,
-      validation_metadata: video.validationMetadata || undefined,
-      additional_options: video.additionalOptions || undefined,
-      lora_weights: video.loraWeights || undefined,
-      seed: video.seed ?? undefined,
-      quota_cost: video.quotaCost ?? undefined,
-      created_at: video.createdAt.toISOString(),
-    };
+    const out: any = {};
+    for (const [app, def] of Object.entries(VIDEO_FIELD_TABLE) as [VideoAppField, VideoFieldDef][]) {
+      out[app] = videoFromDb(def, video[def.prisma]);
+    }
+    return out as VideoEntry;
   }
 
   private mapToUser(user: any): User {
