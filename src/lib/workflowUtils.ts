@@ -122,17 +122,20 @@ export function calculateVideoDimensions(
 /**
  * Dimensions for the MiniMax H3 768p two-stage mode.
  *
- * The HIGH size targets 1,032,192 px (1344x768 at 16:9) with nearest-32
+ * The HIGH size targets 1,032,192 px (1344x768 at 16:9) with nearest-64
  * rounding (floor would turn 1344x761.99 into 1344x736 for 16:9). The LOW size
- * is exactly half the edges, so the latent upscaler lifts a 2x grid and both
- * stay multiples of 16 (the VAE's spatial stride).
+ * is exactly half the edges, so the latent upscaler lifts a 2x grid. H3 patchifies
+ * the latent in 2x2 blocks on a 16x VAE stride, so BOTH stages must be multiples
+ * of 32 px; rounding HIGH to 64 is what keeps LOW (= HIGH / 2) on that grid for every
+ * aspect ratio (nearest-32 gave e.g. 864x1184 -> 432x592 = an odd 27x37 latent, which
+ * crashes patchify_video).
  */
 export function calculateH3TwoStageDimensions(
   imageWidth: number,
   imageHeight: number
 ): { highWidth: number; highHeight: number; lowWidth: number; lowHeight: number } {
   const { width, height } = calculateVideoDimensions(imageWidth, imageHeight, '768p', {
-    roundToMultiple: 32,
+    roundToMultiple: 64,
     rounding: 'nearest'
   });
   return { highWidth: width, highHeight: height, lowWidth: width / 2, lowHeight: height / 2 };

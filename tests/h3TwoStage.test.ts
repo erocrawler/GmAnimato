@@ -49,16 +49,24 @@ describe('768p dimensions', () => {
     expect(calculateH3TwoStageDimensions(854, 480)).toMatchObject({ highWidth: 1344, highHeight: 768 });
   });
 
-  it('flips for portrait and keeps every edge a multiple of 32 (high) / 16 (low)', () => {
+  it('flips for portrait and keeps every edge a multiple of 64 (high) / 32 (low, an even latent grid for the 2x2 patchify)', () => {
     const p = calculateH3TwoStageDimensions(480, 832);
     expect(p).toMatchObject({ highWidth: 768, highHeight: 1344, lowWidth: 384, lowHeight: 672 });
-    for (const [w, h] of [[1920, 1080], [1000, 1000], [1200, 900], [900, 1600], [2000, 1000]]) {
+    for (const [w, h] of [[1920, 1080], [1000, 1000], [1200, 900], [900, 1600], [2000, 1000], [1000, 1723], [1080, 1350], [3, 4], [4, 5], [5, 7], [7, 5], [1500, 1000]]) {
       const d = calculateH3TwoStageDimensions(w, h);
-      expect(d.highWidth % 32).toBe(0);
-      expect(d.highHeight % 32).toBe(0);
-      expect(d.lowWidth % 16).toBe(0);
-      expect(d.lowHeight % 16).toBe(0);
+      expect(d.highWidth % 64).toBe(0);
+      expect(d.highHeight % 64).toBe(0);
+      expect(d.lowWidth % 32).toBe(0);
+      expect(d.lowHeight % 32).toBe(0);
+      // latent grid (px / 16) must be even in both stages: H3 patchifies it in 2x2 blocks
+      expect((d.lowWidth / 16) % 2).toBe(0);
+      expect((d.lowHeight / 16) % 2).toBe(0);
+      expect((d.highWidth / 16) % 2).toBe(0);
+      expect((d.highHeight / 16) % 2).toBe(0);
     }
+    // the pixel budget stays within ~6% of 1,032,192 for the sizes people actually use
+    const sq = calculateH3TwoStageDimensions(1000, 1000);
+    expect(sq.highWidth * sq.highHeight / 1032192).toBeLessThan(1.06);
   });
 
   it('leaves the 480p / 720p numbers unchanged', () => {
