@@ -47,6 +47,8 @@ export const KNOWN_DURATIONS: readonly CapabilityDuration[] = [4, 6, 10, 15];
  * Ids stay as they are so stored rows, rules and in-flight jobs keep working; only labels were renamed.
  */
 export const KNOWN_RESOLUTIONS: readonly CapabilityResolution[] = ['480p', '720p', '720p-hd', '768p'];
+/** 768p (H3 two-stage) is only validated at 6+ steps (Flex 3+3, hybrids 6+2); 4 steps would split 3+1. */
+export const H3_TWO_STAGE_MIN_STEPS = 6;
 /** Human-readable name for logs / API errors. */
 export const RESOLUTION_DISPLAY_NAME: Record<CapabilityResolution, string> = {
   '480p': '480p',

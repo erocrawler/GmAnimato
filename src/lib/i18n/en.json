@@ -412,6 +412,7 @@
     "iteration": {
       "title": "Iteration steps (fast, balanced)",
       "help": "Choose speed vs. detail",
+      "min768": "768p needs at least 6 steps",
       "fast": "Fast",
       "balanced": "Balanced",
       "quality": "Quality",

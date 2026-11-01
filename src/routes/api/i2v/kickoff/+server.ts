@@ -5,7 +5,7 @@ import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { submitJob } from '$lib/local-queue';
 import { filterLoraWeights, withRequiredLoras, isMiniMaxWorkflow, getWorkflowCapabilities, getWorkflowEngine, getWorkflowRunOn } from '$lib/workflows';
-import { RESOLUTION_DISPLAY_NAME } from '$lib/workflowCapabilities';
+import { RESOLUTION_DISPLAY_NAME, H3_TWO_STAGE_MIN_STEPS } from '$lib/workflowCapabilities';
 import { computeWorkflowQuotaCost } from '$lib/quotaCost';
 import { toOriginalUrl } from '$lib/serverImageUrl';
 import { evaluatePromptProperties } from '$lib/imageRecognition';
@@ -357,11 +357,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     // 768p is validated only at 6+ steps (Flex 3+3, hybrids 6+2); 4 steps would
     // split 3+1, which has never produced a checked render. Reject an explicit
     // 4, otherwise snap up to the cheapest allowed step that is >= 6.
-    if (resolution === '768p' && iterationSteps < 6) {
-      const candidates = (caps.steps as readonly number[]).filter((n) => n >= 6).sort((a, b) => a - b);
+    if (resolution === '768p' && iterationSteps < H3_TWO_STAGE_MIN_STEPS) {
+      const candidates = (caps.steps as readonly number[]).filter((n) => n >= H3_TWO_STAGE_MIN_STEPS).sort((a, b) => a - b);
       if (stepExplicit || candidates.length === 0) {
         return new Response(JSON.stringify({
-          error: `768p requires at least 6 iteration steps on ${workflow.name}; please pick a higher step count.`
+          error: `768p requires at least ${H3_TWO_STAGE_MIN_STEPS} iteration steps on ${workflow.name}; please pick a higher step count.`
         }), { status: 400, headers: { 'Content-Type': 'application/json' } });
       }
       iterationSteps = candidates[0] as IterationSteps;

@@ -15,6 +15,7 @@
     STEP_LABEL_KEY,
     MINIMAX_STEP_DESC_KEY,
     DURATION_LABEL_KEY,
+    H3_TWO_STAGE_MIN_STEPS,
     type CapabilityStep,
   } from "$lib/workflowCapabilities";
 
@@ -119,12 +120,19 @@
     }))
     .filter((g) => g.items.length > 0);
 
-  $: resolutionOptions = caps.resolutions.map((value) => ({
-    value,
-    label: $_(`review.resolution.${RESOLUTION_I18N[value]}`),
-    description: $_(`review.resolution.${RESOLUTION_I18N[value]}Desc`),
-    requiresPaid: value !== "480p",
-  }));
+  // 768p (H3 two-stage) needs at least H3_TWO_STAGE_MIN_STEPS steps: hide it for a workflow that
+  // has no such step, and block the lower steps while 768p is selected (the server rejects them).
+  const isStepBlocked = (value: number, resolution: string) =>
+    resolution === "768p" && value < H3_TWO_STAGE_MIN_STEPS;
+
+  $: resolutionOptions = caps.resolutions
+    .filter((value) => value !== "768p" || caps.steps.some((s) => s >= H3_TWO_STAGE_MIN_STEPS))
+    .map((value) => ({
+      value,
+      label: $_(`review.resolution.${RESOLUTION_I18N[value]}`),
+      description: $_(`review.resolution.${RESOLUTION_I18N[value]}Desc`),
+      requiresPaid: value !== "480p",
+    }));
 
   $: visibleStepOptions = canUseQuality
     ? stepOptions
@@ -271,6 +279,14 @@
 
   $: if (!canUseQuality && videoResolution !== "480p") videoResolution = "480p";
 
+  // Selecting 768p with a step below the minimum: move to the smallest allowed step that is enough.
+  $: if (videoResolution === "768p" && iterationSteps < H3_TWO_STAGE_MIN_STEPS) {
+    const next = caps.steps
+      .filter((s) => s >= H3_TWO_STAGE_MIN_STEPS)
+      .sort((a, b) => a - b)[0];
+    if (next !== undefined) iterationSteps = next as IterationSteps;
+  }
+
   // Free tier: durations above 6s are advanced features — snap down to 6s when
   // the workflow allows it so a radio is always checked. Premium-only durations
   // (workflow that excludes ≤6s) are left for kickoff to gate.
@@ -375,6 +391,8 @@
             <label
               class="btn btn-outline flex items-center gap-3 justify-start"
               class:btn-active={iterationSteps === option.value}
+              class:opacity-40={isStepBlocked(option.value, videoResolution)}
+              title={isStepBlocked(option.value, videoResolution) ? $_("review.iteration.min768") : ""}
             >
               <input
                 type="radio"
@@ -382,7 +400,7 @@
                 value={option.value}
                 checked={iterationSteps === option.value}
                 on:change={() => (iterationSteps = option.value)}
-                disabled={!isEditable}
+                disabled={!isEditable || isStepBlocked(option.value, videoResolution)}
               />
               <div>
                 <div class="font-semibold">{option.label}</div>
