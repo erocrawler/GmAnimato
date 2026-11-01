@@ -41,6 +41,7 @@ export class PostgresDatabase implements IDatabase {
       additionalOptions: entry.additional_options,
       loraWeights: entry.lora_weights,
       seed: entry.seed,
+      quotaCost: entry.quota_cost, // undefined -> column default (1)
       processingStartedAt: entry.processing_started_at ? new Date(entry.processing_started_at) : null,
       dequeuedAt: entry.dequeued_at ? new Date(entry.dequeued_at) : null,
     };
@@ -390,6 +391,7 @@ export class PostgresDatabase implements IDatabase {
       if (patch.additional_options !== undefined) data.additionalOptions = patch.additional_options;
       if (patch.lora_weights !== undefined) data.loraWeights = patch.lora_weights;
       if (patch.seed !== undefined) data.seed = patch.seed;
+      if (patch.quota_cost !== undefined) data.quotaCost = patch.quota_cost;
 
       const video = await this.prisma.video.update({
         where: { id },
@@ -1171,6 +1173,7 @@ export class PostgresDatabase implements IDatabase {
       additional_options: video.additionalOptions || undefined,
       lora_weights: video.loraWeights || undefined,
       seed: video.seed ?? undefined,
+      quota_cost: video.quotaCost ?? undefined,
       created_at: video.createdAt.toISOString(),
     };
   }
