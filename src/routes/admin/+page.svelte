@@ -5,6 +5,7 @@
   import {
     ENGINE_DEFAULT_CAPABILITIES,
     KNOWN_STEPS,
+    KNOWN_RESOLUTIONS,
   } from '$lib/workflowCapabilities';
   
   let { data } = $props<{ data: PageData }>();
@@ -35,9 +36,13 @@
   let workflowIsDefault = $state(false);
   let workflowEngine = $state<'wan' | 'minimax'>('wan');
   let workflowRunOn = $state<'auto' | 'serverless'>('auto');
-  // Step allowlist for this workflow (empty = engine default). Durations and
-  // resolutions are NOT editable yet — they follow engine defaults.
+  // Step allowlist for this workflow (empty = engine default).
   let workflowSteps = $state<number[]>([]);
+  // Resolution allowlist (e.g. 768p for the H3 two-stage mode). Empty = engine default.
+  let workflowResolutions = $state<string[]>([]);
+  // Durations are not editable here, but a row may carry a custom allowlist (set in the DB);
+  // keep it so saving the form does not wipe it (capabilities are replaced as a whole on PUT).
+  let workflowDurations = $state<number[]>([]);
   // Highest step treated as free for this workflow (premium above it). Default 4.
   let workflowFreeSteps = $state<number>(4);
   let workflowCompatibleLoras = $state<string[]>([]);
@@ -557,6 +562,8 @@
       const caps = workflow.capabilities || {};
       workflowSteps = caps.steps?.length ? caps.steps : [...def.steps];
       workflowFreeSteps = typeof caps.freeSteps === 'number' ? caps.freeSteps : def.freeSteps;
+      workflowResolutions = caps.resolutions?.length ? [...caps.resolutions] : [...def.resolutions];
+      workflowDurations = Array.isArray(caps.durations) ? [...caps.durations] : [];
       syncWorkflowFreeSteps();
     } else {
       editingWorkflowId = null;
@@ -574,6 +581,8 @@
       workflowRunOn = 'auto';
       workflowSteps = [...ENGINE_DEFAULT_CAPABILITIES.wan.steps];
       workflowFreeSteps = ENGINE_DEFAULT_CAPABILITIES.wan.freeSteps;
+      workflowResolutions = [...ENGINE_DEFAULT_CAPABILITIES.wan.resolutions];
+      workflowDurations = [];
       // New workflow starts empty — no forced base LoRAs (lightx2v only for wan22 base model, not distilled)
       workflowCompatibleLoras = (settings.loraPresets || []).filter((p: any) => p.autoAddToWorkflows).map((p: any) => p.id);
     }
@@ -596,6 +605,8 @@
     workflowRunOn = 'auto';
     workflowSteps = [];
     workflowFreeSteps = 4;
+    workflowResolutions = [];
+    workflowDurations = [];
     workflowCompatibleLoras = [];
     workflowTags = [];
     workflowAutoInclude = true;
@@ -605,14 +616,18 @@
     workflowTagInput = '';
   }
 
-  // ---- Workflow capability helpers (engine / runOn / steps / freeSteps) ----
-  // Durations and resolutions currently follow the engine defaults (the review
-  // page + kickoff derive them per-engine, and e.g. 15s is MiniMax-only), so
-  // only the step allowlist + free-step threshold are stored per-workflow.
+  // ---- Workflow capability helpers (engine / runOn / steps / resolutions / freeSteps) ----
+  // The PUT replaces `capabilities` as a whole, so everything the row carries has to be sent back:
+  // steps, freeSteps, resolutions (omitted when equal to the engine default) and any custom durations.
   function workflowCapabilitiesPayload(): any {
     const p: any = {};
     if (workflowSteps.length) p.steps = workflowSteps;
     if (workflowFreeSteps !== 4) p.freeSteps = workflowFreeSteps;
+    const defRes = ENGINE_DEFAULT_CAPABILITIES[workflowEngine].resolutions;
+    const sameAsDefault =
+      workflowResolutions.length === defRes.length && defRes.every((r) => workflowResolutions.includes(r));
+    if (workflowResolutions.length && !sameAsDefault) p.resolutions = workflowResolutions;
+    if (workflowDurations.length) p.durations = workflowDurations;
     return p;
   }
   /** The highest step this workflow can run (its allowlist, or engine default). */
@@ -631,12 +646,22 @@
       const def = ENGINE_DEFAULT_CAPABILITIES[workflowEngine];
       workflowSteps = [...def.steps];
       workflowFreeSteps = def.freeSteps;
+      workflowResolutions = [...def.resolutions];
+      workflowDurations = [];
     }
   }
   function resetCapabilitiesToDefaults() {
     const def = ENGINE_DEFAULT_CAPABILITIES[workflowEngine];
     workflowSteps = [...def.steps];
     workflowFreeSteps = def.freeSteps;
+    workflowResolutions = [...def.resolutions];
+    workflowDurations = [];
+  }
+  function toggleResolution(value: string) {
+    const next = workflowResolutions.includes(value)
+      ? workflowResolutions.filter((x) => x !== value)
+      : [...workflowResolutions, value];
+    workflowResolutions = KNOWN_RESOLUTIONS.filter((r) => next.includes(r));
   }
   function toggleNumberIn(list: number[], value: number, set: (v: number[]) => void) {
     set(list.includes(value) ? list.filter((x) => x !== value) : [...list, value].sort((a, b) => a - b));
@@ -2168,7 +2193,7 @@
           <span class="text-sm font-semibold">Engine &amp; Capabilities</span>
           <button type="button" class="btn btn-xs btn-outline" onclick={resetCapabilitiesToDefaults}>Reset to engine defaults</button>
         </div>
-        <p class="text-xs opacity-50">Steps and the free-step threshold are configurable per workflow; durations and resolutions follow the engine defaults (e.g. 15s is MiniMax-only). Serverless-only workflows always go to RunPod — use for models whose weights only exist on the serverless image.</p>
+        <p class="text-xs opacity-50">Steps, resolutions and the free-step threshold are configurable per workflow; durations follow the engine defaults (e.g. 15s is MiniMax-only). Serverless-only workflows always go to RunPod — use for models whose weights only exist on the serverless image.</p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label class="form-control">
             <span class="label-text text-sm">Engine (node stack)</span>
@@ -2195,6 +2220,18 @@
                 onclick={() => toggleNumberIn(workflowSteps, v, setWorkflowSteps)}>{v}</button>
             {/each}
           </div>
+        </div>
+        <div class="text-sm">
+          <div class="opacity-60 mb-1">Allowed resolutions</div>
+          <div class="flex flex-wrap gap-1">
+            {#each [...KNOWN_RESOLUTIONS] as r}
+              <button type="button" class="badge badge-sm cursor-pointer"
+                class:badge-ghost={!workflowResolutions.includes(r)}
+                class:badge-primary={workflowResolutions.includes(r)}
+                onclick={() => toggleResolution(r)}>{r === '768p' ? '768p (H3 two-stage)' : r}</button>
+            {/each}
+          </div>
+          <span class="text-xs opacity-50 mt-1 block">768p only works for MiniMax H3 workflows, and needs a worker that declares h3_latent_upscale (or ENABLE_H3_TWO_STAGE_LOCAL).</span>
         </div>
         <label class="form-control">
           <span class="label-text text-sm">Free steps (up to)</span>
