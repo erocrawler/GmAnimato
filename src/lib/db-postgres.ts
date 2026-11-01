@@ -361,6 +361,8 @@ export class PostgresDatabase implements IDatabase {
     return video ? this.mapToVideoEntry(video) : undefined;
   }
 
+  // New Video column / VideoEntry field? Map it in createVideoEntry, here and in mapToVideoEntry —
+  // tests/videoFieldCoverage.test.ts fails when one of them is missing.
   async updateVideo(id: string, patch: Partial<VideoEntry>): Promise<VideoEntry | null> {
     try {
       const data: any = {};
