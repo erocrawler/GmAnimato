@@ -22,6 +22,23 @@ describe('withRequiredLoras', () => {
     expect(withRequiredLoras({ 'speedup.safetensors': 0 }, wf, presets)).toEqual({ 'speedup.safetensors': 1 });
   });
 
+  it('clamps a positive client weight into the preset range and falls back to the default otherwise', () => {
+    const ranged = [{ id: 'speedup.safetensors', default: 1, min: 0.8, max: 1.2, isConfigurable: false }];
+    const run = (v: unknown) => withRequiredLoras({ 'speedup.safetensors': v as number }, wf, ranged)!['speedup.safetensors'];
+    expect(run(1.1)).toBe(1.1);
+    expect(run(1.5)).toBe(1.2);
+    expect(run(0.5)).toBe(0.8);
+    expect(run(0)).toBe(1);
+    expect(run(-1)).toBe(1);
+    expect(run(Number.NaN)).toBe(1);
+    expect(run('1.1')).toBe(1);
+  });
+
+  it('keeps a min == max == default preset at a fixed strength', () => {
+    const fixed = [{ id: 'speedup.safetensors', default: 0.4, min: 0.4, max: 0.4, isConfigurable: false }];
+    expect(withRequiredLoras({ 'speedup.safetensors': 1.2 }, wf, fixed)).toEqual({ 'speedup.safetensors': 0.4 });
+  });
+
   it('never adds LoRAs of other workflows, and leaves optional ones alone', () => {
     const out = withRequiredLoras({}, wf, presets)!;
     expect(out).not.toHaveProperty('other-workflow-speedup.safetensors');

@@ -84,19 +84,27 @@ export function isLoraCompatible(loraId: string, workflow: Workflow): boolean {
 /**
  * Required LoRAs (presets with isConfigurable=false, e.g. the speed-up LoRA)
  * are not optional: the web UI always sends them, so the server enforces the
- * same for every client. Any compatible required preset is set to its default
- * weight, replacing a client-supplied value (including 0) or filling in an
- * omitted one; without it the job would run the slow, undistilled template.
+ * same for every client. A compatible required preset is always applied: an
+ * omitted, zero, negative or non-numeric client value becomes the preset default
+ * (without the LoRA the job would run the slow, undistilled template), and a
+ * positive client value is clamped into the preset's [min, max]. A preset with
+ * min == max == default is therefore a fixed strength; a wider range is the range
+ * the user may pick within.
  */
 export function withRequiredLoras(
   loraWeights: Record<string, number> | undefined,
   workflow: Workflow,
-  presets: ReadonlyArray<{ id: string; default: number; isConfigurable?: boolean }>
+  presets: ReadonlyArray<{ id: string; default: number; min?: number; max?: number; isConfigurable?: boolean }>
 ): Record<string, number> | undefined {
   const required = presets.filter((p) => p.isConfigurable === false && isLoraCompatible(p.id, workflow));
   if (required.length === 0) return loraWeights;
   const out: Record<string, number> = { ...(loraWeights ?? {}) };
-  for (const p of required) out[p.id] = p.default;
+  for (const p of required) {
+    const v = out[p.id];
+    const lo = p.min ?? p.default;
+    const hi = p.max ?? p.default;
+    out[p.id] = typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(hi, Math.max(lo, v)) : p.default;
+  }
   return out;
 }
 

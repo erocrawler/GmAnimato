@@ -131,8 +131,8 @@ export function describeWorkflow(w: Workflow, loraPresets: LoraPreset[], hasAdva
       durations: caps.durations.filter((d) => d <= tierMaxDuration),
       resolutions: hasAdvanced ? caps.resolutions : caps.resolutions.filter((r) => r === '480p'),
     },
-    // Required (non-optional) LoRAs: informational — kickoff always applies
-    // them at their default weight (see withRequiredLoras in workflows.ts).
+    // Required (non-optional) LoRAs: informational — kickoff always applies them; a client weight is
+    // clamped into the preset's [min, max], otherwise the default is used (see withRequiredLoras).
     required_loras: required.map((l) => ({ id: l.id, label: l.label, weight: l.default, chain: l.chain ?? null })),
     optional_loras: optional.map((l) => ({
       id: l.id,
