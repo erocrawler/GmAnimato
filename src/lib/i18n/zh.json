@@ -402,7 +402,11 @@
     "resetAll": "重置为默认值",
     "workflow": {
       "title": "工作流",
-      "help": "选择AI模型和视频生成工作流"
+      "help": "选择AI模型和视频生成工作流",
+      "group": {
+        "wan": "Wan 2.2",
+        "minimax": "MiniMax H3"
+      }
     },
     "iteration": {
       "title": "迭代步数（快速、均衡）",
@@ -416,6 +420,7 @@
         "quality": "8步"
       },
       "minimaxStepsFast": "4步",
+      "minimaxStepsFlex": "6步",
       "minimaxStepsBalanced": "8步",
       "minimaxStepsQuality": "8步"
     },
@@ -436,8 +441,12 @@
       "help": "选择输出质量",
       "standard": "480p",
       "standardDesc": "标准质量",
-      "hd": "720p",
-      "hdDesc": "高清（处理时间较长）"
+      "hd": "ESRGAN 2×",
+      "hdDesc": "480p 生成后放大 2 倍（处理时间较长）",
+      "hd720": "720p",
+      "hd720Desc": "原生 720p 生成（Wan，处理时间较长）",
+      "hd768": "768p",
+      "hd768Desc": "原生高清（H3 两段式，处理时间较长）"
     },
     "additionalOptions": {
       "title": "附加选项",

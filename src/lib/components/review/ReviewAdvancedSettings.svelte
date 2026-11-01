@@ -56,7 +56,14 @@
 
   type IterationSteps = 4 | 6 | 8;
   type VideoDuration = 4 | 6 | 10 | 15;
-  type VideoResolution = "480p" | "720p";
+  type VideoResolution = "480p" | "720p" | "720p-hd" | "768p";
+  // i18n key stems: review.resolution.<stem> / <stem>Desc ("hd" = the ESRGAN 2x route, id 720p)
+  const RESOLUTION_I18N: Record<VideoResolution, string> = {
+    "480p": "standard",
+    "720p": "hd",
+    "720p-hd": "hd720",
+    "768p": "hd768",
+  };
 
   let stepOptions: {
     value: IterationSteps;
@@ -72,6 +79,8 @@
   }[] = [
     { value: "480p", label: "", description: "", requiresPaid: false },
     { value: "720p", label: "", description: "", requiresPaid: true },
+    { value: "720p-hd", label: "", description: "", requiresPaid: true },
+    { value: "768p", label: "", description: "", requiresPaid: true },
   ];
 
   // Iteration steps — built from the workflow's capability allowlist. WAN uses
@@ -101,10 +110,19 @@
       ? ENGINE_DEFAULT_STEP[engine]
       : (caps.steps[0] ?? 4);
 
+  // Model dropdown: group the workflows by engine family (Wan / MiniMax H3).
+  // A single family renders as a plain list.
+  $: workflowGroups = (["wan", "minimax"] as const)
+    .map((engineKey) => ({
+      engine: engineKey,
+      items: filteredWorkflows.filter((w) => getWorkflowEngine(w) === engineKey),
+    }))
+    .filter((g) => g.items.length > 0);
+
   $: resolutionOptions = caps.resolutions.map((value) => ({
     value,
-    label: $_(`review.resolution.${value === "480p" ? "standard" : "hd"}`),
-    description: $_(`review.resolution.${value === "480p" ? "standardDesc" : "hdDesc"}`),
+    label: $_(`review.resolution.${RESOLUTION_I18N[value]}`),
+    description: $_(`review.resolution.${RESOLUTION_I18N[value]}Desc`),
     requiresPaid: value !== "480p",
   }));
 
@@ -251,7 +269,7 @@
     }
   }
 
-  $: if (!canUseQuality && videoResolution === "720p") videoResolution = "480p";
+  $: if (!canUseQuality && videoResolution !== "480p") videoResolution = "480p";
 
   // Free tier: durations above 6s are advanced features — snap down to 6s when
   // the workflow allows it so a radio is always checked. Premium-only durations
@@ -321,9 +339,19 @@
           bind:value={selectedWorkflowId}
           disabled={!isEditable}
         >
-          {#each filteredWorkflows as workflow}
-            <option value={workflow.id}>{workflow.name}</option>
-          {/each}
+          {#if workflowGroups.length > 1}
+            {#each workflowGroups as group}
+              <optgroup label={$_(`review.workflow.group.${group.engine}`)}>
+                {#each group.items as workflow}
+                  <option value={workflow.id}>{workflow.name}</option>
+                {/each}
+              </optgroup>
+            {/each}
+          {:else}
+            {#each filteredWorkflows as workflow}
+              <option value={workflow.id}>{workflow.name}</option>
+            {/each}
+          {/if}
         </select>
         {#if filteredWorkflows.find((w) => w.id === selectedWorkflowId)?.description}
           <p class="text-xs opacity-70">

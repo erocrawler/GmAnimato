@@ -212,7 +212,7 @@
 
   type IterationSteps = 4 | 6 | 8;
   type VideoDuration = 4 | 6 | 10 | 15;
-  type VideoResolution = "480p" | "720p";
+  type VideoResolution = "480p" | "720p" | "720p-hd" | "768p";
   // Aspect ratio for ref2v output. 'video' follows the reference media's own
   // aspect; the rest are fixed presets (MiniMax H3 wants ~0.45-2.2 ratio).
   type Ref2vAspect = "video" | "16:9" | "4:3" | "square" | "3:4" | "9:16";

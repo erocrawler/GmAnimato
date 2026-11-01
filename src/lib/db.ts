@@ -101,8 +101,8 @@ export async function getOldestLocalJob() {
   return db.getOldestLocalJob();
 }
 
-export async function claimLocalJob(userId?: string) {
-  return db.claimLocalJob(userId);
+export async function claimLocalJob(userId?: string, opts?: { allowH3TwoStage?: boolean }) {
+  return db.claimLocalJob(userId, opts);
 }
 
 export async function getLocalJobStats() {

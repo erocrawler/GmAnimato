@@ -3,7 +3,9 @@ import path from 'path';
 import probe from 'probe-image-size';
 import type { Workflow } from './IDatabase';
 import type { LoraPreset } from './loraPresets';
-import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes } from './workflowUtils';
+import { findNode, getNodeInputs, calculateVideoDimensions, calculateH3TwoStageDimensions, add720pUpscaleNodes } from './workflowUtils';
+import { applyH3TwoStage } from './h3TwoStage';
+import { applyH3StyleLoras } from './h3StyleLoras';
 import { workflowDefaultStep, engineFromTemplatePath } from './workflowCapabilities';
 
 interface MiniMaxWorkflowParams {
@@ -15,8 +17,8 @@ interface MiniMaxWorkflowParams {
   seed: number;
   callback_url?: string;
   videoDuration?: 4 | 6 | 10 | 15; // seconds; frames derived via ComfyMathExpression (24fps)
-  videoResolution?: '480p' | '720p';
-  iterationSteps?: 4 | 8; // sampler steps (distilled turbo NFE: fast 4 / quality 8)
+  videoResolution?: '480p' | '720p' | '720p-hd' | '768p';
+  iterationSteps?: 4 | 6 | 8; // sampler steps (Flex 6; distilled turbo NFE: fast 4 / quality 8)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
   useSageAttention?: boolean; // inject MiniMaxH3MemoryEfficientSageAttentionPatch
@@ -134,7 +136,7 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
     .filter((p) => p.isConfigurable === false)
     .find((p) => params.loraWeights && Object.prototype.hasOwnProperty.call(params.loraWeights, p.id));
 
-  if (appliedLora && unetLoaderNode && schedulerNode) {
+  if (appliedLora && unetLoaderNode) {
     const strength =
       typeof params.loraWeights?.[appliedLora.id] === 'number'
         ? params.loraWeights![appliedLora.id]
@@ -153,8 +155,8 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
 
     // Rewire the model chain through the LoRA: slot it between the UNETLoader
     // and the sigma-shift node (or scheduler/guider on templates without it).
-    const schedulerInputs = getNodeInputs(workflow, schedulerNode);
-    const guiderInputs = getNodeInputs(workflow, guiderNode);
+    const schedulerInputs = schedulerNode ? getNodeInputs(workflow, schedulerNode) : null;
+    const guiderInputs = guiderNode ? getNodeInputs(workflow, guiderNode) : null;
     const shiftInputs = sigmaShiftNode ? getNodeInputs(workflow, sigmaShiftNode) : null;
     if (shiftInputs && Array.isArray(shiftInputs.model) && shiftInputs.model[0] === unetLoaderNode) {
       shiftInputs.model = [loraNodeId, 0];
@@ -167,23 +169,34 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
       }
     }
 
-    // Steps = distilled NFE: the user's explicit choice when provided, else the
-    // workflow-defined default (engine default if its capability allowlist
-    // allows it, otherwise the cheapest allowed step).
-    if (schedulerInputs) {
+    console.log(`[MiniMax] Applied speed-up LoRA ${appliedLora.id} (strength ${strength})`);
+  } else {
+    console.log('[MiniMax] No required speed-up LoRA configured for this workflow');
+  }
+
+  // Sampler steps: independent of the LoRA. Templates driven by a BasicScheduler get the user's choice
+  // (4 fast / 8 quality), else the workflow-defined default (engine default if its capability allowlist
+  // has it, otherwise the cheapest allowed step). Hybrid rows whose turbo is built into the checkpoint have
+  // no required LoRA — their step option used to be silently ignored (always the template's steps).
+  // Flex templates have no scheduler (ManualSigmas carries the schedule).
+  if (schedulerNode) {
+    const schedulerStepInputs = getNodeInputs(workflow, schedulerNode);
+    if (schedulerStepInputs) {
       const wfEngine =
         params.workflow?.engine === 'wan' || params.workflow?.engine === 'minimax'
           ? params.workflow.engine
           : engineFromTemplatePath(params.workflow?.templatePath);
-      schedulerInputs.steps =
+      schedulerStepInputs.steps =
         params.iterationSteps ??
         workflowDefaultStep(wfEngine, params.workflow?.capabilities) ??
         8;
+      console.log(`[MiniMax] Sampler steps: ${schedulerStepInputs.steps}`);
     }
-    console.log(`[MiniMax] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
-  } else {
-    console.log('[MiniMax] No speed-up LoRA configured — using template steps (20)');
   }
+
+  // User-selected style LoRAs: chained after the required (speed-up / template) LoRA,
+  // before the sigma-shift and the sage patch.
+  applyH3StyleLoras(workflow, params.loraPresets, params.loraWeights);
 
   // MiniMax H3 sage attention: inject MiniMaxH3MemoryEfficientSageAttentionPatch
   // (from ComfyUI-KJNodes ltxv_nodes.py) into the model chain. It takes the
@@ -191,8 +204,11 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
   // and re-emits the patched model, so we rewire BasicScheduler.model and
   // BasicGuider.model to its output. Requires sageattention on the worker.
   const sageAttentionNodeId = '105:1001:sage';
-  if (params.useSageAttention && unetLoaderNode && schedulerNode) {
-    const modelSourceId = appliedLora ? loraNodeId : unetLoaderNode;
+  if (params.useSageAttention && unetLoaderNode && (schedulerNode || guiderNode)) {
+    // Chain off whatever currently feeds the sigma-shift/guider: the speed-up LoRA
+    // injected above, a LoRA wired in the template itself (Flex), or the UNETLoader.
+    const chainHeadModel = (sigmaShiftNode ? getNodeInputs(workflow, sigmaShiftNode)?.model : null) ?? (guiderNode ? getNodeInputs(workflow, guiderNode)?.model : null);
+    const modelSourceId = Array.isArray(chainHeadModel) ? (chainHeadModel[0] as string) : appliedLora ? loraNodeId : unetLoaderNode;
 
     workflow.input.workflow[sageAttentionNodeId] = {
       inputs: {
@@ -209,7 +225,7 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
     if (shiftInputs && Array.isArray(shiftInputs.model)) {
       shiftInputs.model = [sageAttentionNodeId, 0];
     } else {
-      const schedulerInputs = getNodeInputs(workflow, schedulerNode);
+      const schedulerInputs = schedulerNode ? getNodeInputs(workflow, schedulerNode) : null;
       const guiderInputs = guiderNode ? getNodeInputs(workflow, guiderNode) : null;
       if (schedulerInputs && Array.isArray(schedulerInputs.model)) {
         schedulerInputs.model = [sageAttentionNodeId, 0];
@@ -239,6 +255,7 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
 
   // Always generate at 480p for efficiency, then upscale to 720p if needed
   const resolution = params.videoResolution ?? '480p';
+  let twoStageDims: ReturnType<typeof calculateH3TwoStageDimensions> | null = null;
   let gen480pWidth: number;
   let gen480pHeight: number;
   let originalImageWidth: number;
@@ -248,6 +265,9 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
     const dimensions = await probe(params.first_image_url);
     originalImageWidth = dimensions.width;
     originalImageHeight = dimensions.height;
+    if (resolution === '768p') {
+      twoStageDims = calculateH3TwoStageDimensions(dimensions.width, dimensions.height);
+    }
 
     // Always calculate for 480p generation — MiniMax H3 requires multiples
     // of 32 (floor rounding mirrors the official ResolutionSelector), unlike
@@ -281,7 +301,15 @@ export async function buildMiniMaxWorkflow(params: MiniMaxWorkflowParams): Promi
     }
   }
 
-  // Add upscale nodes after VAE decode if 720p is requested
+  // 768p: two-stage latent-lift graph (native size, no ESRGAN). Falls back to
+  // 16:9 1344x768 when the first frame could not be probed.
+  if (resolution === '768p') {
+    const dims = twoStageDims ?? { highWidth: 1344, highHeight: 768, lowWidth: 672, lowHeight: 384 };
+    const staged = applyH3TwoStage(workflow, { ...dims, seed: params.seed });
+    console.log(`[MiniMax] 768p two-stage ${staged.lowSteps}+${staged.highSteps} at ${dims.lowWidth}x${dims.lowHeight} -> ${dims.highWidth}x${dims.highHeight}`);
+  }
+
+  // Add upscale nodes after VAE decode if 720p (ESRGAN 2x) is requested
   if (resolution === '720p') {
     add720pUpscaleNodes(
       workflow,

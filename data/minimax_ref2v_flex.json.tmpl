@@ -1,0 +1,370 @@
+{
+  "input": {
+    "images": [
+      {
+        "name": "{ref_image_1_name}",
+        "image": "{ref_image_1_url}"
+      },
+      {
+        "name": "{ref_image_2_name}",
+        "image": "{ref_image_2_url}"
+      },
+      {
+        "name": "{ref_image_3_name}",
+        "image": "{ref_image_3_url}"
+      },
+      {
+        "name": "{ref_image_4_name}",
+        "image": "{ref_image_4_url}"
+      },
+      {
+        "name": "{ref_image_5_name}",
+        "image": "{ref_image_5_url}"
+      },
+      {
+        "name": "{ref_image_6_name}",
+        "image": "{ref_image_6_url}"
+      }
+    ],
+    "videos": [
+      {
+        "name": "{ref_video_name}",
+        "image": "{ref_video_url}"
+      }
+    ],
+    "workflow": {
+      "105:1": {
+        "inputs": {
+          "video": "{ref_video_name}",
+          "force_rate": 24,
+          "custom_width": 0,
+          "custom_height": 0,
+          "frame_load_cap": 0,
+          "skip_first_frames": 0,
+          "select_every_nth": 1
+        },
+        "class_type": "VHS_LoadVideo",
+        "_meta": {
+          "title": "Load Reference Video"
+        }
+      },
+      "114": {
+        "inputs": {
+          "image": "{ref_image_1_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Reference Image 1"
+        }
+      },
+      "115": {
+        "inputs": {
+          "image": "{ref_image_2_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Reference Image 2"
+        }
+      },
+      "116": {
+        "inputs": {
+          "image": "{ref_image_3_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Reference Image 3"
+        }
+      },
+      "117": {
+        "inputs": {
+          "image": "{ref_image_4_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Reference Image 4"
+        }
+      },
+      "118": {
+        "inputs": {
+          "image": "{ref_image_5_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Reference Image 5"
+        }
+      },
+      "119": {
+        "inputs": {
+          "image": "{ref_image_6_name}"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+          "title": "Load Reference Image 6"
+        }
+      },
+      "122": {
+        "inputs": {
+          "frame_rate": 24,
+          "loop_count": 0,
+          "filename_prefix": "AnimateDiff",
+          "format": "video/h264-mp4",
+          "pix_fmt": "yuv420p",
+          "crf": 19,
+          "save_metadata": true,
+          "trim_to_audio": false,
+          "pingpong": false,
+          "save_output": true,
+          "images": [
+            "105:10",
+            0
+          ],
+          "audio": [
+            "105:23",
+            0
+          ]
+        },
+        "class_type": "VHS_VideoCombine",
+        "_meta": {
+          "title": "Video Combine 🎥🅥🅗🅢"
+        }
+      },
+      "105:11": {
+        "inputs": {
+          "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+        },
+        "class_type": "VAELoader",
+        "_meta": {
+          "title": "Load VAE"
+        }
+      },
+      "105:24": {
+        "inputs": {
+          "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+        },
+        "class_type": "VAELoader",
+        "_meta": {
+          "title": "Load VAE"
+        }
+      },
+      "105:17": {
+        "inputs": {
+          "sampler_name": "lcm"
+        },
+        "class_type": "KSamplerSelect",
+        "_meta": {
+          "title": "KSamplerSelect"
+        }
+      },
+      "105:9": {
+        "inputs": {
+          "sigmas": "1.0, 0.972973, 0.923077, 0.8, 0.571429, 0.333333, 0.0"
+        },
+        "class_type": "ManualSigmas",
+        "_meta": {
+          "title": "Manual Sigmas (Flex 6-step)"
+        }
+      },
+      "105:14": {
+        "inputs": {
+          "noise": [
+            "105:15",
+            0
+          ],
+          "guider": [
+            "105:16",
+            0
+          ],
+          "sampler": [
+            "105:17",
+            0
+          ],
+          "sigmas": [
+            "105:9",
+            0
+          ],
+          "latent_image": [
+            "105:104",
+            1
+          ]
+        },
+        "class_type": "SamplerCustomAdvanced",
+        "_meta": {
+          "title": "SamplerCustomAdvanced"
+        }
+      },
+      "105:16": {
+        "inputs": {
+          "model": [
+            "105:6",
+            0
+          ],
+          "conditioning": [
+            "105:104",
+            0
+          ]
+        },
+        "class_type": "BasicGuider",
+        "_meta": {
+          "title": "BasicGuider"
+        }
+      },
+      "105:6": {
+        "inputs": {
+          "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+          "weight_dtype": "default"
+        },
+        "class_type": "UNETLoader",
+        "_meta": {
+          "title": "Load Diffusion Model"
+        }
+      },
+      "105:13": {
+        "inputs": {
+          "clip_name": "qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors",
+          "type": "minimax",
+          "device": "default"
+        },
+        "class_type": "CLIPLoader",
+        "_meta": {
+          "title": "Load CLIP"
+        }
+      },
+      "105:15": {
+        "inputs": {
+          "noise_seed": {seed}
+        },
+        "class_type": "RandomNoise",
+        "_meta": {
+          "title": "RandomNoise"
+        }
+      },
+      "105:104": {
+        "inputs": {
+          "prompt": "{input_prompt}",
+          "width": 832,
+          "height": 480,
+          "length": [
+            "105:107",
+            1
+          ],
+          "clip": [
+            "105:13",
+            0
+          ],
+          "vae": [
+            "105:11",
+            0
+          ],
+          "audio_vae": [
+            "105:24",
+            0
+          ],
+          "ref_image_size": "match",
+          "ref_images.ref_image_0": [
+            "114",
+            0
+          ],
+          "ref_images.ref_image_1": [
+            "115",
+            0
+          ],
+          "ref_images.ref_image_2": [
+            "116",
+            0
+          ],
+          "ref_images.ref_image_3": [
+            "117",
+            0
+          ],
+          "ref_images.ref_image_4": [
+            "118",
+            0
+          ],
+          "ref_images.ref_image_5": [
+            "119",
+            0
+          ],
+          "ref_videos.ref_video_0": [
+            "105:1",
+            0
+          ],
+          "ref_video_audios.ref_video_audio_0": [
+            "105:1",
+            2
+          ],
+          "ref_audios.ref_audio_0": [
+            "105:108",
+            0
+          ]
+        },
+        "class_type": "MiniMaxH3ReferenceToVideo",
+        "_meta": {
+          "title": "MiniMax H3 Reference to Video"
+        }
+      },
+      "105:108": {
+        "inputs": {
+          "audio": "{ref_audio_name}"
+        },
+        "class_type": "LoadAudio",
+        "_meta": {
+          "title": "Load Reference Audio"
+        }
+      },
+      "105:107": {
+        "inputs": {
+          "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+          "values.a": [
+            "105:111",
+            0
+          ]
+        },
+        "class_type": "ComfyMathExpression",
+        "_meta": {
+          "title": "Math Expression"
+        }
+      },
+      "105:111": {
+        "inputs": {
+          "value": 6
+        },
+        "class_type": "PrimitiveFloat",
+        "_meta": {
+          "title": "Float (duration)"
+        }
+      },
+      "105:10": {
+        "inputs": {
+          "samples": [
+            "105:14",
+            0
+          ],
+          "vae": [
+            "105:11",
+            0
+          ]
+        },
+        "class_type": "VAEDecode",
+        "_meta": {
+          "title": "VAE Decode"
+        }
+      },
+      "105:23": {
+        "inputs": {
+          "samples": [
+            "105:14",
+            0
+          ],
+          "vae": [
+            "105:24",
+            0
+          ]
+        },
+        "class_type": "VAEDecodeAudio",
+        "_meta": {
+          "title": "VAEDecodeAudio"
+        }
+      }
+    }
+  }
+}

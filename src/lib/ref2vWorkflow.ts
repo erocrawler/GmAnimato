@@ -3,7 +3,9 @@ import path from 'path';
 import probe from 'probe-image-size';
 import type { Workflow } from './IDatabase';
 import type { LoraPreset } from './loraPresets';
-import { findNode, getNodeInputs, calculateVideoDimensions, add720pUpscaleNodes } from './workflowUtils';
+import { findNode, getNodeInputs, calculateVideoDimensions, calculateH3TwoStageDimensions, add720pUpscaleNodes } from './workflowUtils';
+import { applyH3TwoStage } from './h3TwoStage';
+import { applyH3StyleLoras } from './h3StyleLoras';
 import { probeVideoDimensions, probeModelFrameCount } from './videoValidation';
 import { MIN_REF_VIDEO_FRAMES } from './mediaLimits';
 import { workflowDefaultStep, engineFromTemplatePath } from './workflowCapabilities';
@@ -31,11 +33,11 @@ interface Ref2VWorkflowParams {
   // Output duration in seconds. 4/6/8/10 are the standard presets; "follow
   // video duration" may pass any integer 1..10 matched to the ref video.
   videoDuration?: number;
-  videoResolution?: '480p' | '720p';
+  videoResolution?: '480p' | '720p' | '720p-hd' | '768p';
   /** Output aspect ratio. 'video' follows the reference media (default); the
    *  presets override it. MiniMax H3 supports roughly 0.45-2.2. */
   ref2vAspect?: 'video' | '16:9' | '4:3' | 'square' | '3:4' | '9:16';
-  iterationSteps?: 4 | 8; // sampler steps (distilled turbo NFE: fast 4 / quality 8)
+  iterationSteps?: 4 | 6 | 8; // sampler steps (Flex 6; distilled turbo NFE: fast 4 / quality 8)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)
   useSageAttention?: boolean; // inject MiniMaxH3MemoryEfficientSageAttentionPatch
@@ -281,7 +283,7 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   // off the LoRA output when one was applied (mirrors minimaxWorkflow).
   const loraNodeId = '105:1000:lora_speedup';
 
-  if (appliedLora && unetLoaderNode && schedulerNode) {
+  if (appliedLora && unetLoaderNode) {
     const strength =
       typeof params.loraWeights?.[appliedLora.id] === 'number'
         ? params.loraWeights![appliedLora.id]
@@ -300,8 +302,8 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
 
     // Rewire the model chain through the LoRA: slot it between the UNETLoader
     // and the sigma-shift node (or scheduler/guider on templates without it).
-    const schedulerInputs = getNodeInputs(workflow, schedulerNode);
-    const guiderInputs = getNodeInputs(workflow, guiderNode);
+    const schedulerInputs = schedulerNode ? getNodeInputs(workflow, schedulerNode) : null;
+    const guiderInputs = guiderNode ? getNodeInputs(workflow, guiderNode) : null;
     const shiftInputs = sigmaShiftNode ? getNodeInputs(workflow, sigmaShiftNode) : null;
     if (shiftInputs && Array.isArray(shiftInputs.model) && shiftInputs.model[0] === unetLoaderNode) {
       shiftInputs.model = [loraNodeId, 0];
@@ -314,24 +316,34 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
       }
     }
 
-    // Reduce steps: distilled NFE — user's explicit choice when provided, else
-    // the workflow-defined default (engine default if its capability allowlist
-    // allows it, otherwise the cheapest allowed step). Step constraints live on
-    // the WORKFLOW, not on the LoRA.
-    if (schedulerInputs) {
+    console.log(`[Ref2V] Applied speed-up LoRA ${appliedLora.id} (strength ${strength})`);
+  } else {
+    console.log('[Ref2V] No required speed-up LoRA configured for this workflow');
+  }
+
+  // Sampler steps: independent of the LoRA. Templates driven by a BasicScheduler get the user's choice
+  // (4 fast / 8 quality), else the workflow-defined default (engine default if its capability allowlist
+  // has it, otherwise the cheapest allowed step). Hybrid rows whose turbo is built into the checkpoint have
+  // no required LoRA — their step option used to be silently ignored (always the template's steps).
+  // Flex templates have no scheduler (ManualSigmas carries the schedule).
+  if (schedulerNode) {
+    const schedulerStepInputs = getNodeInputs(workflow, schedulerNode);
+    if (schedulerStepInputs) {
       const wfEngine =
         params.workflow?.engine === 'wan' || params.workflow?.engine === 'minimax'
           ? params.workflow.engine
           : engineFromTemplatePath(params.workflow?.templatePath);
-      schedulerInputs.steps =
+      schedulerStepInputs.steps =
         params.iterationSteps ??
         workflowDefaultStep(wfEngine, params.workflow?.capabilities) ??
         8;
+      console.log(`[Ref2V] Sampler steps: ${schedulerStepInputs.steps}`);
     }
-    console.log(`[Ref2V] Applied speed-up LoRA ${appliedLora.id} (strength ${strength}) -> ${schedulerInputs?.steps} steps`);
-  } else {
-    console.log('[Ref2V] No speed-up LoRA configured — using template steps (20)');
   }
+
+  // User-selected style LoRAs: chained after the required (speed-up / template) LoRA,
+  // before the sigma-shift and the sage patch.
+  applyH3StyleLoras(workflow, params.loraPresets, params.loraWeights);
 
   // MiniMax H3 sage attention: inject MiniMaxH3MemoryEfficientSageAttentionPatch
   // (from ComfyUI-KJNodes ltxv_nodes.py) into the model chain — ref2v uses the
@@ -341,8 +353,11 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
   // re-emits the patched model, so we rewire the downstream consumer.
   // Requires sageattention on the worker.
   const sageAttentionNodeId = '105:1001:sage';
-  if (params.useSageAttention && unetLoaderNode && schedulerNode) {
-    const modelSourceId = appliedLora ? loraNodeId : unetLoaderNode;
+  if (params.useSageAttention && unetLoaderNode && (schedulerNode || guiderNode)) {
+    // Chain off whatever currently feeds the sigma-shift/guider: the speed-up LoRA
+    // injected above, a LoRA wired in the template itself (Flex), or the UNETLoader.
+    const chainHeadModel = (sigmaShiftNode ? getNodeInputs(workflow, sigmaShiftNode)?.model : null) ?? (guiderNode ? getNodeInputs(workflow, guiderNode)?.model : null);
+    const modelSourceId = Array.isArray(chainHeadModel) ? (chainHeadModel[0] as string) : appliedLora ? loraNodeId : unetLoaderNode;
 
     workflow.input.workflow[sageAttentionNodeId] = {
       inputs: {
@@ -359,7 +374,7 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
     if (shiftInputs && Array.isArray(shiftInputs.model)) {
       shiftInputs.model = [sageAttentionNodeId, 0];
     } else {
-      const schedulerInputs = getNodeInputs(workflow, schedulerNode);
+      const schedulerInputs = schedulerNode ? getNodeInputs(workflow, schedulerNode) : null;
       const guiderInputs = guiderNode ? getNodeInputs(workflow, guiderNode) : null;
       if (schedulerInputs && Array.isArray(schedulerInputs.model)) {
         schedulerInputs.model = [sageAttentionNodeId, 0];
@@ -389,6 +404,7 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
           '9:16': { w: 9, h: 16 },
         }[params.ref2vAspect] ?? null
       : null;
+  let twoStageDims: ReturnType<typeof calculateH3TwoStageDimensions> | null = null;
   let gen480pWidth: number;
   let gen480pHeight: number;
   let originalImageWidth: number;
@@ -433,6 +449,9 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
     }
     originalImageWidth = probeWidth;
     originalImageHeight = probeHeight;
+    if (resolution === '768p') {
+      twoStageDims = calculateH3TwoStageDimensions(probeWidth, probeHeight);
+    }
 
     const { width, height } = calculateVideoDimensions(
       probeWidth,
@@ -460,7 +479,15 @@ export async function buildRef2VWorkflow(params: Ref2VWorkflowParams): Promise<o
     }
   }
 
-  // Add upscale nodes after VAE decode if 720p is requested
+  // 768p: two-stage latent-lift graph (native size, no ESRGAN). Falls back to
+  // 16:9 1344x768 when the reference media could not be probed.
+  if (resolution === '768p') {
+    const dims = twoStageDims ?? { highWidth: 1344, highHeight: 768, lowWidth: 672, lowHeight: 384 };
+    const staged = applyH3TwoStage(workflow, { ...dims, seed: params.seed });
+    console.log(`[Ref2V] 768p two-stage ${staged.lowSteps}+${staged.highSteps} at ${dims.lowWidth}x${dims.lowHeight} -> ${dims.highWidth}x${dims.highHeight}`);
+  }
+
+  // Add upscale nodes after VAE decode if 720p (ESRGAN 2x) is requested
   if (resolution === '720p') {
     add720pUpscaleNodes(
       workflow,

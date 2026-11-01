@@ -5,6 +5,7 @@ import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { submitJob } from '$lib/local-queue';
 import { filterLoraWeights, withRequiredLoras, isMiniMaxWorkflow, getWorkflowCapabilities, getWorkflowEngine, getWorkflowRunOn } from '$lib/workflows';
+import { RESOLUTION_DISPLAY_NAME } from '$lib/workflowCapabilities';
 import { computeWorkflowQuotaCost } from '$lib/quotaCost';
 import { toOriginalUrl } from '$lib/serverImageUrl';
 import { evaluatePromptProperties } from '$lib/imageRecognition';
@@ -173,9 +174,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
-    // Extract video resolution (480p or 720p)
+    // Extract video resolution (480p / '720p' = ESRGAN 2x / '720p-hd' = native Wan 720p / 768p = MiniMax H3 two-stage)
     const videoResolution = body?.videoResolution;
-    const allowedResolutions = ['480p', '720p'] as const;
+    const allowedResolutions = ['480p', '720p', '720p-hd', '768p'] as const;
     type VideoResolution = (typeof allowedResolutions)[number];
     let resolution: VideoResolution | undefined;
 
@@ -333,10 +334,37 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     if (resolution !== undefined && !caps.resolutions.includes(resolution)) {
       if (resolutionExplicit) {
         return new Response(JSON.stringify({
-          error: `${resolution} is not available for the selected model (${workflow.name}). Allowed: ${caps.resolutions.join(' / ')}.`
+          error: `${RESOLUTION_DISPLAY_NAME[resolution]} is not available for the selected model (${workflow.name}). Allowed: ${caps.resolutions.map((r) => RESOLUTION_DISPLAY_NAME[r]).join(' / ')}.`
         }), { status: 400, headers: { 'Content-Type': 'application/json' } });
       }
       resolution = '480p';
+    }
+
+    // 768p is the MiniMax H3 two-stage mode: H3 workflows only.
+    if (resolution === '768p' && !isMiniMaxWorkflow(workflow)) {
+      return new Response(JSON.stringify({
+        error: '768p resolution is only available with MiniMax H3 models.'
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    // Native 720p is the Wan path (the H3 models have 768p instead).
+    if (resolution === '720p-hd' && isMiniMaxWorkflow(workflow)) {
+      return new Response(JSON.stringify({
+        error: 'Native 720p is only available with Wan models.'
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    // 768p is validated only at 6+ steps (Flex 3+3, hybrids 6+2); 4 steps would
+    // split 3+1, which has never produced a checked render. Reject an explicit
+    // 4, otherwise snap up to the cheapest allowed step that is >= 6.
+    if (resolution === '768p' && iterationSteps < 6) {
+      const candidates = (caps.steps as readonly number[]).filter((n) => n >= 6).sort((a, b) => a - b);
+      if (stepExplicit || candidates.length === 0) {
+        return new Response(JSON.stringify({
+          error: `768p requires at least 6 iteration steps on ${workflow.name}; please pick a higher step count.`
+        }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      }
+      iterationSteps = candidates[0] as IterationSteps;
     }
 
     // Max (15s) duration is a MiniMax H3-only option
@@ -476,10 +504,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
-    // Enforce role requirement for 720p resolution
-    if (resolution === '720p' && !hasAdvancedFeatures) {
+    // Enforce role requirement for the premium resolutions (everything above 480p)
+    if (resolution !== undefined && resolution !== '480p' && !hasAdvancedFeatures) {
       return new Response(JSON.stringify({ 
-        error: '720p resolution is available to users with advanced features only.' 
+        error: `${RESOLUTION_DISPLAY_NAME[resolution]} resolution is available to users with advanced features only.` 
       }), { 
         status: 403, 
         headers: { 'Content-Type': 'application/json' } 

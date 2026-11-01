@@ -403,7 +403,11 @@
     "resetAll": "Reset All to Defaults",
     "workflow": {
       "title": "Workflow",
-      "help": "Select the AI model and workflow for video generation"
+      "help": "Select the AI model and workflow for video generation",
+      "group": {
+        "wan": "Wan 2.2",
+        "minimax": "MiniMax H3"
+      }
     },
     "iteration": {
       "title": "Iteration steps (fast, balanced)",
@@ -417,6 +421,7 @@
         "quality": "8 steps"
       },
       "minimaxStepsFast": "4 steps",
+      "minimaxStepsFlex": "6 steps",
       "minimaxStepsBalanced": "8 steps",
       "minimaxStepsQuality": "8 steps"
     },
@@ -437,8 +442,12 @@
       "help": "Choose output quality",
       "standard": "480p",
       "standardDesc": "Standard quality",
-      "hd": "720p",
-      "hdDesc": "High definition (processing takes longer)"
+      "hd": "ESRGAN 2×",
+      "hdDesc": "Generated at 480p, then upscaled 2× (slower)",
+      "hd720": "720p",
+      "hd720Desc": "Native 720p generation (Wan, slower)",
+      "hd768": "768p",
+      "hd768Desc": "Native HD (H3 two-stage, slower)"
     },
     "additionalOptions": {
       "title": "Additional Options",

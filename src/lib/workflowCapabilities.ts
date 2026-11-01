@@ -23,7 +23,7 @@ export type WorkflowRunOn = 'auto' | 'serverless';
 
 export type CapabilityStep = 4 | 6 | 8;
 export type CapabilityDuration = 4 | 6 | 10 | 15;
-export type CapabilityResolution = '480p' | '720p';
+export type CapabilityResolution = '480p' | '720p' | '720p-hd' | '768p';
 
 export interface WorkflowCapabilities {
   steps?: CapabilityStep[];
@@ -39,7 +39,21 @@ export interface WorkflowCapabilities {
 
 export const KNOWN_STEPS: readonly CapabilityStep[] = [4, 6, 8];
 export const KNOWN_DURATIONS: readonly CapabilityDuration[] = [4, 6, 10, 15];
-export const KNOWN_RESOLUTIONS: readonly CapabilityResolution[] = ['480p', '720p'];
+/**
+ * Resolution ids (stored in videos.video_resolution, quota rules and capabilities):
+ *  - '720p'    legacy id of the ESRGAN route: generated at 480p, upscaled 2x (shown as "ESRGAN 2x")
+ *  - '720p-hd' native 720p generation (Wan only)
+ *  - '768p'    MiniMax H3 two-stage (H3 only)
+ * Ids stay as they are so stored rows, rules and in-flight jobs keep working; only labels were renamed.
+ */
+export const KNOWN_RESOLUTIONS: readonly CapabilityResolution[] = ['480p', '720p', '720p-hd', '768p'];
+/** Human-readable name for logs / API errors. */
+export const RESOLUTION_DISPLAY_NAME: Record<CapabilityResolution, string> = {
+  '480p': '480p',
+  '720p': 'ESRGAN 2x',
+  '720p-hd': '720p',
+  '768p': '768p',
+};
 
 /** Central per-engine defaults (used when capabilities are empty/partial). */
 export const ENGINE_DEFAULT_CAPABILITIES: Record<WorkflowEngine, Required<WorkflowCapabilities>> = {
@@ -79,7 +93,7 @@ export function normalizeWorkflowCapabilities(raw: unknown): WorkflowCapabilitie
   }
   if (Array.isArray(v.resolutions)) {
     out.resolutions = v.resolutions.filter(
-      (r): r is CapabilityResolution => r === '480p' || r === '720p',
+      (r): r is CapabilityResolution => (KNOWN_RESOLUTIONS as readonly string[]).includes(r),
     );
   }
   if (v.freeSteps !== undefined) {
@@ -156,6 +170,7 @@ export const STEP_LABEL_KEY: Record<number, string> = {
 /** MiniMax-specific step description keys (fall back to steps.* otherwise). */
 export const MINIMAX_STEP_DESC_KEY: Record<number, string> = {
   4: 'minimaxStepsFast',
+  6: 'minimaxStepsFlex',
   8: 'minimaxStepsQuality',
 };
 

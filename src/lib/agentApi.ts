@@ -99,7 +99,7 @@ export function describeWorkflow(w: Workflow, loraPresets: LoraPreset[], hasAdva
 
   const premiumSteps = caps.steps.filter((s) => s > caps.freeSteps);
   const premiumDurations = caps.durations.filter((d) => d > FREE_DURATION_MAX);
-  const premiumResolutions = caps.resolutions.filter((r) => r === '720p');
+  const premiumResolutions = caps.resolutions.filter((r) => r !== '480p');
 
   const compatible = loraPresets.filter((l) => w.compatibleLoraIds.includes(l.id));
   const required = compatible.filter((l) => l.isConfigurable === false);
@@ -129,7 +129,7 @@ export function describeWorkflow(w: Workflow, loraPresets: LoraPreset[], hasAdva
     allowed_for_user: {
       steps: hasAdvanced ? caps.steps : caps.steps.filter((s) => s <= caps.freeSteps),
       durations: caps.durations.filter((d) => d <= tierMaxDuration),
-      resolutions: hasAdvanced ? caps.resolutions : caps.resolutions.filter((r) => r !== '720p'),
+      resolutions: hasAdvanced ? caps.resolutions : caps.resolutions.filter((r) => r === '480p'),
     },
     // Required (non-optional) LoRAs: informational — kickoff always applies
     // them at their default weight (see withRequiredLoras in workflows.ts).

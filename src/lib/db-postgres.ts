@@ -507,7 +507,7 @@ export class PostgresDatabase implements IDatabase {
     return video ? this.mapToVideoEntry(video) : null;
   }
 
-  async claimLocalJob(userId?: string): Promise<VideoEntry | null> {
+  async claimLocalJob(userId?: string, opts?: { allowH3TwoStage?: boolean }): Promise<VideoEntry | null> {
     // Use a transaction to atomically find and update a job
     // This prevents race conditions where two workers claim the same job
     try {
@@ -520,10 +520,16 @@ export class PostgresDatabase implements IDatabase {
           ? Prisma.sql`WHERE is_local_job = true AND status = 'in_queue' AND user_id = ${userId}`
           : Prisma.sql`WHERE is_local_job = true AND status = 'in_queue'`;
 
+        // Workers without the H3 latent-upscale capability must not be handed 768p jobs.
+        const skip768 = opts?.allowH3TwoStage === false
+          ? Prisma.sql`AND COALESCE(video_resolution, '') <> '768p'`
+          : Prisma.empty;
+
         // Find the oldest job in queue with FOR UPDATE lock
         const job = await tx.$queryRaw<Array<{id: string}>>(Prisma.sql`
           SELECT id FROM videos 
           ${where}
+          ${skip768}
           AND NOT EXISTS (
             SELECT 1 FROM workflows w
             WHERE w.id = videos.workflow_id AND w.run_on = 'serverless'
