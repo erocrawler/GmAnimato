@@ -56,7 +56,14 @@
 
   type IterationSteps = 4 | 6 | 8;
   type VideoDuration = 4 | 6 | 10 | 15;
-  type VideoResolution = "480p" | "720p" | "768p";
+  type VideoResolution = "480p" | "720p" | "720p-hd" | "768p";
+  // i18n key stems: review.resolution.<stem> / <stem>Desc ("hd" = the ESRGAN 2x route, id 720p)
+  const RESOLUTION_I18N: Record<VideoResolution, string> = {
+    "480p": "standard",
+    "720p": "hd",
+    "720p-hd": "hd720",
+    "768p": "hd768",
+  };
 
   let stepOptions: {
     value: IterationSteps;
@@ -72,6 +79,7 @@
   }[] = [
     { value: "480p", label: "", description: "", requiresPaid: false },
     { value: "720p", label: "", description: "", requiresPaid: true },
+    { value: "720p-hd", label: "", description: "", requiresPaid: true },
     { value: "768p", label: "", description: "", requiresPaid: true },
   ];
 
@@ -113,8 +121,8 @@
 
   $: resolutionOptions = caps.resolutions.map((value) => ({
     value,
-    label: $_(`review.resolution.${value === "480p" ? "standard" : value === "768p" ? "hd768" : "hd"}`),
-    description: $_(`review.resolution.${value === "480p" ? "standardDesc" : value === "768p" ? "hd768Desc" : "hdDesc"}`),
+    label: $_(`review.resolution.${RESOLUTION_I18N[value]}`),
+    description: $_(`review.resolution.${RESOLUTION_I18N[value]}Desc`),
     requiresPaid: value !== "480p",
   }));
 

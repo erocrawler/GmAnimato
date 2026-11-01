@@ -444,6 +444,8 @@
       "standardDesc": "Standard quality",
       "hd": "ESRGAN 2×",
       "hdDesc": "Generated at 480p, then upscaled 2× (slower)",
+      "hd720": "720p",
+      "hd720Desc": "Native 720p generation (Wan, slower)",
       "hd768": "768p",
       "hd768Desc": "Native HD (H3 two-stage, slower)"
     },

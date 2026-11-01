@@ -74,18 +74,18 @@ export function getNodeInputs(workflow: any, nodeId: string | null): any {
  * Calculate video dimensions based on image aspect ratio and resolution
  * @param imageWidth Original image width
  * @param imageHeight Original image height
- * @param resolution Target resolution (480p, 720p or 768p)
+ * @param resolution Target resolution (480p, 720p, 720p-hd or 768p; 720p-hd = native Wan 720p, 921,600 px)
  * @param options Optional rounding config (default: multiples of 16, nearest — WAN)
  * @returns {width, height} Video dimensions (rounded per options)
  */
 export function calculateVideoDimensions(
   imageWidth: number,
   imageHeight: number,
-  resolution: '480p' | '720p' | '768p',
+  resolution: '480p' | '720p' | '720p-hd' | '768p',
   options: CalculateVideoDimensionsOptions = {}
 ): { width: number; height: number } {
   // 768p = 1344x768 at 16:9 (the MiniMax H3 two-stage native size).
-  const totalPixels = resolution === '768p' ? 1032192 : resolution === '720p' ? 921600 : 409600;
+  const totalPixels = resolution === '768p' ? 1032192 : resolution === '720p' || resolution === '720p-hd' ? 921600 : 409600;
   const roundToMultiple = options.roundToMultiple ?? 16;
   const roundFn = options.rounding === 'floor' ? Math.floor : Math.round;
   

@@ -33,7 +33,7 @@ interface Ref2VWorkflowParams {
   // Output duration in seconds. 4/6/8/10 are the standard presets; "follow
   // video duration" may pass any integer 1..10 matched to the ref video.
   videoDuration?: number;
-  videoResolution?: '480p' | '720p' | '768p';
+  videoResolution?: '480p' | '720p' | '720p-hd' | '768p';
   /** Output aspect ratio. 'video' follows the reference media (default); the
    *  presets override it. MiniMax H3 supports roughly 0.45-2.2. */
   ref2vAspect?: 'video' | '16:9' | '4:3' | 'square' | '3:4' | '9:16';

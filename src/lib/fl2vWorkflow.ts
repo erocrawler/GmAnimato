@@ -16,7 +16,7 @@ interface FL2VWorkflowParams {
   callback_url?: string;
   iterationSteps?: 4 | 6 | 8;
   videoDuration?: 4 | 6 | 10;
-  videoResolution?: '480p' | '720p' | '768p';
+  videoResolution?: '480p' | '720p' | '720p-hd' | '768p';
   loraWeights?: Record<string, number>;
   loraPresets?: LoraPreset[];
   motionScale?: number; // 0.5 to 2.0, optional
@@ -98,14 +98,17 @@ export async function buildFL2VWorkflow(params: FL2VWorkflowParams): Promise<obj
     encodeInputs.length = frames;
   }
 
-  // Always generate at 480p for efficiency, then upscale to 720p if needed
+  // Generate at 480p for efficiency (then ESRGAN 2x for '720p'), or natively at 720p for '720p-hd'
   const resolution = params.videoResolution ?? '480p';
   if (resolution === '768p') {
-    // Wan has no native 720p/768p path yet; fail loudly instead of billing for a 480p render.
-    throw new Error('Wan workflows do not support 768p yet');
+    // 768p is the MiniMax H3 two-stage mode; fail loudly instead of billing for a 480p render.
+    throw new Error('Wan workflows do not support 768p');
   }
-  let gen480pWidth: number;
-  let gen480pHeight: number;
+  // '720p-hd' = native 720p generation (official Wan 2.2 720p budget, 921,600 px); every other
+  // resolution generates at 480p ('720p' = ESRGAN 2x afterwards).
+  const genResolution = resolution === '720p-hd' ? '720p-hd' : '480p';
+  let genWidth: number;
+  let genHeight: number;
   let originalImageWidth: number;
   let originalImageHeight: number;
   
@@ -115,9 +118,9 @@ export async function buildFL2VWorkflow(params: FL2VWorkflowParams): Promise<obj
     originalImageHeight = dimensions.height;
     
     // Always calculate for 480p generation
-    const { width, height } = calculateVideoDimensions(dimensions.width, dimensions.height, '480p');
-    gen480pWidth = width;
-    gen480pHeight = height;
+    const { width, height } = calculateVideoDimensions(dimensions.width, dimensions.height, genResolution);
+    genWidth = width;
+    genHeight = height;
     
     // Set dimensions on both ImageResize nodes and WanFirstLastFrameToVideo node
     const resizeFirstInputs = getNodeInputs(workflow, resizeFirstNode);
@@ -140,24 +143,24 @@ export async function buildFL2VWorkflow(params: FL2VWorkflowParams): Promise<obj
     // Fallback to default 480p landscape dimensions
     originalImageWidth = 1280;
     originalImageHeight = 720;
-    gen480pWidth = 832;
-    gen480pHeight = 480;
+    genWidth = genResolution === '720p-hd' ? 1280 : 832;
+    genHeight = genResolution === '720p-hd' ? 720 : 480;
     
     const resizeFirstInputs = getNodeInputs(workflow, resizeFirstNode);
     if (resizeFirstInputs) {
-      resizeFirstInputs.width = gen480pWidth;
-      resizeFirstInputs.height = gen480pHeight;
+      resizeFirstInputs.width = genWidth;
+      resizeFirstInputs.height = genHeight;
     }
     
     const resizeLastInputs = getNodeInputs(workflow, resizeLastNode);
     if (resizeLastInputs) {
-      resizeLastInputs.width = gen480pWidth;
-      resizeLastInputs.height = gen480pHeight;
+      resizeLastInputs.width = genWidth;
+      resizeLastInputs.height = genHeight;
     }
     
     if (encodeInputs) {
-      encodeInputs.width = gen480pWidth;
-      encodeInputs.height = gen480pHeight;
+      encodeInputs.width = genWidth;
+      encodeInputs.height = genHeight;
     }
   }
   
@@ -319,8 +322,8 @@ export async function buildFL2VWorkflow(params: FL2VWorkflowParams): Promise<obj
       segments: params.promptRelaySegments,
       totalFrames: frames,
       fps: 18,
-      width: gen480pWidth,
-      height: gen480pHeight,
+      width: genWidth,
+      height: genHeight,
       encoderNodeId: encodeNode as string,
       samplerInputs,
     });

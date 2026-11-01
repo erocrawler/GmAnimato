@@ -17,7 +17,7 @@ interface MiniMaxWorkflowParams {
   seed: number;
   callback_url?: string;
   videoDuration?: 4 | 6 | 10 | 15; // seconds; frames derived via ComfyMathExpression (24fps)
-  videoResolution?: '480p' | '720p' | '768p';
+  videoResolution?: '480p' | '720p' | '720p-hd' | '768p';
   iterationSteps?: 4 | 6 | 8; // sampler steps (Flex 6; distilled turbo NFE: fast 4 / quality 8)
   loraWeights?: Record<string, number>; // enabled LoRAs + strengths (drives speed-up LoRA)
   loraPresets?: LoraPreset[]; // admin-configured presets (find required speed-up LoRA)

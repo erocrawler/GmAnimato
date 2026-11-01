@@ -30,7 +30,7 @@ export type QuotaCostRule = {
     /** Applies when videoDuration >= minDuration (e.g. 8 covers 8s and 10s). */
     minDuration?: number;
     /** Applies when videoResolution equals this value. */
-    exactResolution?: '480p' | '720p' | '768p';
+    exactResolution?: '480p' | '720p' | '720p-hd' | '768p';
     /** Applies when ANY of these LoRA ids are enabled (present in loraWeights). */
     usingLoras?: string[];
   };
@@ -53,7 +53,7 @@ export function isQuotaCostRule(value: unknown): value is QuotaCostRule {
   if (!hasMultiplier && !hasAdditive) return false;
   const when = (v.when ?? {}) as Record<string, unknown>;
   if (when.minDuration !== undefined && typeof when.minDuration !== 'number') return false;
-  if (when.exactResolution !== undefined && when.exactResolution !== '480p' && when.exactResolution !== '720p' && when.exactResolution !== '768p') return false;
+  if (when.exactResolution !== undefined && when.exactResolution !== '480p' && when.exactResolution !== '720p' && when.exactResolution !== '720p-hd' && when.exactResolution !== '768p') return false;
   if (when.usingLoras !== undefined && !Array.isArray(when.usingLoras)) return false;
   return true;
 }

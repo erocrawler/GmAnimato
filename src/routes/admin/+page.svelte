@@ -6,6 +6,7 @@
     ENGINE_DEFAULT_CAPABILITIES,
     KNOWN_STEPS,
     KNOWN_RESOLUTIONS,
+    RESOLUTION_DISPLAY_NAME,
   } from '$lib/workflowCapabilities';
   
   let { data } = $props<{ data: PageData }>();
@@ -2167,7 +2168,8 @@
                       onchange={(e) => updateQuotaCostRuleWhen(ri, { exactResolution: e.currentTarget.value === '' ? undefined : e.currentTarget.value })}>
                       <option value="">(any)</option>
                       <option value="480p">480p</option>
-                      <option value="720p">720p (ESRGAN 2x)</option>
+                      <option value="720p">ESRGAN 2x</option>
+                      <option value="720p-hd">720p native (Wan)</option>
                       <option value="768p">768p (H3 two-stage)</option>
                     </select>
                   </label>
@@ -2228,10 +2230,10 @@
               <button type="button" class="badge badge-sm cursor-pointer"
                 class:badge-ghost={!workflowResolutions.includes(r)}
                 class:badge-primary={workflowResolutions.includes(r)}
-                onclick={() => toggleResolution(r)}>{r === '768p' ? '768p (H3 two-stage)' : r}</button>
+                onclick={() => toggleResolution(r)}>{r === '720p' ? 'ESRGAN 2x (720p)' : r === '720p-hd' ? '720p native (Wan)' : r === '768p' ? '768p (H3 two-stage)' : r}</button>
             {/each}
           </div>
-          <span class="text-xs opacity-50 mt-1 block">768p only works for MiniMax H3 workflows, and needs a worker that declares h3_latent_upscale (or ENABLE_H3_TWO_STAGE_LOCAL).</span>
+          <span class="text-xs opacity-50 mt-1 block">ESRGAN 2x = 480p render upscaled 2x (id 720p). 720p native = Wan only, generated at 1280x720 (id 720p-hd). 768p = MiniMax H3 only, and needs a worker that declares h3_latent_upscale (or ENABLE_H3_TWO_STAGE_LOCAL).</span>
         </div>
         <label class="form-control">
           <span class="label-text text-sm">Free steps (up to)</span>
