@@ -114,7 +114,11 @@ export function quotaCostRuleMatches(rule: QuotaCostRule, params: QuotaCostParam
     if (!anyUsed) return false;
   }
   if (w.hasRefVideo !== undefined) {
-    if ((params.hasRefVideo ?? false) !== w.hasRefVideo) return false;
+    // Conservative: a rule that cares about ref video never matches when the
+    // caller didn't say whether one is attached. Otherwise a forgotten param
+    // (retry, agent, batch job) would silently grant the "no video" discount.
+    if (params.hasRefVideo === undefined) return false;
+    if (params.hasRefVideo !== w.hasRefVideo) return false;
   }
   return true;
 }

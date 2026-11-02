@@ -57,12 +57,15 @@ describe('quotaRuleSets', () => {
     expect(computeWorkflowQuotaCost(viaRef, { videoResolution: '480p' }, lib)).toBe(2);
     expect(computeWorkflowQuotaCost(viaRef, { videoResolution: '768p' }, {})).toBe(2);
   });
-});
 
-  it('hasRefVideo matches only when specified', async () => {
-    const w = { quotaCost: 1, quotaCostRules: [{ id: 'rv', additive: 1, when: { hasRefVideo: true } }] as any };
-    const { computeWorkflowQuotaCost } = await import('../src/lib/quotaCost');
-    expect(computeWorkflowQuotaCost(w, { hasRefVideo: true })).toBe(2);
-    expect(computeWorkflowQuotaCost(w, { hasRefVideo: false })).toBe(1);
-    expect(computeWorkflowQuotaCost(w, {})).toBe(1);
+  it('hasRefVideo matches only when specified', () => {
+    const wTrue = { quotaCost: 1, quotaCostRules: [{ id: 'rv', additive: 1, when: { hasRefVideo: true } }] as any };
+    expect(computeWorkflowQuotaCost(wTrue, { hasRefVideo: true })).toBe(2);
+    expect(computeWorkflowQuotaCost(wTrue, { hasRefVideo: false })).toBe(1);
+    expect(computeWorkflowQuotaCost(wTrue, {})).toBe(1);
+    const wFalse = { quotaCost: 1, quotaCostRules: [{ id: 'nrv', additive: 1, when: { hasRefVideo: false } }] as any };
+    expect(computeWorkflowQuotaCost(wFalse, { hasRefVideo: false })).toBe(2);
+    expect(computeWorkflowQuotaCost(wFalse, { hasRefVideo: true })).toBe(1);
+    expect(computeWorkflowQuotaCost(wFalse, {})).toBe(1);
   });
+});
