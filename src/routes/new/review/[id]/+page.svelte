@@ -163,15 +163,15 @@
         )
       : videoDuration;
 
-  // Effective credit cost for the CURRENT selections (workflow base + rules like
-  // "2x if duration >= 8s" or "2x if no speed-up LoRA"). Shared calculator with
-  // the kickoff route so the UI always matches what will be charged.
+  // Effective credit cost for the CURRENT selections (workflow base + rules,
+  // inline + `ruleset:` refs). Shared calculator with the kickoff route so the
+  // UI always matches what will be charged.
   $: selectedWorkflowQuotaCost = selectedWorkflow
     ? computeWorkflowQuotaCost(selectedWorkflow, {
         videoDuration: effectiveVideoDuration,
         videoResolution,
         loraWeights,
-      })
+      }, (data as any).quotaRuleSets ?? {})
     : 1;
   $: isMiniMaxSelected = !!selectedWorkflow && isMiniMaxWorkflow(selectedWorkflow);
 

@@ -119,6 +119,7 @@ export type CreateApiTokenInput = {
 
 import type { LoraPreset } from './loraPresets';
 import type { LoraSets } from './loraSets';
+import type { QuotaRuleSets, QuotaCostRuleRef } from './quotaRuleSets';
 import type { WorkflowEngine, WorkflowRunOn, WorkflowCapabilities } from './workflowCapabilities';
 
 export type RoleConfig = {
@@ -149,7 +150,7 @@ export type Workflow = {
   autoIncludeNewLoras?: boolean; // if true, new LoRAs with matching tags auto-added
   presetGroup?: string; // optional UI grouping
   quotaCost?: number; // Credits consumed per video generated with this workflow (default 1)
-  quotaCostRules?: import('./quotaCost').QuotaCostRule[]; // Optional multiplier rules (e.g. 2x if duration >= 8s)
+  quotaCostRules?: (import('./quotaCost').QuotaCostRule | string)[]; // Inline rules + `ruleset:<name>` refs (expanded via admin_settings.quotaRuleSets)
   isDefault: boolean;
   isDeleted: boolean; // Soft-delete: workflow is retired but kept for historical video reference
   createdAt: string;
@@ -172,6 +173,8 @@ export type AdminSettings = {
   loraPresets?: LoraPreset[];
   /** Named LoRA sets: name -> list of LoRA ids and/or `set:` refs. Workflows reference them via `set:<name>` in compatibleLoraIds. */
   loraSets?: LoraSets;
+  /** Named quota rule sets: name -> list of QuotaCostRules. Workflows reference them via `ruleset:<name>` in quotaCostRules. */
+  quotaRuleSets?: QuotaRuleSets;
   sponsorApiUrl?: string; // GmCrawler sponsor API endpoint
   sponsorApiToken?: string; // Auth token for sponsor API
   deviceId?: string; // Device ID for sponsor API requests

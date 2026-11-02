@@ -3,6 +3,7 @@ import { error } from '@sveltejs/kit';
 import { getVideoById, getAdminSettings, getWorkflows } from '$lib/db';
 import { normalizeLoraPresets } from '$lib/loraPresets';
 import { normalizeLoraSets } from '$lib/loraSets';
+import { normalizeQuotaRuleSets } from '$lib/quotaRuleSets';
 import { env } from '$env/dynamic/private';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
@@ -30,6 +31,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     entry, 
     loraPresets: normalizeLoraPresets(adminSettings.loraPresets),
     loraSets: normalizeLoraSets((adminSettings as any).loraSets ?? {}),
+    quotaRuleSets: normalizeQuotaRuleSets((adminSettings as any).quotaRuleSets ?? {}),
     hasAdvancedFeatures,
     sponsorUrl: env.SPONSOR_URL,
     workflows

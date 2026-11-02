@@ -2,10 +2,19 @@ import type { VideoEntry, Workflow, AdminSettings } from './IDatabase';
 import type { LoraPreset } from './loraPresets';
 import { getWorkflowCapabilities, getWorkflowEngine, getWorkflowRunOn } from './workflows';
 import { resolveWorkflowLoraIds } from './loraSets';
+import { expandQuotaCostRules } from './quotaRuleSets';
 import { FREE_DURATION_MAX } from './workflowCapabilities';
 import { workflowDefaultStep } from './workflowCapabilities';
 import { maxAllowedDurationSeconds } from './mediaLimits';
 import { toProxiedUrl } from './serverImageUrl';
+
+function expandQuotaCostRulesForDisplay(
+  rules: unknown,
+  library: import('./quotaRuleSets').QuotaRuleSets | undefined,
+): import('./quotaCost').QuotaCostRule[] {
+  if (!Array.isArray(rules)) return [];
+  return expandQuotaCostRules(rules as (import('./quotaCost').QuotaCostRule | string)[], library ?? {});
+}
 
 /**
  * Serializers for the JSON endpoints meant for scripts and AI agents
@@ -93,7 +102,7 @@ export function userHasAdvancedFeatures(roles: string[] | undefined, settings: P
  * allowlists, never "empty = default"), which values are premium, the LoRAs the
  * client must send with kickoff, and its credit cost.
  */
-export function describeWorkflow(w: Workflow, loraPresets: LoraPreset[], hasAdvanced: boolean, sets?: import('./loraSets').LoraSets) {
+export function describeWorkflow(w: Workflow, loraPresets: LoraPreset[], hasAdvanced: boolean, sets?: import('./loraSets').LoraSets, quotaLibrary?: import('./quotaRuleSets').QuotaRuleSets) {
   const caps = getWorkflowCapabilities(w);
   const engine = getWorkflowEngine(w);
   const tierMaxDuration = maxAllowedDurationSeconds(hasAdvanced);
@@ -106,6 +115,7 @@ export function describeWorkflow(w: Workflow, loraPresets: LoraPreset[], hasAdva
   const compatible = loraPresets.filter((l) => expanded.has(l.id));
   const required = compatible.filter((l) => l.isConfigurable === false);
   const optional = compatible.filter((l) => l.isConfigurable !== false);
+  const expandedQuotaRules = expandQuotaCostRulesForDisplay(w.quotaCostRules, quotaLibrary);
 
   return {
     id: w.id,
@@ -116,7 +126,7 @@ export function describeWorkflow(w: Workflow, loraPresets: LoraPreset[], hasAdva
     run_on: getWorkflowRunOn(w),
     is_default: w.isDefault,
     quota_cost: w.quotaCost ?? 1,
-    quota_cost_rules: w.quotaCostRules ?? [],
+    quota_cost_rules: expandedQuotaRules,
     steps: caps.steps,
     durations: caps.durations,
     resolutions: caps.resolutions,

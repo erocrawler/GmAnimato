@@ -58,20 +58,40 @@ export function isQuotaCostRule(value: unknown): value is QuotaCostRule {
   return true;
 }
 
-/** Normalize a raw rules value (from DB JSON) into a safe array. */
-export function normalizeQuotaCostRules(raw: unknown): QuotaCostRule[] {
+export type QuotaCostRuleRef = QuotaCostRule | string;
+
+/** Prefix for named rule-set references inside quotaCostRules. Mirrored in quotaRuleSets.ts (kept duplicate to avoid a circularmport). */
+export const QUOTA_RULE_SET_PREFIX = 'ruleset:';
+export const QUOTA_RULE_SET_MAX_DEPTH = 10;
+
+function isQuotaRuleSetRefLocal(v: unknown): v is string {
+  return typeof v === 'string' && v.startsWith(QUOTA_RULE_SET_PREFIX) && v.length > QUOTA_RULE_SET_PREFIX.length;
+}
+
+/** Normalize a raw rules value (from DB JSON) into a safe array, preserving valid `ruleset:` refs. */
+export function normalizeQuotaCostRules(raw: unknown): QuotaCostRuleRef[] {
   if (!Array.isArray(raw)) return [];
-  return raw.filter(isQuotaCostRule).map((r) => ({
-    id: r.id || `rule-${Math.random().toString(36).slice(2, 8)}`,
-    label: r.label,
-    multiplier: r.multiplier,
-    additive: r.additive,
-    when: {
-      minDuration: r.when.minDuration,
-      exactResolution: r.when.exactResolution,
-      usingLoras: Array.isArray(r.when.usingLoras) ? r.when.usingLoras : undefined,
-    },
-  }));
+  const out: QuotaCostRuleRef[] = [];
+  for (const r of raw) {
+    if (typeof r === 'string') {
+      if (isQuotaRuleSetRefLocal(r) && r.length <= 80) out.push(r);
+      continue;
+    }
+    if (isQuotaCostRule(r)) {
+      out.push({
+        id: (r as QuotaCostRule).id || `rule-${Math.random().toString(36).slice(2, 8)}`,
+        label: (r as QuotaCostRule).label,
+        multiplier: (r as QuotaCostRule).multiplier,
+        additive: (r as QuotaCostRule).additive,
+        when: {
+          minDuration: (r as QuotaCostRule).when.minDuration,
+          exactResolution: (r as QuotaCostRule).when.exactResolution,
+          usingLoras: Array.isArray((r as QuotaCostRule).when.usingLoras) ? (r as QuotaCostRule).when.usingLoras : undefined,
+        },
+      });
+    }
+  }
+  return out;
 }
 
 /** Whether a single rule matches the given job parameters. */
@@ -93,18 +113,45 @@ export function quotaCostRuleMatches(rule: QuotaCostRule, params: QuotaCostParam
 
 /**
  * Compute the effective credit cost for a video generated with the given workflow
- * and parameters.
+ * and parameters. `ruleset:` refs in quotaCostRules are expanded via `library`
+ * (admin_settings.quotaRuleSets); unknown sets expand to nothing, duplicate
+ * rule ids apply once (first wins).
  *
- * @param workflow The workflow (needs quotaCost + quotaCostRules)
+ * @param workflow The workflow (needs quotaCost + quotaCostRules, refs allowed)
  * @param params Job parameters (duration, resolution, enabled LoRAs)
+ * @param library Named rule sets, defaults to {}
  * @returns Effective credit cost, integer >= 1
  */
 export function computeWorkflowQuotaCost(
-  workflow: { quotaCost?: number; quotaCostRules?: QuotaCostRule[] | null },
-  params: QuotaCostParams = {}
+  workflow: { quotaCost?: number; quotaCostRules?: (QuotaCostRule | string)[] | null },
+  params: QuotaCostParams = {},
+  library: Record<string, QuotaCostRule[]> | undefined | null = {},
 ): number {
   const base = typeof workflow.quotaCost === 'number' && workflow.quotaCost >= 1 ? workflow.quotaCost : 1;
-  const rules = Array.isArray(workflow.quotaCostRules) ? workflow.quotaCostRules : [];
+  const raw = Array.isArray(workflow.quotaCostRules) ? workflow.quotaCostRules : [];
+  const table = library && typeof library === 'object' ? library : {};
+
+  const rules: QuotaCostRule[] = [];
+  const seenIds = new Set<string>();
+  const visit = (list: readonly (QuotaCostRule | string)[], path: string[], depth: number) => {
+    if (depth > QUOTA_RULE_SET_MAX_DEPTH) return;
+    for (const item of list) {
+      if (typeof item === 'string') {
+        if (!isQuotaRuleSetRefLocal(item)) continue;
+        const name = item.slice(QUOTA_RULE_SET_PREFIX.length);
+        if (path.includes(name)) continue;
+        const inner = (table as Record<string, unknown>)[name];
+        if (!Array.isArray(inner)) continue;
+        visit(inner as (QuotaCostRule | string)[], [...path, name], depth + 1);
+      } else if (isQuotaCostRule(item)) {
+        const norm = normalizeQuotaCostRules([item])[0] as QuotaCostRule;
+        if (seenIds.has(norm.id)) continue;
+        seenIds.add(norm.id);
+        rules.push(norm);
+      }
+    }
+  };
+  visit(raw, [], 0);
 
   let product = 1;
   let added = 0;

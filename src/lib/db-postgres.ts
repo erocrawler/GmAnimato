@@ -3,6 +3,7 @@ import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic, Workflow, 
 import { DEFAULT_LORA_PRESETS, normalizeLoraPresets } from './loraPresets';
 import { normalizeLoraSets, isLoraSetRef } from './loraSets';
 import { normalizeQuotaCostRules } from './quotaCost';
+import { normalizeQuotaRuleSets } from './quotaRuleSets';
 import { normalizeWorkflowCapabilities, engineFromTemplatePath } from './workflowCapabilities';
 import { PrismaPg } from '@prisma/adapter-pg'
 
@@ -1012,6 +1013,9 @@ export class PostgresDatabase implements IDatabase {
     if ((patch as any).loraSets !== undefined) {
       (data as any).loraSets = normalizeLoraSets((patch as any).loraSets);
     }
+    if ((patch as any).quotaRuleSets !== undefined) {
+      (data as any).quotaRuleSets = normalizeQuotaRuleSets((patch as any).quotaRuleSets);
+    }
     let newLoraIds: string[] = [];
     let newLoras: any[] = [];
     let removedLoraIds: string[] = [];
@@ -1208,6 +1212,7 @@ export class PostgresDatabase implements IDatabase {
       paidUserQueueLimit: settings.paidUserQueueLimit || 5,
       loraPresets: normalizeLoraPresets(settings.loraPresets ?? DEFAULT_LORA_PRESETS),
       loraSets: normalizeLoraSets((settings as any).loraSets ?? {}),
+      quotaRuleSets: normalizeQuotaRuleSets((settings as any).quotaRuleSets ?? (settings as any).quota_rule_sets ?? {}),
       sponsorApiUrl: sponsorConfig.sponsorApiUrl || undefined,
       sponsorApiToken: sponsorConfig.sponsorApiToken || undefined,
       deviceId: sponsorConfig.deviceId || undefined,

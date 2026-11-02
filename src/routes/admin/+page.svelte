@@ -107,6 +107,46 @@
     workflowCompatibleLoras = workflowCompatibleLoras.filter((id) => id !== ref);
   }
 
+  // Quota rule sets (named groups; workflows reference them via `ruleset:<name>`)
+  let quotaRuleSetNameInput = $state('');
+  let workflowQuotaRuleSetRefInput = $state('');
+  const quotaRuleSets = $derived.by(() => (settings as any).quotaRuleSets ?? {});
+  const quotaRuleSetNames = $derived.by(() => Object.keys(quotaRuleSets).sort());
+  function setQuotaRuleSets(next: Record<string, any[]>) {
+    settings = { ...(settings as any), quotaRuleSets: next } as any;
+  }
+  function addQuotaRuleSet() {
+    const name = quotaRuleSetNameInput.trim();
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name) || name.length > 64) return;
+    if (quotaRuleSets[name] !== undefined) return;
+    setQuotaRuleSets({ ...quotaRuleSets, [name]: [] });
+    quotaRuleSetNameInput = '';
+  }
+  function removeQuotaRuleSet(name: string) {
+    const next: Record<string, any[]> = { ...quotaRuleSets };
+    delete next[name];
+    setQuotaRuleSets(next);
+  }
+  function updateQuotaRuleSet(name: string, text: string) {
+    try {
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed)) return;
+      setQuotaRuleSets({ ...quotaRuleSets, [name]: parsed });
+    } catch {
+      // invalid JSON while typing — keep old value until valid
+    }
+  }
+  function addQuotaRuleSetRefToWorkflow() {
+    const name = workflowQuotaRuleSetRefInput.trim();
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name) || name.length > 64) return;
+    const ref = `ruleset:${name}`;
+    if (!(workflowQuotaCostRules as any[]).includes(ref)) workflowQuotaCostRules = [...workflowQuotaCostRules, ref as any];
+    workflowQuotaRuleSetRefInput = '';
+  }
+  function removeQuotaRuleSetRefFromWorkflow(ref: string) {
+    workflowQuotaCostRules = workflowQuotaCostRules.filter((r: any) => r !== ref);
+  }
+
   // Derived helpers for preset UI
   const allLoraTags = $derived.by(() => {
     const set = new Set<string>();
@@ -1548,6 +1588,28 @@
           </div>
         {/each}
       {/if}
+
+      <div class="divider my-4 text-xs">Quota rule sets — workflows reference them via <code>ruleset:name</code></div>
+      <div class="flex gap-2 mb-2 items-center">
+        <input class="input input-bordered input-sm w-56" placeholder="new rule set name" bind:value={quotaRuleSetNameInput} />
+        <button class="btn btn-sm btn-outline" onclick={addQuotaRuleSet}>+ Add rule set</button>
+        <span class="text-xs opacity-60">JSON array of rules; keep rule ids stable.</span>
+      </div>
+      {#if quotaRuleSetNames.length === 0}
+        <p class="text-base-content/70 text-sm">No rule sets yet.</p>
+      {:else}
+        {#each quotaRuleSetNames as rsName}
+          <div class="border border-base-200 rounded-lg p-2 mb-2">
+            <div class="flex items-center gap-2 mb-1">
+              <code class="text-sm font-bold">ruleset:{rsName}</code>
+              <span class="text-xs opacity-60">{(quotaRuleSets[rsName] || []).length} rules</span>
+              <span class="flex-1"></span>
+              <button class="btn btn-xs btn-ghost text-error" onclick={() => removeQuotaRuleSet(rsName)}>Delete</button>
+            </div>
+            <textarea class="textarea textarea-bordered textarea-xs w-full font-mono" rows="4" value={JSON.stringify(quotaRuleSets[rsName] || [], null, 2)} oninput={(e) => updateQuotaRuleSet(rsName, (e.target as HTMLTextAreaElement).value)}></textarea>
+          </div>
+        {/each}
+      {/if}
     </div>
   </div>
   
@@ -2194,12 +2256,21 @@
           <span class="text-sm font-semibold">Quota Cost Rules</span>
           <button class="btn btn-xs btn-outline" onclick={addQuotaCostRule}>+ Add rule</button>
         </div>
-        <p class="text-xs opacity-50 mb-2">Multipliers (×) scale the base cost, additive (+/−) adds or subtracts a flat credit, multipliers &lt;1× (e.g. 0.5×) also discount. e.g. "2× if duration ≥ 8s" or "+1 if using a ref video" or "-1 when speed-up LoRA used".</p>
+        <p class="text-xs opacity-50 mb-2">Multipliers (×) scale the base cost, additive (+/−) adds or subtracts a flat credit, multipliers &lt;1× (e.g. 0.5×) also discount. e.g. "2× if duration ≥ 8s" or "+1 if using a ref video" or "-1 when speed-up LoRA used". Use <code>ruleset:name</code> to reuse the shared library.</p>
+        <div class="flex gap-2 mb-2 items-center">
+          <input class="input input-bordered input-xs w-48" placeholder="ruleset name, e.g. h3-768p" bind:value={workflowQuotaRuleSetRefInput} />
+          <button class="btn btn-xs" onclick={addQuotaRuleSetRefToWorkflow}>Add ruleset ref</button>
+          {#each (workflowQuotaCostRules as any[]).filter((r: any) => typeof r === 'string') as ref}
+            <span class="badge badge-secondary badge-sm gap-1">{ref}<button class="ml-1" onclick={() => removeQuotaRuleSetRefFromWorkflow(ref)}>✕</button></span>
+          {/each}
+        </div>
         {#if workflowQuotaCostRules.length === 0}
           <p class="text-xs opacity-40">No rules — cost is always {workflowQuotaCost} credit{workflowQuotaCost > 1 ? 's' : ''}/video.</p>
         {:else}
           <div class="space-y-3">
-            {#each workflowQuotaCostRules as rule, ri (rule.id)}
+            {#each (workflowQuotaCostRules as any[]).map((r: any, idx: number) => ({ r, idx })).filter((x: any) => typeof x.r !== 'string') as _unused}
+              {@const rule = _unused.r}
+              {@const ri = _unused.idx}
               <div class="border border-base-300 rounded-lg p-3 space-y-2">
                 <div class="flex items-center gap-2">
                   <input type="number" min={0.1} step={0.1} bind:value={rule.multiplier} placeholder="1" class="input input-bordered input-xs w-20" title="Multiplier (×) — &lt;1 is a discount" />

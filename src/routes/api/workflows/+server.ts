@@ -23,11 +23,12 @@ export const GET: RequestHandler = async ({ url, locals }) => {
   const presets = normalizeLoraPresets(settings.loraPresets);
   const hasAdvanced = userHasAdvancedFeatures(locals.user.roles, settings);
   const loraSets = (settings as any).loraSets ?? {};
+  const quotaRuleSets = (settings as any).quotaRuleSets ?? {};
 
   return jsonResponse({
     workflows: workflows
       .filter((w) => !w.isDeleted && (!type || w.workflowType === type))
-      .map((w) => describeWorkflow(w, presets, hasAdvanced, loraSets)),
+      .map((w) => describeWorkflow(w, presets, hasAdvanced, loraSets, quotaRuleSets)),
     user: {
       has_advanced_features: hasAdvanced,
       max_duration_seconds: maxAllowedDurationSeconds(hasAdvanced),

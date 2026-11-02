@@ -453,13 +453,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     // Save user's settings first (before quota check) so their preferences are preserved
     // Snapshot the workflow's effective credit cost so historical usage stays accurate
     // even if the workflow is later edited or deleted. The cost is computed from the
-    // base quotaCost plus any matching quotaCostRules (e.g. 2x if duration >= 8s or
-    // if a speed-up LoRA is not used).
+    // base quotaCost plus any matching quotaCostRules (inline + `ruleset:` refs).
     const workflowQuotaCost = computeWorkflowQuotaCost(workflow, {
       videoDuration,
       videoResolution: resolution,
       loraWeights: filteredLoraWeights,
-    });
+    }, (settings as any).quotaRuleSets ?? {});
     const settingsPayload: any = { 
       workflow_id: workflow.id,
       quota_cost: workflowQuotaCost,
