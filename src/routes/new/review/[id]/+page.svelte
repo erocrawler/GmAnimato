@@ -171,6 +171,7 @@
         videoDuration: effectiveVideoDuration,
         videoResolution,
         loraWeights,
+        hasRefVideo: Boolean(entry?.additional_options?.ref_video_url),
       }, (data as any).quotaRuleSets ?? {})
     : 1;
   $: isMiniMaxSelected = !!selectedWorkflow && isMiniMaxWorkflow(selectedWorkflow);

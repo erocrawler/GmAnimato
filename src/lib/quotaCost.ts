@@ -33,6 +33,8 @@ export type QuotaCostRule = {
     exactResolution?: '480p' | '720p' | '720p-hd' | '768p';
     /** Applies when ANY of these LoRA ids are enabled (present in loraWeights). */
     usingLoras?: string[];
+    /** Applies when a reference video is / is not attached. Omit for either. */
+    hasRefVideo?: boolean;
   };
 };
 
@@ -40,6 +42,7 @@ export type QuotaCostParams = {
   videoDuration?: number;
   videoResolution?: string;
   loraWeights?: Record<string, number> | null;
+  hasRefVideo?: boolean;
 };
 
 export function isQuotaCostRule(value: unknown): value is QuotaCostRule {
@@ -55,6 +58,7 @@ export function isQuotaCostRule(value: unknown): value is QuotaCostRule {
   if (when.minDuration !== undefined && typeof when.minDuration !== 'number') return false;
   if (when.exactResolution !== undefined && when.exactResolution !== '480p' && when.exactResolution !== '720p' && when.exactResolution !== '720p-hd' && when.exactResolution !== '768p') return false;
   if (when.usingLoras !== undefined && !Array.isArray(when.usingLoras)) return false;
+  if (when.hasRefVideo !== undefined && typeof when.hasRefVideo !== 'boolean') return false;
   return true;
 }
 
@@ -87,6 +91,7 @@ export function normalizeQuotaCostRules(raw: unknown): QuotaCostRuleRef[] {
           minDuration: (r as QuotaCostRule).when.minDuration,
           exactResolution: (r as QuotaCostRule).when.exactResolution,
           usingLoras: Array.isArray((r as QuotaCostRule).when.usingLoras) ? (r as QuotaCostRule).when.usingLoras : undefined,
+          hasRefVideo: typeof (r as QuotaCostRule).when.hasRefVideo === 'boolean' ? (r as QuotaCostRule).when.hasRefVideo : undefined,
         },
       });
     }
@@ -107,6 +112,9 @@ export function quotaCostRuleMatches(rule: QuotaCostRule, params: QuotaCostParam
     // Applies only if AT LEAST ONE of the listed LoRAs is enabled
     const anyUsed = w.usingLoras.some((id) => !!params.loraWeights?.[id]);
     if (!anyUsed) return false;
+  }
+  if (w.hasRefVideo !== undefined) {
+    if ((params.hasRefVideo ?? false) !== w.hasRefVideo) return false;
   }
   return true;
 }

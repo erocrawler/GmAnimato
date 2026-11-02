@@ -454,10 +454,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     // Snapshot the workflow's effective credit cost so historical usage stays accurate
     // even if the workflow is later edited or deleted. The cost is computed from the
     // base quotaCost plus any matching quotaCostRules (inline + `ruleset:` refs).
+    const hasRefVideo = Boolean((existing as any)?.additional_options?.ref_video_url);
     const workflowQuotaCost = computeWorkflowQuotaCost(workflow, {
       videoDuration,
       videoResolution: resolution,
       loraWeights: filteredLoraWeights,
+      hasRefVideo,
     }, (settings as any).quotaRuleSets ?? {});
     const settingsPayload: any = { 
       workflow_id: workflow.id,

@@ -2280,7 +2280,7 @@
                   <input type="text" placeholder="Label (optional)" bind:value={rule.label} class="input input-bordered input-xs flex-1" />
                   <button class="btn btn-xs btn-error btn-ghost" onclick={() => removeQuotaCostRule(ri)}>✕</button>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
                   <label class="flex items-center gap-2">
                     <span class="opacity-60 shrink-0">Duration ≥</span>
                     <select class="select select-bordered select-xs" value={rule.when.minDuration ?? ''}
@@ -2300,6 +2300,15 @@
                       <option value="720p">ESRGAN 2x</option>
                       <option value="720p-hd">720p native (Wan)</option>
                       <option value="768p">768p (H3 two-stage)</option>
+                    </select>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <span class="opacity-60 shrink-0">Ref video</span>
+                    <select class="select select-bordered select-xs" value={rule.when.hasRefVideo === true ? 'yes' : rule.when.hasRefVideo === false ? 'no' : ''}
+                      onchange={(e) => updateQuotaCostRuleWhen(ri, { hasRefVideo: e.currentTarget.value === '' ? undefined : e.currentTarget.value === 'yes' })}>
+                      <option value="">(any)</option>
+                      <option value="yes">with video</option>
+                      <option value="no">without video</option>
                     </select>
                   </label>
                 </div>
