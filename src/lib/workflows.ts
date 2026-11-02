@@ -1,5 +1,7 @@
 import type { Workflow } from './db';
 import type { LoraPreset } from './loraPresets';
+import type { LoraSets } from './loraSets';
+import { resolveWorkflowLoraIds } from './loraSets';
 import {
   engineFromTemplatePath,
   resolveCapabilities,
@@ -52,13 +54,16 @@ export function getWorkflowCapabilities(
 }
 
 /**
- * Get compatible LoRA presets for a given workflow
+ * Get compatible LoRA presets for a given workflow.
+ * `compatibleLoraIds` may contain `set:` refs; they are expanded via `sets`.
  */
 export function filterLorasForWorkflow(
   allLoraPresets: LoraPreset[],
-  workflow: Workflow
+  workflow: Workflow,
+  sets?: LoraSets,
 ): LoraPreset[] {
-  return allLoraPresets.filter((lora) => workflow.compatibleLoraIds.includes(lora.id));
+  const expanded = new Set(resolveWorkflowLoraIds(workflow.compatibleLoraIds, sets ?? {}));
+  return allLoraPresets.filter((lora) => expanded.has(lora.id));
 }
 
 /**
@@ -75,10 +80,12 @@ export function isMiniMaxWorkflow(
 }
 
 /**
- * Check if a LoRA is compatible with a workflow
+ * Check if a LoRA is compatible with a workflow (set refs are expanded).
  */
-export function isLoraCompatible(loraId: string, workflow: Workflow): boolean {
-  return workflow.compatibleLoraIds.includes(loraId);
+export function isLoraCompatible(loraId: string, workflow: Workflow, sets?: LoraSets): boolean {
+  if (workflow.compatibleLoraIds.includes(loraId)) return true;
+  if (!sets) return false;
+  return resolveWorkflowLoraIds(workflow.compatibleLoraIds, sets).includes(loraId);
 }
 
 /**
@@ -94,9 +101,10 @@ export function isLoraCompatible(loraId: string, workflow: Workflow): boolean {
 export function withRequiredLoras(
   loraWeights: Record<string, number> | undefined,
   workflow: Workflow,
-  presets: ReadonlyArray<{ id: string; default: number; min?: number; max?: number; isConfigurable?: boolean }>
+  presets: ReadonlyArray<{ id: string; default: number; min?: number; max?: number; isConfigurable?: boolean }>,
+  sets?: LoraSets,
 ): Record<string, number> | undefined {
-  const required = presets.filter((p) => p.isConfigurable === false && isLoraCompatible(p.id, workflow));
+  const required = presets.filter((p) => p.isConfigurable === false && isLoraCompatible(p.id, workflow, sets));
   if (required.length === 0) return loraWeights;
   const out: Record<string, number> = { ...(loraWeights ?? {}) };
   for (const p of required) {
@@ -109,13 +117,14 @@ export function withRequiredLoras(
 }
 
 /**
- * Filter LoRA weights to only include compatible ones for a workflow
+ * Filter LoRA weights to only include compatible ones for a workflow (set refs expanded).
  */
 export function filterLoraWeights(
   loraWeights: Record<string, number>,
-  workflow: Workflow
+  workflow: Workflow,
+  sets?: LoraSets,
 ): Record<string, number> {
   return Object.fromEntries(
-    Object.entries(loraWeights).filter(([loraId]) => isLoraCompatible(loraId, workflow))
+    Object.entries(loraWeights).filter(([loraId]) => isLoraCompatible(loraId, workflow, sets))
   );
 }

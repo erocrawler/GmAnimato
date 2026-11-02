@@ -118,6 +118,7 @@ export type CreateApiTokenInput = {
 };
 
 import type { LoraPreset } from './loraPresets';
+import type { LoraSets } from './loraSets';
 import type { WorkflowEngine, WorkflowRunOn, WorkflowCapabilities } from './workflowCapabilities';
 
 export type RoleConfig = {
@@ -169,6 +170,8 @@ export type AdminSettings = {
   freeUserQueueLimit: number; // Max concurrent jobs for free users
   paidUserQueueLimit: number; // Max concurrent jobs for paid users
   loraPresets?: LoraPreset[];
+  /** Named LoRA sets: name -> list of LoRA ids and/or `set:` refs. Workflows reference them via `set:<name>` in compatibleLoraIds. */
+  loraSets?: LoraSets;
   sponsorApiUrl?: string; // GmCrawler sponsor API endpoint
   sponsorApiToken?: string; // Auth token for sponsor API
   deviceId?: string; // Device ID for sponsor API requests

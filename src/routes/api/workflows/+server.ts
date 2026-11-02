@@ -22,11 +22,12 @@ export const GET: RequestHandler = async ({ url, locals }) => {
   const [settings, workflows] = await Promise.all([getAdminSettings(), getWorkflows()]);
   const presets = normalizeLoraPresets(settings.loraPresets);
   const hasAdvanced = userHasAdvancedFeatures(locals.user.roles, settings);
+  const loraSets = (settings as any).loraSets ?? {};
 
   return jsonResponse({
     workflows: workflows
       .filter((w) => !w.isDeleted && (!type || w.workflowType === type))
-      .map((w) => describeWorkflow(w, presets, hasAdvanced)),
+      .map((w) => describeWorkflow(w, presets, hasAdvanced, loraSets)),
     user: {
       has_advanced_features: hasAdvanced,
       max_duration_seconds: maxAllowedDurationSeconds(hasAdvanced),

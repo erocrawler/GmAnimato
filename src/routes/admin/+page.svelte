@@ -72,6 +72,41 @@
   let bulkTargetWorkflowIds = $state<string[]>([]);
   let bulkAction: 'add' | 'remove' | 'set' = $state('add');
 
+  // LoRA sets (named groups; workflows reference them via `set:<name>`)
+  let loraSetNameInput = $state('');
+  let workflowSetRefInput = $state('');
+  const loraSets = $derived.by(() => (settings as any).loraSets ?? {});
+  const loraSetNames = $derived.by(() => Object.keys(loraSets).sort());
+  function setLoraSets(next: Record<string, string[]>) {
+    settings = { ...(settings as any), loraSets: next } as any;
+  }
+  function addLoraSet() {
+    const name = loraSetNameInput.trim();
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name) || name.length > 64) return;
+    if (loraSets[name] !== undefined) return;
+    setLoraSets({ ...loraSets, [name]: [] });
+    loraSetNameInput = '';
+  }
+  function removeLoraSet(name: string) {
+    const next: Record<string, string[]> = { ...loraSets };
+    delete next[name];
+    setLoraSets(next);
+  }
+  function updateLoraSet(name: string, text: string) {
+    const ids = text.split('\n').map((s) => s.trim()).filter(Boolean);
+    setLoraSets({ ...loraSets, [name]: ids });
+  }
+  function addSetRefToWorkflow() {
+    const name = workflowSetRefInput.trim();
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name) || name.length > 64) return;
+    const ref = `set:${name}`;
+    if (!workflowCompatibleLoras.includes(ref)) workflowCompatibleLoras = [...workflowCompatibleLoras, ref];
+    workflowSetRefInput = '';
+  }
+  function removeSetRefFromWorkflow(ref: string) {
+    workflowCompatibleLoras = workflowCompatibleLoras.filter((id) => id !== ref);
+  }
+
   // Derived helpers for preset UI
   const allLoraTags = $derived.by(() => {
     const set = new Set<string>();
@@ -821,10 +856,11 @@
     }
 
     // Auto-purge ghost LoRAs: ids that no longer exist in loraPresets
-    // (rename/delete leaves orphan compatibleLoraIds that break generation)
+    // (rename/delete leaves orphan compatibleLoraIds that break generation).
+    // `set:` refs are not LoRA ids — never purge them here.
     const validIds = new Set((settings.loraPresets || []).map((p: any) => p.id));
-    const purgedIds = workflowCompatibleLoras.filter((id: string) => !validIds.has(id));
-    if (purgedIds.length) workflowCompatibleLoras = workflowCompatibleLoras.filter((id: string) => validIds.has(id));
+    const purgedIds = workflowCompatibleLoras.filter((id: string) => !id.startsWith('set:') && !validIds.has(id));
+    if (purgedIds.length) workflowCompatibleLoras = workflowCompatibleLoras.filter((id: string) => id.startsWith('set:') || validIds.has(id));
     const cleanedRules = workflowQuotaCostRules.map((r: any) => {
       const w = r?.when || {};
       const using = Array.isArray(w.usingLoras) ? w.usingLoras.filter((id: string) => validIds.has(id)) : w.usingLoras;
@@ -1490,6 +1526,28 @@
         </button>
       </div>
       <p class="text-xs opacity-60 mt-2">Saving detects newly added LoRAs and auto-assigns them to workflows where <code>autoIncludeNewLoras=true</code> or tags overlap or LoRA has <code>autoAddToWorkflows</code>.</p>
+
+      <div class="divider my-4 text-xs">LoRA sets — workflows reference them via <code>set:name</code></div>
+      <div class="flex gap-2 mb-2 items-center">
+        <input class="input input-bordered input-sm w-56" placeholder="new set name" bind:value={loraSetNameInput} />
+        <button class="btn btn-sm btn-outline" onclick={addLoraSet}>+ Add set</button>
+        <span class="text-xs opacity-60">One id per line; <code>set:other</code> nests sets.</span>
+      </div>
+      {#if loraSetNames.length === 0}
+        <p class="text-base-content/70 text-sm">No sets yet.</p>
+      {:else}
+        {#each loraSetNames as setName}
+          <div class="border border-base-200 rounded-lg p-2 mb-2">
+            <div class="flex items-center gap-2 mb-1">
+              <code class="text-sm font-bold">set:{setName}</code>
+              <span class="text-xs opacity-60">{(loraSets[setName] || []).length} ids</span>
+              <span class="flex-1"></span>
+              <button class="btn btn-xs btn-ghost text-error" onclick={() => removeLoraSet(setName)}>Delete</button>
+            </div>
+            <textarea class="textarea textarea-bordered textarea-sm w-full font-mono" rows="3" value={(loraSets[setName] || []).join('\n')} oninput={(e) => updateLoraSet(setName, (e.target as HTMLTextAreaElement).value)}></textarea>
+          </div>
+        {/each}
+      {/if}
     </div>
   </div>
   
@@ -2272,6 +2330,14 @@
       </div>
 
       <div class="divider my-3 text-xs">LoRAs — {workflowCompatibleLoras.length} selected</div>
+
+      <div class="flex flex-wrap gap-2 mb-2 items-center">
+        <input class="input input-bordered input-xs w-48" placeholder="set name, e.g. wan-mid" bind:value={workflowSetRefInput} />
+        <button class="btn btn-xs" onclick={addSetRefToWorkflow}>Add set ref</button>
+        {#each workflowCompatibleLoras.filter((id) => id.startsWith('set:')) as ref}
+          <span class="badge badge-primary badge-sm gap-1">{ref}<button class="ml-1" onclick={() => removeSetRefFromWorkflow(ref)}>✕</button></span>
+        {/each}
+      </div>
 
       <div class="flex flex-wrap gap-2 mb-2 items-center">
         <select class="select select-bordered select-xs" bind:value={workflowSelectedGroupFilter}>

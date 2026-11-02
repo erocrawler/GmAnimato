@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { db } from '$lib/db';
 import { normalizeQuotaCostRules } from '$lib/quotaCost';
 import { normalizeWorkflowCapabilities } from '$lib/workflowCapabilities';
+import { isLoraSetRef, isValidLoraSetName, setNameFromRef } from '$lib/loraSets';
 
 export const PUT: RequestHandler = async ({ locals, params, request }) => {
   // Check authentication
@@ -21,6 +22,12 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
 
   if (compatibleLoraIds !== undefined && !Array.isArray(compatibleLoraIds)) {
     throw error(400, 'compatibleLoraIds must be an array');
+  }
+  if (Array.isArray(compatibleLoraIds)) {
+    for (const cid of compatibleLoraIds) {
+      if (typeof cid !== 'string' || cid.length === 0 || cid.length > 255) throw error(400, 'compatibleLoraIds must be strings');
+      if (isLoraSetRef(cid) && !isValidLoraSetName(setNameFromRef(cid))) throw error(400, `invalid LoRA set ref ${cid}`);
+    }
   }
 
   if (workflowType !== undefined && !['i2v', 'fl2v', 'ref2v'].includes(workflowType)) {

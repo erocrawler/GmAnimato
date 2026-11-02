@@ -182,6 +182,29 @@
     data.loraPresets && data.loraPresets.length > 0
       ? data.loraPresets
       : DEFAULT_LORA_PRESETS;
+  const LORA_SETS: Record<string, string[]> = (data as any).loraSets ?? {};
+  const expandedWorkflowLoraIds = (ids: string[] | undefined): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const visit = (list: string[], path: string[], depth: number): void => {
+      if (depth > 10) return;
+      for (const item of list) {
+        if (typeof item !== 'string' || !item) continue;
+        if (item.startsWith('set:')) {
+          const name = item.slice(4);
+          if (path.includes(name)) continue;
+          const inner = (LORA_SETS as any)[name];
+          if (!Array.isArray(inner)) continue;
+          visit(inner, [...path, name], depth + 1);
+        } else if (!seen.has(item)) {
+          seen.add(item);
+          out.push(item);
+        }
+      }
+    };
+    visit(Array.isArray(ids) ? ids : [], [], 0);
+    return out;
+  };
 
   const hasAdvancedFeatures: boolean = data.hasAdvancedFeatures || false;
 
@@ -373,7 +396,7 @@
     entry.lora_weights ||
     Object.fromEntries(LORA_PRESETS.map((lora) => [lora.id, lora.default]));
 
-  // Get LoRAs compatible with selected workflow
+  // Get LoRAs compatible with selected workflow (set: refs expanded)
   $: filteredLoraPresets =
     selectedWorkflowId && filteredWorkflows.length > 0
       ? (() => {
@@ -381,9 +404,8 @@
             (w) => w.id === selectedWorkflowId,
           );
           if (workflow) {
-            return LORA_PRESETS.filter((lora) =>
-              workflow.compatibleLoraIds.includes(lora.id),
-            );
+            const expanded = new Set(expandedWorkflowLoraIds(workflow.compatibleLoraIds));
+            return LORA_PRESETS.filter((lora) => expanded.has(lora.id));
           }
           return LORA_PRESETS;
         })()

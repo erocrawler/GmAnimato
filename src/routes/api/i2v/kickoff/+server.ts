@@ -387,11 +387,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 
     // Filter LoRA weights to only compatible ones for the selected workflow
-    // and make sure the workflow's required (non-configurable) LoRAs are always applied.
+    // (set: refs expanded) and make sure the workflow's required
+    // (non-configurable) LoRAs are always applied.
+    const loraSets = (settings as any).loraSets ?? {};
     const filteredLoraWeights = withRequiredLoras(
-      loraWeights ? filterLoraWeights(loraWeights, workflow) : undefined,
+      loraWeights ? filterLoraWeights(loraWeights, workflow, loraSets) : undefined,
       workflow,
-      normalizeLoraPresets(settings.loraPresets)
+      normalizeLoraPresets(settings.loraPresets),
+      loraSets,
     );
 
     // Generate seed for reproducibility

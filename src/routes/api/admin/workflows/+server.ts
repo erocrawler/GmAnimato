@@ -3,10 +3,19 @@ import type { RequestHandler } from './$types';
 import { db } from '$lib/db';
 import { normalizeQuotaCostRules } from '$lib/quotaCost';
 import { normalizeWorkflowCapabilities, engineFromTemplatePath } from '$lib/workflowCapabilities';
+import { isLoraSetRef, isValidLoraSetName, setNameFromRef } from '$lib/loraSets';
 
 function parseEngine(raw: unknown, templatePath?: string): string {
   if (raw === 'wan' || raw === 'minimax') return raw;
   return engineFromTemplatePath(templatePath);
+}
+
+function assertCompatibleLoraIds(v: unknown): void {
+  if (!Array.isArray(v)) throw error(400, 'compatibleLoraIds must be an array');
+  for (const id of v) {
+    if (typeof id !== 'string' || id.length === 0 || id.length > 255) throw error(400, 'compatibleLoraIds must be strings');
+    if (isLoraSetRef(id) && !isValidLoraSetName(setNameFromRef(id))) throw error(400, `invalid LoRA set ref ${id}`);
+  }
 }
 
 export const POST: RequestHandler = async ({ locals, request }) => {
@@ -44,6 +53,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
   if (!Array.isArray(compatibleLoraIds)) {
     throw error(400, 'compatibleLoraIds must be an array');
   }
+  assertCompatibleLoraIds(compatibleLoraIds);
 
   if (quotaCost !== undefined && (!Number.isInteger(quotaCost) || quotaCost < 1)) {
     throw error(400, 'quotaCost must be an integer >= 1');

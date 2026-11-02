@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic } from './IDatabase';
 import { DEFAULT_LORA_PRESETS, normalizeLoraPresets } from './loraPresets';
+import { normalizeLoraSets } from './loraSets';
 
 const DATA_DIR = path.resolve('data');
 const DB_FILE = path.join(DATA_DIR, 'videos.json');
@@ -553,6 +554,7 @@ export class JsonFileDatabase implements IDatabase {
     return {
       ...parsed,
       loraPresets: normalizeLoraPresets(parsed.loraPresets),
+      loraSets: normalizeLoraSets((parsed as any).loraSets ?? {}),
     };
   }
 
@@ -563,6 +565,7 @@ export class JsonFileDatabase implements IDatabase {
       ...settings,
       ...patch,
       loraPresets: normalizeLoraPresets(patch.loraPresets ?? settings.loraPresets),
+      loraSets: normalizeLoraSets((patch as any).loraSets ?? (settings as any).loraSets ?? {}),
       id: 'default',
       updatedAt: new Date().toISOString(),
     };

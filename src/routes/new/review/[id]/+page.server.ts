@@ -2,6 +2,7 @@ import type { PageServerLoad } from './$types';
 import { error } from '@sveltejs/kit';
 import { getVideoById, getAdminSettings, getWorkflows } from '$lib/db';
 import { normalizeLoraPresets } from '$lib/loraPresets';
+import { normalizeLoraSets } from '$lib/loraSets';
 import { env } from '$env/dynamic/private';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
@@ -28,6 +29,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   return { 
     entry, 
     loraPresets: normalizeLoraPresets(adminSettings.loraPresets),
+    loraSets: normalizeLoraSets((adminSettings as any).loraSets ?? {}),
     hasAdvancedFeatures,
     sponsorUrl: env.SPONSOR_URL,
     workflows

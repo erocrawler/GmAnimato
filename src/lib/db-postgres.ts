@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import type { IDatabase, VideoEntry, User, AdminSettings, UserPublic, Workflow, SponsorClaim, ApiToken, CreateApiTokenInput } from './IDatabase';
 import { DEFAULT_LORA_PRESETS, normalizeLoraPresets } from './loraPresets';
+import { normalizeLoraSets, isLoraSetRef } from './loraSets';
 import { normalizeQuotaCostRules } from './quotaCost';
 import { normalizeWorkflowCapabilities, engineFromTemplatePath } from './workflowCapabilities';
 import { PrismaPg } from '@prisma/adapter-pg'
@@ -1008,6 +1009,9 @@ export class PostgresDatabase implements IDatabase {
     if (patch.freeUserWaitThresholdMinutes !== undefined) data.freeUserWaitThresholdMinutes = patch.freeUserWaitThresholdMinutes;
     if (patch.freeUserQueueLimit !== undefined) data.freeUserQueueLimit = patch.freeUserQueueLimit;
     if (patch.paidUserQueueLimit !== undefined) data.paidUserQueueLimit = patch.paidUserQueueLimit;
+    if ((patch as any).loraSets !== undefined) {
+      (data as any).loraSets = normalizeLoraSets((patch as any).loraSets);
+    }
     let newLoraIds: string[] = [];
     let newLoras: any[] = [];
     let removedLoraIds: string[] = [];
@@ -1063,12 +1067,13 @@ export class PostgresDatabase implements IDatabase {
           const w = wf as any;
           const compatibleIds: string[] = Array.isArray(w.compatibleLoraIds) ? w.compatibleLoraIds as string[] : [];
           const rules: any[] = Array.isArray(w.quotaCostRules) ? w.quotaCostRules : [];
-          const filteredIds = compatibleIds.filter((id: string) => validLoraIds.has(id));
+          // `set:` refs are not LoRA ids — never purge them here.
+          const filteredIds = compatibleIds.filter((id: string) => isLoraSetRef(id) || validLoraIds.has(id));
           let rulesChanged = false;
           const filteredRules = rules.map((r: any) => {
             const when = r?.when || {};
             const rawUsing = when.usingLoras as string[] | undefined;
-            const using = Array.isArray(rawUsing) ? rawUsing.filter((id: string) => validLoraIds!.has(id)) : rawUsing;
+            const using = Array.isArray(rawUsing) ? rawUsing.filter((id: string) => isLoraSetRef(id) || validLoraIds!.has(id)) : rawUsing;
             if (using?.length === rawUsing?.length) return r;
             rulesChanged = true;
             return { ...r, when: { ...when, usingLoras: using } };
@@ -1202,6 +1207,7 @@ export class PostgresDatabase implements IDatabase {
       freeUserQueueLimit: settings.freeUserQueueLimit || 3,
       paidUserQueueLimit: settings.paidUserQueueLimit || 5,
       loraPresets: normalizeLoraPresets(settings.loraPresets ?? DEFAULT_LORA_PRESETS),
+      loraSets: normalizeLoraSets((settings as any).loraSets ?? {}),
       sponsorApiUrl: sponsorConfig.sponsorApiUrl || undefined,
       sponsorApiToken: sponsorConfig.sponsorApiToken || undefined,
       deviceId: sponsorConfig.deviceId || undefined,

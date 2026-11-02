@@ -1,6 +1,7 @@
 import type { VideoEntry, Workflow, AdminSettings } from './IDatabase';
 import type { LoraPreset } from './loraPresets';
 import { getWorkflowCapabilities, getWorkflowEngine, getWorkflowRunOn } from './workflows';
+import { resolveWorkflowLoraIds } from './loraSets';
 import { FREE_DURATION_MAX } from './workflowCapabilities';
 import { workflowDefaultStep } from './workflowCapabilities';
 import { maxAllowedDurationSeconds } from './mediaLimits';
@@ -92,7 +93,7 @@ export function userHasAdvancedFeatures(roles: string[] | undefined, settings: P
  * allowlists, never "empty = default"), which values are premium, the LoRAs the
  * client must send with kickoff, and its credit cost.
  */
-export function describeWorkflow(w: Workflow, loraPresets: LoraPreset[], hasAdvanced: boolean) {
+export function describeWorkflow(w: Workflow, loraPresets: LoraPreset[], hasAdvanced: boolean, sets?: import('./loraSets').LoraSets) {
   const caps = getWorkflowCapabilities(w);
   const engine = getWorkflowEngine(w);
   const tierMaxDuration = maxAllowedDurationSeconds(hasAdvanced);
@@ -101,7 +102,8 @@ export function describeWorkflow(w: Workflow, loraPresets: LoraPreset[], hasAdva
   const premiumDurations = caps.durations.filter((d) => d > FREE_DURATION_MAX);
   const premiumResolutions = caps.resolutions.filter((r) => r !== '480p');
 
-  const compatible = loraPresets.filter((l) => w.compatibleLoraIds.includes(l.id));
+  const expanded = new Set(resolveWorkflowLoraIds(w.compatibleLoraIds, sets ?? {}));
+  const compatible = loraPresets.filter((l) => expanded.has(l.id));
   const required = compatible.filter((l) => l.isConfigurable === false);
   const optional = compatible.filter((l) => l.isConfigurable !== false);
 
