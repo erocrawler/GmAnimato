@@ -2256,7 +2256,7 @@
           <span class="text-sm font-semibold">Quota Cost Rules</span>
           <button class="btn btn-xs btn-outline" onclick={addQuotaCostRule}>+ Add rule</button>
         </div>
-        <p class="text-xs opacity-50 mb-2">Multipliers (×) scale the base cost, additive (+/−) adds or subtracts a flat credit, multipliers &lt;1× (e.g. 0.5×) also discount. e.g. "2× if duration ≥ 8s" or "+1 if using a ref video" or "-1 when speed-up LoRA used". Use <code>ruleset:name</code> to reuse the shared library.</p>
+        <p class="text-xs opacity-50 mb-2">Cost = (base + Σ additives) × Π multipliers, rounded once at the end (min 1). Additive (+/−) is added to the base BEFORE the multipliers, so e.g. "+1 with a reference video" is then scaled by the resolution / length multipliers; multipliers &lt;1× (e.g. 0.5×) discount. e.g. "2× if duration ≥ 6s" or "+1 if using a ref video" or "-1 when speed-up LoRA used". Rule order does not matter. Use <code>ruleset:name</code> to reuse the shared library.</p>
         <div class="flex gap-2 mb-2 items-center">
           <input class="input input-bordered input-xs w-48" placeholder="ruleset name, e.g. h3-768p" bind:value={workflowQuotaRuleSetRefInput} />
           <button class="btn btn-xs" onclick={addQuotaRuleSetRefToWorkflow}>Add ruleset ref</button>

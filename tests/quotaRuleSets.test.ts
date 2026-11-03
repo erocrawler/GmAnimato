@@ -68,4 +68,22 @@ describe('quotaRuleSets', () => {
     expect(computeWorkflowQuotaCost(wFalse, { hasRefVideo: true })).toBe(1);
     expect(computeWorkflowQuotaCost(wFalse, {})).toBe(1);
   });
+
+  it('additives join the base before the multipliers: (base + video) x resolution x length', () => {
+    const rules = [
+      { id: 'video', additive: 1, when: { hasRefVideo: true } },
+      { id: 'res', multiplier: 2, when: { exactResolution: '768p' } },
+      { id: 'len', multiplier: 1.5, when: { minDuration: 6 } },
+    ] as any;
+    const w = { quotaCost: 1, quotaCostRules: rules };
+    const p = { videoResolution: '768p', videoDuration: 6 } as any;
+    expect(computeWorkflowQuotaCost(w, { ...p, hasRefVideo: true })).toBe(6); // (1 + 1) x 2 x 1.5
+    expect(computeWorkflowQuotaCost(w, { ...p, hasRefVideo: false })).toBe(3); // 1 x 2 x 1.5
+    expect(computeWorkflowQuotaCost({ quotaCost: 2, quotaCostRules: rules }, { ...p, hasRefVideo: true })).toBe(9); // (2 + 1) x 3
+    // rule order does not matter
+    expect(computeWorkflowQuotaCost({ quotaCost: 1, quotaCostRules: [...rules].reverse() }, { ...p, hasRefVideo: true })).toBe(6);
+    // never below 1, rounded once at the end
+    expect(computeWorkflowQuotaCost({ quotaCost: 1, quotaCostRules: [{ id: 'd', additive: -1, when: {} }] as any }, {})).toBe(1);
+    expect(computeWorkflowQuotaCost({ quotaCost: 1, quotaCostRules: [{ id: 'm', multiplier: 1.25, when: {} }, { id: 'a', additive: 1, when: {} }] as any }, {})).toBe(3); // 2 x 1.25 = 2.5 -> 3
+  });
 });

@@ -174,5 +174,7 @@ export function computeWorkflowQuotaCost(
     }
   }
 
-  return Math.max(1, Math.round(base * product) + added);
+  // Additives belong to the base (e.g. a reference video adds its own cost BEFORE the resolution / length
+  // multipliers apply): cost = (base + sum of additives) x product of multipliers, rounded once at the end.
+  return Math.max(1, Math.round((base + added) * product));
 }
