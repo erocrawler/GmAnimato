@@ -709,7 +709,8 @@
       workflowAutoInclude = workflow.autoIncludeNewLoras ?? true;
       workflowPresetGroup = workflow.presetGroup || '';
       workflowQuotaCost = typeof workflow.quotaCost === 'number' && workflow.quotaCost >= 1 ? workflow.quotaCost : 1;
-      workflowQuotaCostRules = (workflow.quotaCostRules || []).map((r: any) => ({ ...r, when: { ...(r.when || {}) } }));
+      // `ruleset:<name>` refs are plain strings — only inline rule objects get their `when` cloned.
+      workflowQuotaCostRules = (workflow.quotaCostRules || []).map((r: any) => (typeof r === 'string' ? r : { ...r, when: { ...(r.when || {}) } }));
       workflowEngine = workflow.engine === 'minimax' ? 'minimax' : 'wan';
       workflowRunOn = workflow.runOn === 'serverless' ? 'serverless' : 'auto';
       const def = ENGINE_DEFAULT_CAPABILITIES[workflowEngine];
@@ -1693,7 +1694,7 @@
           <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
             <label class="flex items-center gap-2">
               <span class="opacity-60 shrink-0">Duration ≥</span>
-              <select class="select select-bordered select-xs" value={rule.when?.minDuration ?? ''}
+              <select class="select select-bordered select-xs" value={String(rule.when?.minDuration ?? '')}
                 onchange={(e) => setRuleWhen(rule, { minDuration: e.currentTarget.value === '' ? undefined : +e.currentTarget.value })}>
                 <option value="">(any)</option>
                 <option value="6">6s</option>
