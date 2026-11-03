@@ -72,79 +72,154 @@
   let bulkTargetWorkflowIds = $state<string[]>([]);
   let bulkAction: 'add' | 'remove' | 'set' = $state('add');
 
-  // LoRA sets (named groups; workflows reference them via `set:<name>`)
+  // ---- LoRA sets & quota rule sets ----
+  // Edited in local deep state; the settings payload takes a snapshot of them on save.
+  // Workflows reference them as `set:<name>` / `ruleset:<name>` and only pick from the lists below.
+  const SET_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+  let loraSetsEdit = $state<Record<string, string[]>>({});
+  let quotaRuleSetsEdit = $state<Record<string, any[]>>({});
+  function seedSets(src: any) {
+    loraSetsEdit = JSON.parse(JSON.stringify(src?.loraSets ?? {}));
+    quotaRuleSetsEdit = JSON.parse(JSON.stringify(src?.quotaRuleSets ?? {}));
+  }
+  seedSets(settings);
+  const loraSetNames = $derived.by(() => Object.keys(loraSetsEdit).sort());
+  const quotaRuleSetNames = $derived.by(() => Object.keys(quotaRuleSetsEdit).sort());
   let loraSetNameInput = $state('');
-  let workflowSetRefInput = $state('');
-  const loraSets = $derived.by(() => (settings as any).loraSets ?? {});
-  const loraSetNames = $derived.by(() => Object.keys(loraSets).sort());
-  function setLoraSets(next: Record<string, string[]>) {
-    settings = { ...(settings as any), loraSets: next } as any;
+  let loraSetPick = $state<Record<string, string>>({});
+  let quotaRuleSetNameInput = $state('');
+
+  function loraLabel(id: string): string {
+    return (settings.loraPresets || []).find((p: any) => p.id === id)?.label || id;
+  }
+  /** Flattened, de-duplicated LoRA ids of a set (nested `set:` members expanded, cycle-safe). */
+  function expandLoraSet(name: string, seen: string[] = []): string[] {
+    if (seen.includes(name)) return [];
+    const out: string[] = [];
+    for (const m of loraSetsEdit[name] || []) {
+      const ids = m.startsWith('set:') ? expandLoraSet(m.slice(4), [...seen, name]) : [m];
+      for (const id of ids) if (!out.includes(id)) out.push(id);
+    }
+    return out;
+  }
+  function loraSetUsage(name: string): number {
+    const ref = `set:${name}`;
+    const inWorkflows = (workflows || []).filter((w: any) => (w.compatibleLoraIds || []).includes(ref)).length;
+    const inSets = Object.entries(loraSetsEdit).filter(([n, m]) => n !== name && (m as string[]).includes(ref)).length;
+    return inWorkflows + inSets;
   }
   function addLoraSet() {
     const name = loraSetNameInput.trim();
-    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name) || name.length > 64) return;
-    if (loraSets[name] !== undefined) return;
-    setLoraSets({ ...loraSets, [name]: [] });
+    if (!SET_NAME_RE.test(name) || name.length > 64) { showNotification('Set name: letters, digits, - and _ (max 64)', 'error'); return; }
+    if (loraSetsEdit[name] !== undefined) { showNotification(`Set "${name}" already exists`, 'error'); return; }
+    loraSetsEdit[name] = [];
     loraSetNameInput = '';
   }
   function removeLoraSet(name: string) {
-    const next: Record<string, string[]> = { ...loraSets };
-    delete next[name];
-    setLoraSets(next);
+    const used = loraSetUsage(name);
+    if (used > 0 && !confirm(`"${name}" is referenced ${used} time(s). Delete anyway? (references stay dangling and are ignored)`)) return;
+    delete loraSetsEdit[name];
   }
-  function updateLoraSet(name: string, text: string) {
-    const ids = text.split('\n').map((s) => s.trim()).filter(Boolean);
-    setLoraSets({ ...loraSets, [name]: ids });
+  function addLoraSetMember(name: string, member: string) {
+    if (!member || member === `set:${name}`) return;
+    if (!(loraSetsEdit[name] ||= []).includes(member)) loraSetsEdit[name].push(member);
   }
-  function addSetRefToWorkflow() {
-    const name = workflowSetRefInput.trim();
-    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name) || name.length > 64) return;
-    const ref = `set:${name}`;
-    if (!workflowCompatibleLoras.includes(ref)) workflowCompatibleLoras = [...workflowCompatibleLoras, ref];
-    workflowSetRefInput = '';
-  }
-  function removeSetRefFromWorkflow(ref: string) {
-    workflowCompatibleLoras = workflowCompatibleLoras.filter((id) => id !== ref);
+  function removeLoraSetMember(name: string, idx: number) {
+    loraSetsEdit[name].splice(idx, 1);
   }
 
-  // Quota rule sets (named groups; workflows reference them via `ruleset:<name>`)
-  let quotaRuleSetNameInput = $state('');
-  let workflowQuotaRuleSetRefInput = $state('');
-  const quotaRuleSets = $derived.by(() => (settings as any).quotaRuleSets ?? {});
-  const quotaRuleSetNames = $derived.by(() => Object.keys(quotaRuleSets).sort());
-  function setQuotaRuleSets(next: Record<string, any[]>) {
-    settings = { ...(settings as any), quotaRuleSets: next } as any;
-  }
   function addQuotaRuleSet() {
     const name = quotaRuleSetNameInput.trim();
-    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name) || name.length > 64) return;
-    if (quotaRuleSets[name] !== undefined) return;
-    setQuotaRuleSets({ ...quotaRuleSets, [name]: [] });
+    if (!SET_NAME_RE.test(name) || name.length > 64) { showNotification('Rule set name: letters, digits, - and _ (max 64)', 'error'); return; }
+    if (quotaRuleSetsEdit[name] !== undefined) { showNotification(`Rule set "${name}" already exists`, 'error'); return; }
+    quotaRuleSetsEdit[name] = [];
     quotaRuleSetNameInput = '';
   }
-  function removeQuotaRuleSet(name: string) {
-    const next: Record<string, any[]> = { ...quotaRuleSets };
-    delete next[name];
-    setQuotaRuleSets(next);
-  }
-  function updateQuotaRuleSet(name: string, text: string) {
-    try {
-      const parsed = JSON.parse(text);
-      if (!Array.isArray(parsed)) return;
-      setQuotaRuleSets({ ...quotaRuleSets, [name]: parsed });
-    } catch {
-      // invalid JSON while typing — keep old value until valid
-    }
-  }
-  function addQuotaRuleSetRefToWorkflow() {
-    const name = workflowQuotaRuleSetRefInput.trim();
-    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name) || name.length > 64) return;
+  function quotaRuleSetUsage(name: string): number {
     const ref = `ruleset:${name}`;
-    if (!(workflowQuotaCostRules as any[]).includes(ref)) workflowQuotaCostRules = [...workflowQuotaCostRules, ref as any];
-    workflowQuotaRuleSetRefInput = '';
+    return (workflows || []).filter((w: any) => (w.quotaCostRules || []).includes(ref)).length;
   }
-  function removeQuotaRuleSetRefFromWorkflow(ref: string) {
+  function removeQuotaRuleSet(name: string) {
+    const used = quotaRuleSetUsage(name);
+    if (used > 0 && !confirm(`"${name}" is used by ${used} workflow(s). Delete anyway? (references stay dangling and charge nothing)`)) return;
+    delete quotaRuleSetsEdit[name];
+  }
+  function addRuleToSet(name: string) {
+    quotaRuleSetsEdit[name].push({
+      id: `rule-${Math.random().toString(36).slice(2, 7)}`,
+      label: '',
+      multiplier: 2,
+      additive: undefined,
+      when: {},
+    });
+  }
+  function removeRuleFromSet(name: string, idx: number) {
+    quotaRuleSetsEdit[name].splice(idx, 1);
+  }
+  function setRuleWhen(rule: any, patch: Record<string, unknown>) {
+    rule.when = { ...(rule.when || {}), ...patch };
+  }
+  function toggleRuleLora(rule: any, loraId: string) {
+    const list: string[] = rule.when?.usingLoras || [];
+    setRuleWhen(rule, { usingLoras: list.includes(loraId) ? list.filter((id) => id !== loraId) : [...list, loraId] });
+  }
+  const RES_NAME: Record<string, string> = { '480p': '480p', '720p': 'ESRGAN 2x', '720p-hd': '720p native', '768p': '768p' };
+  function describeRule(r: any): string {
+    const parts: string[] = [];
+    if (typeof r.additive === 'number' && r.additive !== 0) parts.push(`${r.additive > 0 ? '+' : ''}${r.additive}`);
+    if (typeof r.multiplier === 'number') parts.push(`×${r.multiplier}`);
+    const w = r.when || {};
+    const cond: string[] = [];
+    if (w.exactResolution) cond.push(RES_NAME[w.exactResolution] || w.exactResolution);
+    if (typeof w.minDuration === 'number') cond.push(`≥${w.minDuration}s`);
+    if (w.hasRefVideo === true) cond.push('with ref video');
+    if (w.hasRefVideo === false) cond.push('without ref video');
+    if (Array.isArray(w.usingLoras) && w.usingLoras.length) cond.push(`using ${w.usingLoras.length} LoRA(s)`);
+    return parts.join(' ') + (cond.length ? ` when ${cond.join(', ')}` : '');
+  }
+  function describeRuleSet(name: string): string {
+    const rules = quotaRuleSetsEdit[name] || [];
+    return rules.length ? rules.map(describeRule).join('; ') : '(empty)';
+  }
+  /** Drop empty/NaN numbers and empty conditions so the saved JSON is minimal. */
+  function cleanRuleSets(): Record<string, any[]> {
+    const out: Record<string, any[]> = {};
+    for (const [name, rules] of Object.entries($state.snapshot(quotaRuleSetsEdit) as Record<string, any[]>)) {
+      out[name] = rules.map((r: any) => {
+        const w = r.when || {};
+        const when: any = {};
+        if (typeof w.minDuration === 'number') when.minDuration = w.minDuration;
+        if (w.exactResolution) when.exactResolution = w.exactResolution;
+        if (typeof w.hasRefVideo === 'boolean') when.hasRefVideo = w.hasRefVideo;
+        if (Array.isArray(w.usingLoras) && w.usingLoras.length) when.usingLoras = w.usingLoras;
+        const rule: any = { id: String(r.id || '').trim() || `rule-${Math.random().toString(36).slice(2, 7)}`, when };
+        if (r.label) rule.label = r.label;
+        if (typeof r.multiplier === 'number' && Number.isFinite(r.multiplier)) rule.multiplier = r.multiplier;
+        if (typeof r.additive === 'number' && Number.isFinite(r.additive) && r.additive !== 0) rule.additive = r.additive;
+        return rule;
+      });
+    }
+    return out;
+  }
+
+  // Workflow modal: pick sets by name (checkbox lists); refs to undefined sets show up in red.
+  function toggleWorkflowSet(name: string) {
+    const ref = `set:${name}`;
+    workflowCompatibleLoras = workflowCompatibleLoras.includes(ref)
+      ? workflowCompatibleLoras.filter((id) => id !== ref)
+      : [...workflowCompatibleLoras, ref];
+  }
+  function toggleWorkflowRuleSet(name: string) {
+    const ref = `ruleset:${name}`;
+    workflowQuotaCostRules = (workflowQuotaCostRules as any[]).includes(ref)
+      ? workflowQuotaCostRules.filter((r: any) => r !== ref)
+      : [...workflowQuotaCostRules, ref as any];
+  }
+  function removeWorkflowRuleRef(ref: string) {
     workflowQuotaCostRules = workflowQuotaCostRules.filter((r: any) => r !== ref);
+  }
+  function clearInlineRules() {
+    workflowQuotaCostRules = workflowQuotaCostRules.filter((r: any) => typeof r === 'string');
   }
 
   // Derived helpers for preset UI
@@ -386,6 +461,8 @@
       const payload = {
         ...settings,
         loraPresets: sanitizeLoraPresets(settings.loraPresets),
+        loraSets: $state.snapshot(loraSetsEdit),
+        quotaRuleSets: cleanRuleSets(),
       };
       const response = await fetch('/api/admin/settings', {
         method: 'PUT',
@@ -401,6 +478,7 @@
           ...newSettings,
           loraPresets: sanitizeLoraPresets(newSettings.loraPresets)
         };
+        seedSets(newSettings);
       } else {
         const error = await response.json();
         showNotification($_('admin.settings.error', { values: { error: error.error || 'Failed to save settings' } }), 'error');
@@ -857,38 +935,6 @@
     }
   }
 
-  // ---- Quota cost rules editor ----
-  function addQuotaCostRule() {
-    workflowQuotaCostRules = [
-      ...workflowQuotaCostRules,
-      {
-        id: `rule-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        label: '',
-        multiplier: 2,
-        additive: undefined,
-        when: {},
-      },
-    ];
-  }
-  function removeQuotaCostRule(index: number) {
-    workflowQuotaCostRules = workflowQuotaCostRules.filter((_, i) => i !== index);
-  }
-  function updateQuotaCostRule(index: number, patch: any) {
-    workflowQuotaCostRules = workflowQuotaCostRules.map((r, i) =>
-      i === index ? { ...r, ...patch } : r
-    );
-  }
-  function updateQuotaCostRuleWhen(index: number, patch: any) {
-    workflowQuotaCostRules = workflowQuotaCostRules.map((r, i) =>
-      i === index ? { ...r, when: { ...(r.when || {}), ...patch } } : r
-    );
-  }
-  function toggleLoraInRule(ruleIndex: number, field: 'usingLoras', loraId: string) {
-    const list = (workflowQuotaCostRules[ruleIndex]?.when?.[field] as string[]) || [];
-    const next = list.includes(loraId) ? list.filter(id => id !== loraId) : [...list, loraId];
-    updateQuotaCostRuleWhen(ruleIndex, { [field]: next });
-  }
-  
   async function saveWorkflow() {
     if (!workflowName.trim() || !workflowTemplatePath.trim()) {
       showNotification('Workflow name and template path are required', 'error');
@@ -1567,48 +1613,150 @@
       </div>
       <p class="text-xs opacity-60 mt-2">Saving detects newly added LoRAs and auto-assigns them to workflows where <code>autoIncludeNewLoras=true</code> or tags overlap or LoRA has <code>autoAddToWorkflows</code>.</p>
 
-      <div class="divider my-4 text-xs">LoRA sets — workflows reference them via <code>set:name</code></div>
-      <div class="flex gap-2 mb-2 items-center">
-        <input class="input input-bordered input-sm w-56" placeholder="new set name" bind:value={loraSetNameInput} />
+      <div class="divider my-4 text-xs">LoRA sets — workflows reference them as <code>set:name</code></div>
+      <div class="flex flex-wrap gap-2 mb-3 items-center">
+        <input class="input input-bordered input-sm w-56" placeholder="new set name" bind:value={loraSetNameInput}
+          onkeydown={(e) => { if (e.key === 'Enter') addLoraSet(); }} />
         <button class="btn btn-sm btn-outline" onclick={addLoraSet}>+ Add set</button>
-        <span class="text-xs opacity-60">One id per line; <code>set:other</code> nests sets.</span>
+        <span class="text-xs opacity-60">A set only decides which LoRAs are available; the order in the list does not matter (the chain order and the order users see come from the LoRA preset list). Applied with the save button above.</span>
       </div>
       {#if loraSetNames.length === 0}
         <p class="text-base-content/70 text-sm">No sets yet.</p>
       {:else}
-        {#each loraSetNames as setName}
-          <div class="border border-base-200 rounded-lg p-2 mb-2">
-            <div class="flex items-center gap-2 mb-1">
-              <code class="text-sm font-bold">set:{setName}</code>
-              <span class="text-xs opacity-60">{(loraSets[setName] || []).length} ids</span>
-              <span class="flex-1"></span>
-              <button class="btn btn-xs btn-ghost text-error" onclick={() => removeLoraSet(setName)}>Delete</button>
+        <div class="space-y-3">
+          {#each loraSetNames as setName (setName)}
+            {@const members = loraSetsEdit[setName] || []}
+            <div class="border border-base-300 rounded-lg p-3 bg-base-100">
+              <div class="flex flex-wrap items-center gap-2 mb-2">
+                <code class="text-sm font-bold">set:{setName}</code>
+                <span class="badge badge-sm badge-ghost">{expandLoraSet(setName).length} LoRAs expanded</span>
+                <span class="badge badge-sm badge-ghost">used {loraSetUsage(setName)}×</span>
+                <span class="flex-1"></span>
+                <button class="btn btn-xs btn-ghost text-error" onclick={() => removeLoraSet(setName)}>Delete</button>
+              </div>
+              <div class="flex flex-wrap gap-1 mb-2">
+                {#each members as member, mi (member)}
+                  {@const isSet = member.startsWith('set:')}
+                  {@const known = isSet ? loraSetNames.includes(member.slice(4)) : (settings.loraPresets || []).some((p: any) => p.id === member)}
+                  <span class="badge badge-sm gap-1 {isSet ? 'badge-primary' : 'badge-ghost'} {known ? '' : 'badge-error'}" title={known ? member : `${member} — not defined`}>
+                    {isSet ? member : loraLabel(member)}
+                    <button class="opacity-60 hover:opacity-100" title="Remove" onclick={() => removeLoraSetMember(setName, mi)}>✕</button>
+                  </span>
+                {/each}
+                {#if members.length === 0}<span class="text-xs opacity-50">Empty — add LoRAs below.</span>{/if}
+              </div>
+              <select class="select select-bordered select-xs w-72" value={loraSetPick[setName] ?? ''}
+                onchange={(e) => { addLoraSetMember(setName, e.currentTarget.value); e.currentTarget.value = ''; }}>
+                <option value="">+ add a LoRA or another set…</option>
+                {#if loraSetNames.filter((n) => n !== setName && !members.includes(`set:${n}`)).length}
+                  <optgroup label="Sets">
+                    {#each loraSetNames.filter((n) => n !== setName && !members.includes(`set:${n}`)) as n}
+                      <option value={`set:${n}`}>set:{n} ({expandLoraSet(n).length})</option>
+                    {/each}
+                  </optgroup>
+                {/if}
+                <optgroup label="LoRAs">
+                  {#each (settings.loraPresets || []).filter((p: any) => !members.includes(p.id)) as p}
+                    <option value={p.id}>{p.label} — {p.id}</option>
+                  {/each}
+                </optgroup>
+              </select>
             </div>
-            <textarea class="textarea textarea-bordered textarea-sm w-full font-mono" rows="3" value={(loraSets[setName] || []).join('\n')} oninput={(e) => updateLoraSet(setName, (e.target as HTMLTextAreaElement).value)}></textarea>
-          </div>
-        {/each}
+          {/each}
+        </div>
       {/if}
 
-      <div class="divider my-4 text-xs">Quota rule sets — workflows reference them via <code>ruleset:name</code></div>
-      <div class="flex gap-2 mb-2 items-center">
-        <input class="input input-bordered input-sm w-56" placeholder="new rule set name" bind:value={quotaRuleSetNameInput} />
+      <div class="divider my-4 text-xs">Quota rule sets — workflows reference them as <code>ruleset:name</code></div>
+      <div class="flex flex-wrap gap-2 mb-1 items-center">
+        <input class="input input-bordered input-sm w-56" placeholder="new rule set name" bind:value={quotaRuleSetNameInput}
+          onkeydown={(e) => { if (e.key === 'Enter') addQuotaRuleSet(); }} />
         <button class="btn btn-sm btn-outline" onclick={addQuotaRuleSet}>+ Add rule set</button>
-        <span class="text-xs opacity-60">JSON array of rules; keep rule ids stable.</span>
       </div>
+      <p class="text-xs opacity-60 mb-3">
+        Cost = (base + Σ additives) × Π multipliers, rounded once at the end (min 1). An additive (+/−) is added to the base <b>before</b> the multipliers,
+        so "+1 with a reference video" is then scaled by the resolution / length multipliers. Rule order does not matter; the same rule id in two sets is charged once.
+        Applied with the save button above.
+      </p>
+      {#snippet ruleEditor(rule: any, onRemove: () => void)}
+        <div class="border border-base-300 rounded-lg p-3 space-y-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <input type="text" bind:value={rule.id} class="input input-bordered input-xs w-40 font-mono" placeholder="rule id" title="Stable id — keep it, charges are de-duplicated by id" />
+            <input type="text" placeholder="Label (optional)" bind:value={rule.label} class="input input-bordered input-xs flex-1 min-w-32" />
+            <button class="btn btn-xs btn-error btn-ghost" onclick={onRemove}>✕</button>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 text-xs">
+            <span class="opacity-60">Add to base</span>
+            <input type="number" step={1} bind:value={rule.additive} placeholder="0" class="input input-bordered input-xs w-20" title="Credits added to the base BEFORE multiplying (negative = discount)" />
+            <span class="opacity-60">then multiply by ×</span>
+            <input type="number" min={0.1} step={0.1} bind:value={rule.multiplier} placeholder="1" class="input input-bordered input-xs w-20" title="Multiplier — below 1 is a discount" />
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+            <label class="flex items-center gap-2">
+              <span class="opacity-60 shrink-0">Duration ≥</span>
+              <select class="select select-bordered select-xs" value={rule.when?.minDuration ?? ''}
+                onchange={(e) => setRuleWhen(rule, { minDuration: e.currentTarget.value === '' ? undefined : +e.currentTarget.value })}>
+                <option value="">(any)</option>
+                <option value="6">6s</option>
+                <option value="8">8s</option>
+                <option value="10">10s</option>
+                <option value="15">15s</option>
+              </select>
+            </label>
+            <label class="flex items-center gap-2">
+              <span class="opacity-60 shrink-0">Resolution</span>
+              <select class="select select-bordered select-xs" value={rule.when?.exactResolution ?? ''}
+                onchange={(e) => setRuleWhen(rule, { exactResolution: e.currentTarget.value === '' ? undefined : e.currentTarget.value })}>
+                <option value="">(any)</option>
+                <option value="480p">480p</option>
+                <option value="720p">ESRGAN 2x</option>
+                <option value="720p-hd">720p native (Wan)</option>
+                <option value="768p">768p (H3 two-stage)</option>
+              </select>
+            </label>
+            <label class="flex items-center gap-2">
+              <span class="opacity-60 shrink-0">Ref video</span>
+              <select class="select select-bordered select-xs" value={rule.when?.hasRefVideo === true ? 'yes' : rule.when?.hasRefVideo === false ? 'no' : ''}
+                onchange={(e) => setRuleWhen(rule, { hasRefVideo: e.currentTarget.value === '' ? undefined : e.currentTarget.value === 'yes' })}>
+                <option value="">(any)</option>
+                <option value="yes">with video</option>
+                <option value="no">without video</option>
+              </select>
+            </label>
+          </div>
+          <details class="text-xs">
+            <summary class="cursor-pointer opacity-60">Only when these LoRAs are used{(rule.when?.usingLoras || []).length ? ` (${rule.when.usingLoras.length})` : ' (any)'}</summary>
+            <div class="flex flex-wrap gap-1 mt-1">
+              {#each (settings.loraPresets || []) as lora}
+                <button class="badge badge-xs badge-ghost cursor-pointer" class:badge-secondary={(rule.when?.usingLoras || []).includes(lora.id)}
+                  onclick={() => toggleRuleLora(rule, lora.id)}>{lora.label}</button>
+              {/each}
+            </div>
+          </details>
+        </div>
+      {/snippet}
       {#if quotaRuleSetNames.length === 0}
         <p class="text-base-content/70 text-sm">No rule sets yet.</p>
       {:else}
-        {#each quotaRuleSetNames as rsName}
-          <div class="border border-base-200 rounded-lg p-2 mb-2">
-            <div class="flex items-center gap-2 mb-1">
-              <code class="text-sm font-bold">ruleset:{rsName}</code>
-              <span class="text-xs opacity-60">{(quotaRuleSets[rsName] || []).length} rules</span>
-              <span class="flex-1"></span>
-              <button class="btn btn-xs btn-ghost text-error" onclick={() => removeQuotaRuleSet(rsName)}>Delete</button>
+        <div class="space-y-3">
+          {#each quotaRuleSetNames as rsName (rsName)}
+            <div class="border border-base-300 rounded-lg p-3 bg-base-100">
+              <div class="flex flex-wrap items-center gap-2 mb-1">
+                <code class="text-sm font-bold">ruleset:{rsName}</code>
+                <span class="badge badge-sm badge-ghost">{(quotaRuleSetsEdit[rsName] || []).length} rule(s)</span>
+                <span class="badge badge-sm badge-ghost">used by {quotaRuleSetUsage(rsName)} workflow(s)</span>
+                <span class="flex-1"></span>
+                <button class="btn btn-xs btn-outline" onclick={() => addRuleToSet(rsName)}>+ Add rule</button>
+                <button class="btn btn-xs btn-ghost text-error" onclick={() => removeQuotaRuleSet(rsName)}>Delete</button>
+              </div>
+              <p class="text-xs opacity-60 mb-2">{describeRuleSet(rsName)}</p>
+              <div class="space-y-2">
+                {#each quotaRuleSetsEdit[rsName] || [] as rule, ri (ri)}
+                  {@render ruleEditor(rule, () => removeRuleFromSet(rsName, ri))}
+                {/each}
+              </div>
             </div>
-            <textarea class="textarea textarea-bordered textarea-xs w-full font-mono" rows="4" value={JSON.stringify(quotaRuleSets[rsName] || [], null, 2)} oninput={(e) => updateQuotaRuleSet(rsName, (e.target as HTMLTextAreaElement).value)}></textarea>
-          </div>
-        {/each}
+          {/each}
+        </div>
       {/if}
     </div>
   </div>
@@ -2250,79 +2398,35 @@
         </label>
       </div>
 
-      <!-- Quota cost rules -->
+      <!-- Quota cost rules: pick rule sets (defined in Settings) -->
       <div class="mt-4">
         <div class="flex items-center justify-between mb-1">
-          <span class="text-sm font-semibold">Quota Cost Rules</span>
-          <button class="btn btn-xs btn-outline" onclick={addQuotaCostRule}>+ Add rule</button>
+          <span class="text-sm font-semibold">Quota cost rule sets</span>
+          <span class="text-xs opacity-50">Edit the rules in Settings → Quota rule sets</span>
         </div>
-        <p class="text-xs opacity-50 mb-2">Cost = (base + Σ additives) × Π multipliers, rounded once at the end (min 1). Additive (+/−) is added to the base BEFORE the multipliers, so e.g. "+1 with a reference video" is then scaled by the resolution / length multipliers; multipliers &lt;1× (e.g. 0.5×) discount. e.g. "2× if duration ≥ 6s" or "+1 if using a ref video" or "-1 when speed-up LoRA used". Rule order does not matter. Use <code>ruleset:name</code> to reuse the shared library.</p>
-        <div class="flex gap-2 mb-2 items-center">
-          <input class="input input-bordered input-xs w-48" placeholder="ruleset name, e.g. h3-768p" bind:value={workflowQuotaRuleSetRefInput} />
-          <button class="btn btn-xs" onclick={addQuotaRuleSetRefToWorkflow}>Add ruleset ref</button>
-          {#each (workflowQuotaCostRules as any[]).filter((r: any) => typeof r === 'string') as ref}
-            <span class="badge badge-secondary badge-sm gap-1">{ref}<button class="ml-1" onclick={() => removeQuotaRuleSetRefFromWorkflow(ref)}>✕</button></span>
-          {/each}
-        </div>
-        {#if workflowQuotaCostRules.length === 0}
-          <p class="text-xs opacity-40">No rules — cost is always {workflowQuotaCost} credit{workflowQuotaCost > 1 ? 's' : ''}/video.</p>
+        <p class="text-xs opacity-50 mb-2">Cost = (base + Σ additives) × Π multipliers, rounded once (min 1). Pick the sets this workflow charges by.</p>
+        {#if quotaRuleSetNames.length === 0}
+          <p class="text-xs opacity-40">No rule sets defined yet — cost is always {workflowQuotaCost} credit{workflowQuotaCost > 1 ? 's' : ''}/video.</p>
         {:else}
-          <div class="space-y-3">
-            {#each (workflowQuotaCostRules as any[]).map((r: any, idx: number) => ({ r, idx })).filter((x: any) => typeof x.r !== 'string') as _unused}
-              {@const rule = _unused.r}
-              {@const ri = _unused.idx}
-              <div class="border border-base-300 rounded-lg p-3 space-y-2">
-                <div class="flex items-center gap-2">
-                  <input type="number" min={0.1} step={0.1} bind:value={rule.multiplier} placeholder="1" class="input input-bordered input-xs w-20" title="Multiplier (×) — &lt;1 is a discount" />
-                  <span class="text-xs">×</span>
-                  <input type="number" step={1} bind:value={rule.additive} placeholder="+0" class="input input-bordered input-xs w-20" title="Additive credits (+/−) — negative is a discount" />
-                  <span class="text-xs">+/−</span>
-                  <input type="text" placeholder="Label (optional)" bind:value={rule.label} class="input input-bordered input-xs flex-1" />
-                  <button class="btn btn-xs btn-error btn-ghost" onclick={() => removeQuotaCostRule(ri)}>✕</button>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                  <label class="flex items-center gap-2">
-                    <span class="opacity-60 shrink-0">Duration ≥</span>
-                    <select class="select select-bordered select-xs" value={rule.when.minDuration ?? ''}
-                      onchange={(e) => updateQuotaCostRuleWhen(ri, { minDuration: e.currentTarget.value === '' ? undefined : +e.currentTarget.value })}>
-                      <option value="">(any)</option>
-                      <option value="6">6s</option>
-                      <option value="8">8s</option>
-                      <option value="10">10s</option>
-                    </select>
-                  </label>
-                  <label class="flex items-center gap-2">
-                    <span class="opacity-60 shrink-0">Resolution</span>
-                    <select class="select select-bordered select-xs" value={rule.when.exactResolution ?? ''}
-                      onchange={(e) => updateQuotaCostRuleWhen(ri, { exactResolution: e.currentTarget.value === '' ? undefined : e.currentTarget.value })}>
-                      <option value="">(any)</option>
-                      <option value="480p">480p</option>
-                      <option value="720p">ESRGAN 2x</option>
-                      <option value="720p-hd">720p native (Wan)</option>
-                      <option value="768p">768p (H3 two-stage)</option>
-                    </select>
-                  </label>
-                  <label class="flex items-center gap-2">
-                    <span class="opacity-60 shrink-0">Ref video</span>
-                    <select class="select select-bordered select-xs" value={rule.when.hasRefVideo === true ? 'yes' : rule.when.hasRefVideo === false ? 'no' : ''}
-                      onchange={(e) => updateQuotaCostRuleWhen(ri, { hasRefVideo: e.currentTarget.value === '' ? undefined : e.currentTarget.value === 'yes' })}>
-                      <option value="">(any)</option>
-                      <option value="yes">with video</option>
-                      <option value="no">without video</option>
-                    </select>
-                  </label>
-                </div>
-                <div>
-                  <div class="opacity-60 mb-1">Applies when ANY of these LoRAs used:</div>
-                  <div class="flex flex-wrap gap-1">
-                    {#each (settings.loraPresets || []) as lora}
-                      <button class="badge badge-xs badge-ghost cursor-pointer" class:badge-secondary={(rule.when.usingLoras || []).includes(lora.id)}
-                        onclick={() => toggleLoraInRule(ri, 'usingLoras', lora.id)}>{lora.label}</button>
-                    {/each}
-                  </div>
-                </div>
-              </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {#each quotaRuleSetNames as n (n)}
+              <label class="flex items-start gap-2 p-2 rounded border border-base-300 hover:bg-base-200 cursor-pointer">
+                <input type="checkbox" class="checkbox checkbox-primary checkbox-xs mt-1" checked={(workflowQuotaCostRules as any[]).includes(`ruleset:${n}`)} onchange={() => toggleWorkflowRuleSet(n)} />
+                <span class="min-w-0">
+                  <code class="text-xs">ruleset:{n}</code>
+                  <span class="block text-xs opacity-60 break-words">{describeRuleSet(n)}</span>
+                </span>
+              </label>
             {/each}
+          </div>
+        {/if}
+        {#each (workflowQuotaCostRules as any[]).filter((r: any) => typeof r === 'string' && !quotaRuleSetNames.includes(r.replace(/^ruleset:/, ''))) as ref}
+          <span class="badge badge-error badge-sm gap-1 mt-2 mr-1" title="Not defined in Settings — charges nothing">{ref} (undefined)<button class="ml-1" onclick={() => removeWorkflowRuleRef(ref)}>✕</button></span>
+        {/each}
+        {#if (workflowQuotaCostRules as any[]).some((r: any) => typeof r !== 'string')}
+          <div class="alert alert-warning py-2 mt-2 text-xs">
+            <span>{(workflowQuotaCostRules as any[]).filter((r: any) => typeof r !== 'string').length} legacy inline rule(s) are still stored on this workflow and keep charging. Move them into a rule set, then clear them here.</span>
+            <button class="btn btn-xs" onclick={clearInlineRules}>Clear inline rules</button>
           </div>
         {/if}
       </div>
@@ -2411,11 +2515,23 @@
 
       <div class="divider my-3 text-xs">LoRAs — {workflowCompatibleLoras.length} selected</div>
 
-      <div class="flex flex-wrap gap-2 mb-2 items-center">
-        <input class="input input-bordered input-xs w-48" placeholder="set name, e.g. wan-mid" bind:value={workflowSetRefInput} />
-        <button class="btn btn-xs" onclick={addSetRefToWorkflow}>Add set ref</button>
-        {#each workflowCompatibleLoras.filter((id) => id.startsWith('set:')) as ref}
-          <span class="badge badge-primary badge-sm gap-1">{ref}<button class="ml-1" onclick={() => removeSetRefFromWorkflow(ref)}>✕</button></span>
+      <div class="mb-3">
+        <div class="text-xs opacity-60 mb-1">LoRA sets (edit them in Settings → LoRA sets)</div>
+        {#if loraSetNames.length === 0}
+          <p class="text-xs opacity-40">No sets defined yet.</p>
+        {:else}
+          <div class="flex flex-wrap gap-2">
+            {#each loraSetNames as n (n)}
+              <label class="flex items-center gap-2 px-2 py-1 rounded border border-base-300 hover:bg-base-200 cursor-pointer text-xs" title={expandLoraSet(n).map(loraLabel).join(', ')}>
+                <input type="checkbox" class="checkbox checkbox-primary checkbox-xs" checked={workflowCompatibleLoras.includes(`set:${n}`)} onchange={() => toggleWorkflowSet(n)} />
+                <code>set:{n}</code>
+                <span class="opacity-60">{expandLoraSet(n).length} LoRAs</span>
+              </label>
+            {/each}
+          </div>
+        {/if}
+        {#each workflowCompatibleLoras.filter((id) => id.startsWith('set:') && !loraSetNames.includes(id.slice(4))) as ref}
+          <span class="badge badge-error badge-sm gap-1 mt-2 mr-1" title="Not defined in Settings — adds no LoRAs">{ref} (undefined)<button class="ml-1" onclick={() => toggleWorkflowSet(ref.slice(4))}>✕</button></span>
         {/each}
       </div>
 
