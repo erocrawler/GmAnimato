@@ -44,7 +44,8 @@ export function normalizeLoraSets(raw: unknown): LoraSets {
 
 /**
  * Expand a mixed list of LoRA ids + `set:` refs into a flat LoRA id list.
- * - Order: first occurrence wins (LoRA chain order matters, never sorted).
+ * - Order: first occurrence wins, kept as written (never sorted). It does not affect inference or the list users see:
+ *   the chain order and that list follow the LoRA preset list; a set only decides WHICH LoRAs are available.
  * - Nested sets recurse; cycles are skipped via the active path set.
  * - Depth is capped at LORA_SET_MAX_DEPTH; unknown sets expand to nothing.
  * - Returned list never contains `set:` refs.
