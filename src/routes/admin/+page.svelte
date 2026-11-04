@@ -21,7 +21,7 @@
   let userTotalPages = $derived(data.userTotalPages || 1);
   let userTotal = $derived(data.userTotal || 0);
   let userSearch = $derived(data.userSearch || '');
-  let workflows = $state(data.workflows || []);
+  let workflows = $state<any[]>(data.workflows || []);
   let queueStatus: any = $state(null);
   let saving = $state(false);
   let loadingQueue = $state(false);
@@ -1166,7 +1166,7 @@
     
     const currentIds = workflow.compatibleLoraIds || [];
     const newIds = currentIds.includes(loraId)
-      ? currentIds.filter(id => id !== loraId)
+      ? currentIds.filter((id: string) => id !== loraId)
       : [...currentIds, loraId];
     
     // Update local state immediately for better UX
@@ -1328,7 +1328,7 @@
               id="local-queue-enabled"
               type="checkbox" 
               checked={settings.localQueueThreshold > 0}
-              onchange={(e) => settings.localQueueThreshold = e.target.checked ? 10 : 0}
+              onchange={(e) => settings.localQueueThreshold = (e.target as HTMLInputElement).checked ? 10 : 0}
               class="toggle toggle-primary"
             />
           </label>
