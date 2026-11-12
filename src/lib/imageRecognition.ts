@@ -56,6 +56,73 @@ const CUSTOM_VL_MAX_IMAGE_PIXELS = Number(env.CUSTOM_VL_MAX_IMAGE_PIXELS || '100
 // than the general-purpose cap so the request fits in a ~3K-token context.
 const CUSTOM_VL_ENHANCE_MAX_IMAGE_PIXELS = Number(env.CUSTOM_VL_ENHANCE_MAX_IMAGE_PIXELS || '160000');
 const CUSTOM_VL_ENABLE_THINKING = env.CUSTOM_VL_ENABLE_THINKING === 'true';
+
+// --- LLM request template -------------------------------------------------
+// Backend-specific fields of the chat-completions body (sampling, JSON mode,
+// thinking controls) come from a JSON file, not from code. Per request only
+// `messages`, `max_tokens` and (for bearer auth) `model` are added; template
+// fields win over the caller's `temperature`.
+//
+//   CUSTOM_VL_REQUEST_TEMPLATE                 primary endpoint
+//   CUSTOM_VL_MODAL_FALLBACK_REQUEST_TEMPLATE  Modal fallback
+//   CUSTOM_VL_TEMPLATE_DIR                     template directory (default: config/vl-templates)
+//
+// Value = file name inside the template dir (".json" optional), or a path
+// containing "/" (relative to cwd, or absolute). Empty/unset = legacy body
+// (response_format json_object + thinking toggled by CUSTOM_VL_ENABLE_THINKING).
+// When a template file is used, CUSTOM_VL_ENABLE_THINKING is ignored: the file
+// is the single source of truth.
+type VlRequestTemplate = Record<string, unknown>;
+
+const CUSTOM_VL_TEMPLATE_DIR = env.CUSTOM_VL_TEMPLATE_DIR || path.join(process.cwd(), 'config', 'vl-templates');
+
+function legacyVlRequestTemplate(): VlRequestTemplate {
+  return {
+    response_format: { type: 'json_object' },
+    ...(CUSTOM_VL_ENABLE_THINKING ? {} : { chat_template_kwargs: { enable_thinking: false } }),
+  };
+}
+
+function loadVlRequestTemplate(name: string | undefined, label: string): VlRequestTemplate {
+  const value = (name || '').trim();
+  if (!value) return legacyVlRequestTemplate();
+  let file = value.includes('/') ? path.resolve(value) : path.join(CUSTOM_VL_TEMPLATE_DIR, value);
+  if (!path.extname(file)) file += '.json';
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      console.log(`[Custom VL] ${label} request template: ${file}`);
+      return parsed as VlRequestTemplate;
+    }
+    throw new Error('template must be a JSON object');
+  } catch (err) {
+    console.warn(`[Custom VL] ${label} request template '${file}' unusable (${(err as Error).message}); using legacy body.`);
+    return legacyVlRequestTemplate();
+  }
+}
+
+const CUSTOM_VL_REQUEST_TEMPLATE = loadVlRequestTemplate(env.CUSTOM_VL_REQUEST_TEMPLATE, 'primary');
+const CUSTOM_VL_MODAL_FALLBACK_REQUEST_TEMPLATE = loadVlRequestTemplate(
+  env.CUSTOM_VL_MODAL_FALLBACK_REQUEST_TEMPLATE,
+  'modal-fallback'
+);
+
+function buildVlRequestBody(
+  template: VlRequestTemplate,
+  messages: unknown,
+  temperature: number,
+  maxTokens: number | undefined,
+  model?: string
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    temperature,
+    ...template,
+    messages,
+    max_tokens: maxTokens ?? CUSTOM_VL_MAX_TOKENS,
+  };
+  if (model) body['model'] = model;
+  return body;
+}
 const CUSTOM_VL_ERROR_LOG = env.CUSTOM_VL_ERROR_LOG || path.join(process.cwd(), 'logs', 'custom-vl-errors.log');
 
 type CustomVlAuthMode = 'modal' | 'cf' | 'custom' | 'bearer' | 'none';
@@ -358,15 +425,12 @@ async function requestModalFallback(
       'Modal-Secret': CUSTOM_VL_MODAL_FALLBACK_TOKEN_SECRET,
     };
 
-    const body: Record<string, unknown> = {
+    const body = buildVlRequestBody(
+      CUSTOM_VL_MODAL_FALLBACK_REQUEST_TEMPLATE,
       messages,
       temperature,
-      max_tokens: maxTokens ?? CUSTOM_VL_MAX_TOKENS,
-      response_format: { type: 'json_object' },
-    };
-    if (!CUSTOM_VL_ENABLE_THINKING) {
-      body['chat_template_kwargs'] = { enable_thinking: false };
-    }
+      maxTokens
+    );
 
     const response = await fetch(CUSTOM_VL_MODAL_FALLBACK_URL.replace(/\/$/, ''), {
       method: 'POST',
@@ -435,18 +499,13 @@ async function requestCustomVl(
       headers[tokenHeaders.secretHeader] = CUSTOM_VL_TOKEN_SECRET;
     }
 
-    const body: Record<string, unknown> = {
+    const body = buildVlRequestBody(
+      CUSTOM_VL_REQUEST_TEMPLATE,
       messages,
       temperature,
-      max_tokens: maxTokens ?? CUSTOM_VL_MAX_TOKENS,
-      response_format: { type: 'json_object' },
-    };
-    if (authMode === 'bearer') {
-      body['model'] = CUSTOM_VL_MODEL;
-    }
-    if (!CUSTOM_VL_ENABLE_THINKING) {
-      body['chat_template_kwargs'] = { enable_thinking: false };
-    }
+      maxTokens,
+      authMode === 'bearer' ? CUSTOM_VL_MODEL : undefined
+    );
 
     const response = await fetch(url, {
       method: 'POST',
