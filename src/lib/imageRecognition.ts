@@ -541,6 +541,39 @@ async function requestCustomVl(
   }
 }
 
+// Invalid JSON from the model is the common transient failure of backends that do
+// not enforce JSON mode (e.g. Strata, which also answers HTTP 502
+// structured_output_failed). One resample usually fixes it, so retry once on a
+// parse failure or a 502 before giving up. Callers keep their own null handling.
+function isTransientStructuredOutputError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\(502\)|structured_output_failed/.test(message);
+}
+
+async function requestCustomVlJson<T>(
+  messages: CustomVlMessage[],
+  temperature: number,
+  maxTokens?: number
+): Promise<{ text: string | null; parsed: T | null }> {
+  const maxAttempts = 2;
+  for (let attempt = 1; ; attempt++) {
+    let text: string | null;
+    try {
+      text = await requestCustomVl(messages, temperature, maxTokens);
+    } catch (error) {
+      if (attempt < maxAttempts && isTransientStructuredOutputError(error)) {
+        console.warn(`[Custom VL] Structured output failure, retrying (${attempt}/${maxAttempts - 1}):`, error);
+        continue;
+      }
+      throw error;
+    }
+    if (!text) return { text: null, parsed: null };
+    const parsed = parseJsonWithRepair<T>(text);
+    if (parsed || attempt >= maxAttempts) return { text, parsed };
+    console.warn(`[Custom VL] Response is not valid JSON, retrying (${attempt}/${maxAttempts - 1}).`);
+  }
+}
+
 export async function annotateImage(
   filePath: string,
   lastImagePath?: string,
@@ -942,7 +975,7 @@ IMPORTANT:
       });
     }
 
-    const text = await requestCustomVl([
+    const { text, parsed } = await requestCustomVlJson<CustomVlResponse>([
       {
         role: 'system',
         content: systemPrompt,
@@ -957,7 +990,6 @@ IMPORTANT:
       return null;
     }
     console.log('[Custom VL] Filtered response:', text);
-    const parsed = parseJsonWithRepair<CustomVlResponse>(text);
     if (!parsed) {
       logCustomVlError('annotateImage.parseFailure', null, {
         user_id: userId,
@@ -1048,7 +1080,7 @@ async function evaluatePromptWithCustomVl(
       });
     }
 
-    const text = await requestCustomVl([
+    const { text, parsed } = await requestCustomVlJson<{ is_photo_realistic: boolean; is_nsfw: boolean }>([
       {
         role: 'user',
         content: messageContent,
@@ -1059,7 +1091,6 @@ async function evaluatePromptWithCustomVl(
       return null;
     }
 
-    const parsed = parseJsonWithRepair<{ is_photo_realistic: boolean; is_nsfw: boolean }>(text);
     if (!parsed) {
       return null;
     }
@@ -1175,14 +1206,13 @@ Rules:
       });
     }
 
-    const text = await requestCustomVl([
+    const { text, parsed } = await requestCustomVlJson<{ global_prompt: string; segments: { prompt: string; frames: number }[] }>([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: messageContent },
     ], 0.7);
 
     if (!text) return null;
 
-    const parsed = parseJsonWithRepair<{ global_prompt: string; segments: { prompt: string; frames: number }[] }>(text);
     if (!parsed || typeof parsed.global_prompt !== 'string' || !Array.isArray(parsed.segments)) {
       console.error('[Custom VL] Invalid prompt relay response structure:', parsed);
       return null;
