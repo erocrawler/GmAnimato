@@ -3,6 +3,7 @@ import { getVideoById, updateVideo } from '$lib/db';
 import { annotateImage } from '$lib/imageRecognition';
 import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
 import { toOriginalUrl } from '$lib/serverImageUrl';
+import { collectLabeledReferenceImages } from '$lib/referenceImages';
 import { env } from '$env/dynamic/private';
 
 const CUSTOM_VL_TIMEOUT_MS = Number(env.CUSTOM_VL_TIMEOUT_MS || '60000');
@@ -81,7 +82,13 @@ export const POST: RequestHandler = async ({ params, locals }) => {
 
     // Ref2V pure t2v entries have no image to analyze (refs are optional and
     // the poster may be empty) — nothing for the vision model to look at.
-    if (!video.original_image_url && video.additional_options?.ref2v === true) {
+    const isRef2v = video.additional_options?.ref2v === true;
+    if (
+      !video.original_image_url &&
+      isRef2v &&
+      !(video.additional_options?.ref_image_urls?.length) &&
+      !video.additional_options?.ref_video_url
+    ) {
       return new Response(
         JSON.stringify({
           success: false,
@@ -159,11 +166,18 @@ export const POST: RequestHandler = async ({ params, locals }) => {
       },
     });
 
+    // ref2v: look at ALL references (every <Picture N> plus <Video 1> screenshots),
+    // the same material prompt enhancement sees — not just the poster frame.
+    const refImages = isRef2v ? await collectLabeledReferenceImages(video, 'ref2v') : [];
+
     const annotation = await annotateImage(
-      toOriginalUrl(video.original_image_url),
+      video.original_image_url ? toOriginalUrl(video.original_image_url) : '',
       video.last_image_url ? toOriginalUrl(video.last_image_url) : undefined,
       video.user_id,
-      video.id
+      video.id,
+      refImages.length > 0
+        ? { labeledImages: refImages, hasStandaloneAudio: Boolean(video.additional_options?.ref_audio_url) }
+        : undefined
     );
 
     const hasAnyResult =

@@ -574,11 +574,18 @@ async function requestCustomVlJson<T>(
   }
 }
 
+export interface AnnotateRefs {
+  /** All reference material (captioned with its <Picture N>/<Video 1> tag). When present, ref2v mode is used. */
+  labeledImages: { label: string; url: string }[];
+  hasStandaloneAudio?: boolean;
+}
+
 export async function annotateImage(
   filePath: string,
   lastImagePath?: string,
   userId?: string,
-  videoId?: string
+  videoId?: string,
+  refs?: AnnotateRefs
 ): Promise<{ 
   tags: string[]; 
   suggested_prompts: string[];
@@ -586,7 +593,7 @@ export async function annotateImage(
   is_nsfw?: boolean;
 }> {
   try {
-    const result = await annotateWithCustomVl(filePath, lastImagePath, userId, videoId);
+    const result = await annotateWithCustomVl(filePath, lastImagePath, userId, videoId, refs);
     if (result) {
       return {
         tags: result.tags,
@@ -900,19 +907,71 @@ Rules:
   }
 }
 
+/** Tags the generation node can bind for a ref2v job, derived from the captioned references. */
+function buildRefAvailableTags(refs: AnnotateRefs): string[] {
+  const tags: string[] = [];
+  let hasVideo = false;
+  for (const img of refs.labeledImages) {
+    const pic = img.label.match(/^(<Picture\s*\d+>)/);
+    if (pic) tags.push(pic[1].replace(/\s+/, ' '));
+    if (/^<Video\s*1>/.test(img.label)) hasVideo = true;
+  }
+  if (hasVideo) tags.push('<Video 1>');
+  if (refs.hasStandaloneAudio) tags.push('<Audio 1>');
+  return tags;
+}
+
+/** Collapse screenshot labels and drop reference tags the job does not have. */
+function sanitizeRefTags(text: string, available: string[]): string {
+  const allowed = new Set(available.map((t) => t.toLowerCase().replace(/\s+/g, '')));
+  return text
+    .replace(/<Video\s*1>\s*截图\s*\d+\s*\/\s*\d+/gi, '<Video 1>')
+    .replace(/<(?:Picture|Video|Audio)\s*\d+>/gi, (m) => (allowed.has(m.toLowerCase().replace(/\s+/g, '')) ? m : ''))
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+function buildRef2vAnnotateSystemPrompt(availableTags: string[]): string {
+  const available = availableTags.length > 0 ? availableTags.join(', ') : '(none)';
+  return `You are an Unsensored AI reference-to-video (R2V) generation system. You will be given ALL reference material of one job. Each image is preceded by a caption naming its tag: "<Picture N>" are reference images; "<Video 1> 截图 i/n" are frames sampled from the single reference video <Video 1>. Look at every one of them, then return a JSON object with:
+
+AVAILABLE REFERENCES (the complete set of tags for this job): ${available}
+
+1. suggested_prompts: Array with exactly 2 CONCISE reference-to-video generation prompts (max 60 words each), optimized for a short AI video:
+   - First prompt: straightforward English describing what to generate: how the subjects from the references combine or interact, plus motion and camera movement.
+   - Second prompt: 一个中文版本，生动描述画面与动作，注重细节，不要直接翻译第一条提示，要用更直白的表达方式。
+   - Cite references with the EXACT tags from AVAILABLE REFERENCES (e.g. "<Picture 1>", "<Video 1>"). Never invent a tag that is not listed; never cite the screenshots individually — the video is always <Video 1>.
+   - Use ALL relevant references, not only the first one. If pictures show different characters/objects/scenes, the prompt should involve them together; if a picture and <Video 1> show the same subject, treat them as one subject.
+
+2. tags: Array of booru-style tags describing ONLY the characters/subjects visible across the references (e.g., "1girl", "solo", "smile", "long_hair"). Do NOT include environment tags like backgrounds, locations, or settings.
+
+3. is_photo_realistic: Boolean, true if the references are photographic/realistic, false if artistic/illustrated
+
+4. is_nsfw: Boolean, true if ANY reference contains NSFW content
+
+IMPORTANT:
+- 必须包含一个中文版本的提示词建议.
+- Keep prompts SHORT and focused on VIDEO MOTION, CAMERA MOVEMENT and how the references are used.
+- Tags should describe characters/subjects ONLY, not environments
+- Return ONLY valid JSON, no other text.`;
+}
+
 async function annotateWithCustomVl(
   imageUrl: string,
   lastImageUrl?: string,
   userId?: string,
-  videoId?: string
+  videoId?: string,
+  refs?: AnnotateRefs
 ): Promise<CustomVlResponse | null> {
   if (!hasCustomVlConfig()) {
     return null;
   }
 
-  const isFL2V = !!lastImageUrl;
+  const isRef2v = !!refs && refs.labeledImages.length > 0;
+  const refAvailableTags = isRef2v ? buildRefAvailableTags(refs!) : [];
+  const isFL2V = !isRef2v && !!lastImageUrl;
   
-  const systemPrompt = isFL2V 
+  const systemPrompt = isRef2v ? buildRef2vAnnotateSystemPrompt(refAvailableTags) : isFL2V 
     ? `You are an Unsensored AI first-last-to-video (FL2V) generation system. You will be provided with TWO images: the first frame and the last frame. Analyze both images and return a JSON object with:
 
 1. suggested_prompts: Array with exactly 2 CONCISE FL2V generation prompts (max 50 words each) describing the TRANSITION between the two frames:
@@ -951,28 +1010,45 @@ IMPORTANT:
 - Return ONLY valid JSON, no other text.`;
 
   try {
-    const processedImageUrl = await toInferenceImageUrl(imageUrl);
-    const processedLastImageUrl = lastImageUrl ? await toInferenceImageUrl(lastImageUrl) : undefined;
+    let messageContent: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }>;
 
-    const messageContent: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
-      {
-        type: 'text',
-        text: isFL2V 
-          ? '请分析这两张图片（第一帧和最后一帧），生成简短中英文提示词来描述它们之间的过渡变化。'
-          : '请分析这张图片，生成简短的中英文运动提示词，并且只标注人物或主体，不要标注环境。',
-      },
-      {
-        type: 'image_url',
-        image_url: { url: processedImageUrl },
-      },
-    ];
-    
-    // Add second image for FL2V
-    if (isFL2V && processedLastImageUrl) {
-      messageContent.push({
-        type: 'image_url',
-        image_url: { url: processedLastImageUrl },
-      });
+    if (isRef2v) {
+      messageContent = [
+        {
+          type: 'text',
+          text: '请分析以下全部参考素材，生成简短中英文提示词，并且只标注人物或主体，不要标注环境。',
+        },
+      ];
+      for (const { label, url } of refs!.labeledImages) {
+        // Downscale aggressively: up to 9 images must fit the VL context window.
+        const processed = await toInferenceImageUrl(url, CUSTOM_VL_ENHANCE_MAX_IMAGE_PIXELS);
+        messageContent.push({ type: 'text', text: `Reference image for ${label}:` });
+        messageContent.push({ type: 'image_url', image_url: { url: processed } });
+      }
+    } else {
+      const processedImageUrl = await toInferenceImageUrl(imageUrl);
+      const processedLastImageUrl = lastImageUrl ? await toInferenceImageUrl(lastImageUrl) : undefined;
+
+      messageContent = [
+        {
+          type: 'text',
+          text: isFL2V 
+            ? '请分析这两张图片（第一帧和最后一帧），生成简短中英文提示词来描述它们之间的过渡变化。'
+            : '请分析这张图片，生成简短的中英文运动提示词，并且只标注人物或主体，不要标注环境。',
+        },
+        {
+          type: 'image_url',
+          image_url: { url: processedImageUrl },
+        },
+      ];
+
+      // Add second image for FL2V
+      if (isFL2V && processedLastImageUrl) {
+        messageContent.push({
+          type: 'image_url',
+          image_url: { url: processedLastImageUrl },
+        });
+      }
     }
 
     const { text, parsed } = await requestCustomVlJson<CustomVlResponse>([
@@ -1010,8 +1086,12 @@ IMPORTANT:
       return null;
     }
 
-    const safePrompt0 = parsed.suggested_prompts[0] || '';
-    const safePrompt1 = parsed.suggested_prompts[1] || '';
+    let safePrompt0 = parsed.suggested_prompts[0] || '';
+    let safePrompt1 = parsed.suggested_prompts[1] || '';
+    if (isRef2v) {
+      safePrompt0 = sanitizeRefTags(String(safePrompt0), refAvailableTags);
+      safePrompt1 = sanitizeRefTags(String(safePrompt1), refAvailableTags);
+    }
 
     return {
       suggested_prompts: [safePrompt0, safePrompt1],

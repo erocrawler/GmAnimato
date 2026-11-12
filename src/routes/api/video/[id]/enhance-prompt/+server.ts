@@ -1,9 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { getVideoById } from '$lib/db';
 import { enhanceMiniMaxPrompt } from '$lib/imageRecognition';
-import { toOriginalUrl } from '$lib/serverImageUrl';
-import { extractVideoScreenshots } from '$lib/videoValidation';
-import { uploadBufferToS3 } from '$lib/s3';
+import { collectLabeledReferenceImages, detectReferenceWorkflowType } from '$lib/referenceImages';
 
 /**
  * POST /api/video/[id]/enhance-prompt
@@ -65,62 +63,10 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
       });
     }
 
-    const requestedType = String(body.workflowType ?? '');
-    const workflowType: 'ref2v' | 'fl2v' | 'i2v' =
-      requestedType === 'ref2v' || requestedType === 'fl2v' || requestedType === 'i2v'
-        ? requestedType
-        : video.additional_options?.ref2v === true
-          ? 'ref2v'
-          : video.last_image_url
-            ? 'fl2v'
-            : 'i2v';
+    const workflowType = detectReferenceWorkflowType(video, String(body.workflowType ?? ''));
 
-    // Gather labeled reference images for vision grounding (convert proxied
-    // /media/ URLs back to S3 URLs — the VL client fetches them server-side).
-    // Each image gets a caption binding it to its <Picture N>/<Video 1> tag so
-    // the VL model can tell which upload is which (it can't infer that from a
-    // bare URL).
-    const labeledImages: { label: string; url: string }[] = [];
-    if (workflowType === 'ref2v') {
-      // ref2v: reference images are <Picture N>; screenshots from the ref
-      // video are <Video 1> 截图 N/M.
-      const refImages: string[] = video.additional_options?.ref_image_urls ?? [];
-      refImages.slice(0, 6).forEach((u, i) => {
-        labeledImages.push({ label: `<Picture ${i + 1}>`, url: u });
-      });
-
-      const refVideoUrl = video.additional_options?.ref_video_url;
-      if (refVideoUrl) {
-        const screenshots = await extractVideoScreenshots(toOriginalUrl(refVideoUrl), 3);
-        for (let i = 0; i < screenshots.length; i++) {
-          try {
-            const shotUrl = await uploadBufferToS3(screenshots[i], 'jpg');
-            if (shotUrl) {
-              labeledImages.push({
-                label: `<Video 1> 截图 ${i + 1}/${screenshots.length}`,
-                url: shotUrl,
-              });
-            }
-          } catch (e) {
-            console.warn('[enhance-prompt] Failed to upload ref-video screenshot:', e);
-          }
-        }
-      }
-
-      // Fall back to the poster frame if no refs at all (pure t2v).
-      if (labeledImages.length === 0 && video.original_image_url) {
-        labeledImages.push({ label: '主图像', url: video.original_image_url });
-      }
-    } else if (workflowType === 'fl2v') {
-      if (video.original_image_url) labeledImages.push({ label: '首帧 (first frame)', url: video.original_image_url });
-      if (video.last_image_url) labeledImages.push({ label: '尾帧 (last frame)', url: video.last_image_url });
-    } else {
-      if (video.original_image_url) labeledImages.push({ label: '主图像', url: video.original_image_url });
-    }
-    for (const item of labeledImages) {
-      item.url = toOriginalUrl(item.url);
-    }
-    const filteredLabeled = labeledImages.filter((x) => x.url);
+    // Labeled reference images for vision grounding (shared with the analyze endpoint).
+    const filteredLabeled = await collectLabeledReferenceImages(video, workflowType);
 
     const durationSeconds = Number(body.videoDuration ?? video.video_duration ?? 5);
 
