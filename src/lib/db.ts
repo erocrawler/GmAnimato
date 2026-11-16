@@ -117,6 +117,14 @@ export async function claimJobForMigration(settings: AdminSettings) {
   return db.claimJobForMigration(settings);
 }
 
+export async function claimStaleLocalJob(olderThan: Date, excludeIds?: string[]) {
+  return db.claimStaleLocalJob(olderThan, excludeIds);
+}
+
+export async function failTimedOutProcessing(cutoff: Date) {
+  return db.failTimedOutProcessing(cutoff);
+}
+
 // ==================== User Functions ====================
 
 export async function createUser(username: string, password_hash: string, email?: string, roles?: string[]) {

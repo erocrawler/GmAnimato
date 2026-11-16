@@ -17,6 +17,7 @@ import type { AdminSettings, VideoEntry, User } from './IDatabase';
  * @param claimJobForMigration Function to atomically claim a job for migration
  * @param updateVideo Function to update video in database
  * @param buildWorkflowCallback Function to build workflow for the migrated job
+ * @param submit RunPod submission (injectable for the queue sweeper / tests; defaults to submitRunPodJob)
  * @returns true if a job was migrated, false otherwise
  */
 export async function migrateOldestEligibleJob(
@@ -24,7 +25,8 @@ export async function migrateOldestEligibleJob(
   settings: AdminSettings,
   claimJobForMigration: (settings: AdminSettings) => Promise<VideoEntry | null>,
   updateVideo: (id: string, patch: any) => Promise<any>,
-  buildWorkflowCallback: (video: VideoEntry) => Promise<any>
+  buildWorkflowCallback: (video: VideoEntry) => Promise<any>,
+  submit: (config: RunPodConfig, payload: any) => Promise<{ id: string }> = submitRunPodJob
 ): Promise<boolean> {
   if (!config) {
     console.log('[Queue Migration] RunPod not configured, cannot migrate');
@@ -48,7 +50,7 @@ export async function migrateOldestEligibleJob(
     const payload = await buildWorkflowCallback(candidate);
 
     // Submit to RunPod
-    const result = await submitRunPodJob(config, payload);
+    const result = await submit(config, payload);
 
     // Update database to mark as RunPod job and restore to in_queue status
     // (RunPod will handle the actual processing)

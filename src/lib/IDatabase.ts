@@ -263,6 +263,24 @@ export interface IDatabase {
   getLocalJobStats(): Promise<{ inQueue: number; processing: number; completed: number; failed: number }>;
   getOldestMigrationCandidate(settings: AdminSettings): Promise<VideoEntry | null>; // Find oldest eligible job for RunPod migration
   claimJobForMigration(settings: AdminSettings): Promise<VideoEntry | null>; // Atomically claim and mark job for migration
+  /**
+   * Hourly sweeper: atomically reserve the OLDEST local in_queue job whose queue wait
+   * (processing_started_at, falling back to created_at) is older than `olderThan`,
+   * regardless of the owner's role. Reservation = status 'processing' (same as
+   * claimJobForMigration, so local workers can no longer pick it up) plus
+   * dequeued_at = now (a leash: a crashed sweeper leaves the row to be timed out instead of
+   * stuck forever). The caller must either finish the migration or reset the row to in_queue.
+   * `excludeIds` lets a batch skip rows it already failed on. Returns null when nothing qualifies.
+   */
+  claimStaleLocalJob(olderThan: Date, excludeIds?: string[]): Promise<VideoEntry | null>;
+  /**
+   * Hourly sweeper: mark every job still 'processing' whose dequeued_at is older than `cutoff`
+   * as 'failed' in ONE conditional write (the condition lives in the UPDATE itself, so a
+   * concurrently arriving completed webhook can never be overwritten). Only status changes;
+   * job_id is kept so a genuine late completion callback is still accepted.
+   * Returns the ids that were marked.
+   */
+  failTimedOutProcessing(cutoff: Date): Promise<string[]>;
   getVideoModelTypes(): Promise<VideoModelType[]>; // Distinct model/workflow types present in the video table (includes legacy/unavailable)
   
   // User methods

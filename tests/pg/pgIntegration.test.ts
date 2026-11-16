@@ -34,6 +34,7 @@ vi.mock('$lib/runpod', () => ({
   mapRunPodStatus: (s: string) =>
     ({ FAILED: 'failed', COMPLETED: 'completed', IN_QUEUE: 'in_queue', IN_PROGRESS: 'processing' } as any)[s] ?? 'failed',
   retryRunPodJob: (...a: any[]) => h.runpod.retry(...a),
+  PROCESSING_TIMEOUT_MS: 30 * 60 * 1000,
   submitRunPodJob: (...a: any[]) => h.runpod.submit(...a),
 }));
 vi.mock('$lib/jobWorkflow', () => ({
@@ -48,7 +49,7 @@ vi.mock('$lib/imageRecognition', () => ({ evaluatePromptProperties: async () => 
 describe.skipIf(!PG_URL)('real Postgres integration', () => {
   let db: any; // real $lib/db module (delegates to a real PostgresDatabase)
   let prisma: any;
-  let retry: any, reopen: any, webhook: any, kickoff: any, submitJob: any;
+  let retry: any, reopen: any, webhook: any, kickoff: any, submitJob: any, runQueueSweep: any;
   let FREE: any, PAID: any, ADMIN: any, OTHER: any;
 
   const startOfTodayMinus = (hours: number) => new Date(Date.now() - hours * 3600_000).toISOString();
@@ -65,6 +66,7 @@ describe.skipIf(!PG_URL)('real Postgres integration', () => {
     webhook = (await import('../../src/routes/api/i2v-webhook/[id]/+server')).POST;
     kickoff = (await import('../../src/routes/api/i2v/kickoff/+server')).POST;
     submitJob = (await import('../../src/lib/local-queue')).submitJob;
+    runQueueSweep = (await import('../../src/lib/queueSweeper')).runQueueSweep;
   });
 
   afterAll(async () => {
@@ -337,6 +339,254 @@ describe.skipIf(!PG_URL)('real Postgres integration', () => {
       expect(after.isLocalJob).toBe(true);
       expect(after.jobId).toMatch(new RegExp(`^local-${v.id}-[0-9a-f-]{36}$`));
       expect(h.runpod.submit).not.toHaveBeenCalled();
+    });
+  });
+  // ==================== (h) hourly queue sweeper ====================
+  describe('(h) queue sweeper: failTimedOutProcessing / claimStaleLocalJob / runQueueSweep', () => {
+    // admin_settings is not truncated between tests: pin the threshold this block depends on.
+    beforeEach(async () => {
+      await db.updateAdminSettings({ freeUserWaitThresholdMinutes: 30 } as any);
+    });
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    const iso = (minutes: number) => ago(minutes).toISOString();
+    const local = (over: any = {}) =>
+      seed({ status: 'in_queue', is_local_job: true, job_id: 'local-x', dequeued_at: undefined, processing_started_at: iso(60), ...over });
+    const realDeps = (over: any = {}) => ({
+      now: () => Date.now(),
+      getAdminSettings: () => db.getAdminSettings(),
+      failTimedOutProcessing: (c: Date) => db.failTimedOutProcessing(c),
+      claimStaleLocalJob: (o: Date, ex?: string[]) => db.claimStaleLocalJob(o, ex),
+      updateVideo: (id: string, patch: any) => db.updateVideo(id, patch),
+      getRunPodConfig: () => ({ endpointUrl: 'http://runpod.test', apiKey: 'k' }),
+      resolveCallbackBase: () => 'https://cb.example.test',
+      buildPayload: async (v: any) => ({ input: { id: v.id } }),
+      submitRunPodJob: (c: any, p: any) => h.runpod.submit(c, p),
+      logger: { log: () => {}, warn: () => {}, error: () => {} },
+      ...over,
+    });
+
+    describe('failTimedOutProcessing', () => {
+      it('only flips processing rows with an expired dequeued_at; everything else is untouched', async () => {
+        const expired1 = await seed({ status: 'processing', processing_started_at: iso(200), job_id: 'rp-e1', dequeued_at: iso(31) });
+        const expired2 = await seed({ status: 'processing', processing_started_at: iso(200), is_local_job: true, job_id: 'local-e2', dequeued_at: iso(600) });
+        const fresh = await seed({ status: 'processing', processing_started_at: iso(200), job_id: 'rp-f', dequeued_at: iso(5) });
+        const noDeq = await seed({ status: 'processing', processing_started_at: iso(200), job_id: 'rp-n', dequeued_at: null });
+        const queued = await seed({ status: 'in_queue', job_id: 'rp-q', dequeued_at: iso(600) });
+        const done = await seed({ status: 'completed', job_id: 'rp-c', dequeued_at: iso(600) });
+        const failed = await seed({ status: 'failed', job_id: 'rp-x', dequeued_at: iso(600) });
+        const uploaded = await seed({ status: 'uploaded', job_id: null, dequeued_at: iso(600) });
+        const untouched = [fresh, noDeq, queued, done, failed, uploaded];
+        const snap = await Promise.all(untouched.map((v) => row(v.id)));
+
+        const ids = await db.failTimedOutProcessing(ago(30));
+        expect(ids.sort()).toEqual([expired1.id, expired2.id].sort());
+
+        for (const [i, v] of untouched.entries()) expect(await row(v.id)).toEqual(snap[i]);
+        const e1 = await row(expired1.id);
+        expect(e1.status).toBe('failed');
+        expect(e1.jobId).toBe('rp-e1'); // job_id kept so a genuine late completion is still accepted
+        expect((await row(expired2.id)).jobId).toBe('local-e2');
+        expect(e1.updatedAt.getTime()).toBeGreaterThan(Date.now() - 60_000);
+
+        // idempotent
+        expect(await db.failTimedOutProcessing(ago(30))).toEqual([]);
+      });
+
+      it('does not overwrite a row that already became completed (condition lives in the UPDATE)', async () => {
+        const v = await seed({ status: 'processing', processing_started_at: iso(200), job_id: 'rp-1', dequeued_at: iso(120) });
+        await db.updateVideo(v.id, { status: 'completed', final_video_url: 'https://s3.test/ok.mp4' });
+        const before = await row(v.id);
+        expect(await db.failTimedOutProcessing(ago(30))).toEqual([]);
+        expect(await row(v.id)).toEqual(before);
+      });
+
+      it('racing a completed webhook: the row ends completed, never failed', async () => {
+        const v = await seed({ status: 'processing', processing_started_at: iso(200), job_id: 'rp-r', dequeued_at: iso(120) });
+        await Promise.all([
+          db.failTimedOutProcessing(ago(30)),
+          callWebhook(v.id, { id: 'rp-r', status: 'COMPLETED', files: [{ type: 's3_url', filename: 'o.mp4', data: 'https://s3.test/o.mp4' }] }),
+        ]);
+        expect((await row(v.id)).status).toBe('completed');
+      });
+
+      it('a late genuine COMPLETED callback is still accepted for a swept (failed) row', async () => {
+        const v = await seed({ status: 'processing', processing_started_at: iso(200), job_id: 'rp-late', dequeued_at: iso(120) });
+        await db.failTimedOutProcessing(ago(30));
+        expect((await row(v.id)).status).toBe('failed');
+        const res = await callWebhook(v.id, { id: 'rp-late', status: 'COMPLETED', files: [{ type: 's3_url', filename: 'o.mp4', data: 'https://s3.test/late.mp4' }] });
+        expect(res.status).toBe(201);
+        expect((await row(v.id)).status).toBe('completed');
+      });
+    });
+
+    describe('claimStaleLocalJob', () => {
+      it('claims only stale local in_queue rows, oldest first, reserving them as processing with a dequeued_at leash', async () => {
+        const stale = await local({ processing_started_at: iso(45) });
+        const staler = await local({ processing_started_at: iso(90) });
+        const young = await local({ processing_started_at: iso(10) });
+        const rp = await seed({ status: 'in_queue', is_local_job: false, job_id: 'rp-q', processing_started_at: iso(500), dequeued_at: undefined });
+        const processing = await seed({ status: 'processing', is_local_job: true, job_id: 'local-p', processing_started_at: iso(500), dequeued_at: iso(1) });
+        const completed = await seed({ status: 'completed', is_local_job: true, job_id: 'local-c', processing_started_at: iso(500) });
+        const failed = await seed({ status: 'failed', is_local_job: true, job_id: 'local-f', processing_started_at: iso(500) });
+        const keep = [young, rp, processing, completed, failed];
+        const snap = await Promise.all(keep.map((v) => row(v.id)));
+
+        const first = await db.claimStaleLocalJob(ago(30));
+        expect(first.id).toBe(staler.id);
+        const r1 = await row(staler.id);
+        expect(r1).toMatchObject({ status: 'processing', isLocalJob: true, jobId: 'local-x' });
+        expect(r1.dequeuedAt.getTime()).toBeGreaterThan(Date.now() - 60_000);
+        expect((await db.claimStaleLocalJob(ago(30))).id).toBe(stale.id);
+        expect(await db.claimStaleLocalJob(ago(30))).toBeNull();
+
+        for (const [i, v] of keep.entries()) expect(await row(v.id)).toEqual(snap[i]);
+      });
+
+      it('falls back to created_at when processing_started_at is null; a young created_at is not claimed', async () => {
+        const oldCreated = await local({ processing_started_at: null });
+        await prisma.video.update({ where: { id: oldCreated.id }, data: { createdAt: ago(120) } });
+        const youngCreated = await local({ processing_started_at: null });
+        expect((await db.claimStaleLocalJob(ago(30))).id).toBe(oldCreated.id);
+        expect(await db.claimStaleLocalJob(ago(30))).toBeNull();
+        expect((await row(youngCreated.id)).status).toBe('in_queue');
+      });
+
+      it('treats every role alike (paid user waiting under the threshold is NOT claimed; over it, is)', async () => {
+        const paidYoung = await local({ user_id: PAID.id, processing_started_at: iso(5) });
+        expect(await db.claimStaleLocalJob(ago(30))).toBeNull();
+        const paidOld = await local({ user_id: PAID.id, processing_started_at: iso(50) });
+        expect((await db.claimStaleLocalJob(ago(30))).id).toBe(paidOld.id);
+        expect((await row(paidYoung.id)).status).toBe('in_queue');
+      });
+
+      it('excludeIds skips rows (also with an empty list)', async () => {
+        const a = await local({ processing_started_at: iso(90) });
+        const b = await local({ processing_started_at: iso(80) });
+        expect((await db.claimStaleLocalJob(ago(30), [a.id])).id).toBe(b.id);
+        expect((await db.claimStaleLocalJob(ago(30), [])).id).toBe(a.id);
+      });
+
+      it('concurrent claims never hand out the same row', async () => {
+        const one = await local();
+        const two = await Promise.all([db.claimStaleLocalJob(ago(30)), db.claimStaleLocalJob(ago(30))]);
+        expect(two.filter(Boolean)).toHaveLength(1);
+        expect(two.find(Boolean).id).toBe(one.id);
+
+        const many = await Promise.all(Array.from({ length: 6 }, () => local()));
+        const claims = await Promise.all(Array.from({ length: 10 }, () => db.claimStaleLocalJob(ago(30))));
+        const got = claims.filter(Boolean).map((c: any) => c.id);
+        expect(got).toHaveLength(6);
+        expect(new Set(got).size).toBe(6);
+        expect(new Set(got)).toEqual(new Set(many.map((m: any) => m.id)));
+      });
+
+      it('races a local worker claim: exactly one side wins the row', async () => {
+        const v = await local();
+        const [mine, workers] = await Promise.all([db.claimStaleLocalJob(ago(30)), db.claimLocalJob()]);
+        expect([mine, workers].filter(Boolean)).toHaveLength(1);
+        expect(((mine ?? workers) as any).id).toBe(v.id);
+      });
+    });
+
+    describe('runQueueSweep end to end', () => {
+      it('3 timed-out + 2 stale queued migrated; the rest untouched; migrated rows are not killed by the next sweep', async () => {
+        const t1 = await seed({ status: 'processing', processing_started_at: iso(200), job_id: 'rp-t1', dequeued_at: iso(40) });
+        const t2 = await seed({ status: 'processing', processing_started_at: iso(200), job_id: 'rp-t2', dequeued_at: iso(90) });
+        const t3 = await seed({ status: 'processing', processing_started_at: iso(200), is_local_job: true, job_id: 'local-t3', dequeued_at: iso(300) });
+        const m1 = await local({ processing_started_at: iso(100) });
+        const m2 = await local({ user_id: PAID.id, processing_started_at: iso(35) });
+        const keepRows = [
+          await local({ processing_started_at: iso(10) }),                                                    // young local queue
+          await seed({ status: 'in_queue', is_local_job: false, job_id: 'rp-q', processing_started_at: iso(500), dequeued_at: undefined }), // RunPod queue
+          await seed({ status: 'processing', processing_started_at: iso(200), job_id: 'rp-fresh', dequeued_at: iso(3) }),                       // processing, not expired
+          await seed({ status: 'processing', processing_started_at: iso(200), job_id: 'rp-nodeq', dequeued_at: null }),                         // processing, no dequeued_at
+          await seed({ status: 'completed', job_id: 'rp-done', dequeued_at: iso(900) }),
+          await seed({ status: 'failed', job_id: 'rp-fail', dequeued_at: iso(900) }),
+          await seed({ status: 'uploaded', job_id: null, dequeued_at: null, processing_started_at: null }),
+        ];
+        const snap = await Promise.all(keepRows.map((v: any) => row(v.id)));
+        const m1Started = (await row(m1.id)).processingStartedAt.toISOString();
+        let n = 0;
+        h.runpod.submit = vi.fn(async () => ({ id: `rp-mig-${++n}` }));
+
+        const s = await runQueueSweep(realDeps());
+        expect(s).toMatchObject({ timedOut: 3, migrated: 2, migrationFailed: 0 });
+        expect(s.skipped).toBeUndefined();
+        expect(s.timedOutIds.sort()).toEqual([t1.id, t2.id, t3.id].sort());
+        expect(s.migratedIds).toEqual([m1.id, m2.id]); // oldest wait first
+        expect(h.runpod.submit).toHaveBeenCalledTimes(2);
+
+        for (const id of [t1.id, t2.id, t3.id]) expect((await row(id)).status).toBe('failed');
+        const r1 = await row(m1.id);
+        expect(r1).toMatchObject({ status: 'in_queue', isLocalJob: false, jobId: 'rp-mig-1', dequeuedAt: null });
+        expect(r1.processingStartedAt.toISOString()).toBe(m1Started); // queue-start (daily quota accounting) is preserved
+        expect(await row(m2.id)).toMatchObject({ status: 'in_queue', isLocalJob: false, jobId: 'rp-mig-2', dequeuedAt: null });
+        for (const [i, v] of keepRows.entries()) expect(await row((v as any).id)).toEqual(snap[i]);
+
+        // a second sweep changes nothing: migrated rows are in_queue (not processing), so no timeout can hit them
+        const s2 = await runQueueSweep(realDeps());
+        expect(s2).toMatchObject({ timedOut: 0, migrated: 0 });
+        expect((await row(m1.id)).status).toBe('in_queue');
+        expect(h.runpod.submit).toHaveBeenCalledTimes(2);
+      });
+
+      it('a migrated job that really starts and then times out is failed by a later sweep', async () => {
+        const m = await local({ processing_started_at: iso(100) });
+        await runQueueSweep(realDeps());
+        expect((await row(m.id)).isLocalJob).toBe(false);
+        await db.updateVideo(m.id, { status: 'processing', dequeued_at: iso(45) });
+        const s = await runQueueSweep(realDeps());
+        expect(s.timedOutIds).toEqual([m.id]);
+        expect((await row(m.id)).status).toBe('failed');
+      });
+
+      it('submit failure resets the row to in_queue/local and the rest of the batch still migrates', async () => {
+        const bad = await local({ processing_started_at: iso(100) });
+        const good = await local({ processing_started_at: iso(90) });
+        h.runpod.submit = vi.fn(async (_c: any, p: any) => {
+          if (p.input.id === bad.id) throw new Error('runpod 500');
+          return { id: 'rp-good' };
+        });
+        const s = await runQueueSweep(realDeps());
+        expect(s).toMatchObject({ migrated: 1, migrationFailed: 1 });
+        expect(await row(bad.id)).toMatchObject({ status: 'in_queue', isLocalJob: true, jobId: 'local-x', dequeuedAt: null });
+        expect(await row(good.id)).toMatchObject({ status: 'in_queue', isLocalJob: false, jobId: 'rp-good' });
+      });
+
+      it('no callback base: timeouts still swept, nothing claimed or submitted', async () => {
+        const t = await seed({ status: 'processing', processing_started_at: iso(200), job_id: 'rp-t', dequeued_at: iso(60) });
+        const q = await local();
+        const s = await runQueueSweep(realDeps({ resolveCallbackBase: () => null }));
+        expect(s).toMatchObject({ timedOut: 1, migrated: 0, skipped: 'no-callback-base' });
+        expect((await row(t.id)).status).toBe('failed');
+        expect(await row(q.id)).toMatchObject({ status: 'in_queue', isLocalJob: true });
+        expect(h.runpod.submit).not.toHaveBeenCalled();
+      });
+
+      it('honours freeUserWaitThresholdMinutes from AdminSettings', async () => {
+        await db.updateAdminSettings({ freeUserWaitThresholdMinutes: 120 } as any);
+        const q = await local({ processing_started_at: iso(100) });
+        expect(await runQueueSweep(realDeps())).toMatchObject({ migrated: 0 });
+        expect((await row(q.id)).isLocalJob).toBe(true);
+        await db.updateAdminSettings({ freeUserWaitThresholdMinutes: 60 } as any);
+        expect(await runQueueSweep(realDeps())).toMatchObject({ migrated: 1 });
+      });
+
+      it('two sweepers at once (multi-instance) migrate each row exactly once', async () => {
+        const rows = await Promise.all(Array.from({ length: 5 }, () => local()));
+        // runQueueSweep has an in-process re-entrancy flag, so emulate two instances at the DB layer
+        const worker = async () => {
+          const out: string[] = [];
+          for (;;) {
+            const c = await db.claimStaleLocalJob(ago(30));
+            if (!c) return out;
+            out.push(c.id);
+          }
+        };
+        const [a, b] = await Promise.all([worker(), worker()]);
+        expect([...a, ...b].sort()).toEqual(rows.map((r: any) => r.id).sort());
+        expect(new Set([...a, ...b]).size).toBe(5);
+      });
     });
   });
 });

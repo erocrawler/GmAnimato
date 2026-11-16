@@ -434,6 +434,49 @@ export class JsonFileDatabase implements IDatabase {
     return rows[idx];
   }
 
+  // JSON store has no row locking / cross-process atomicity (dev/test only). This chain at least
+  // serialises the two sweeper methods against each other inside one process, so concurrent
+  // calls cannot read the same snapshot and hand out the same row twice.
+  private sweepChain: Promise<unknown> = Promise.resolve();
+  private serialiseSweep<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.sweepChain.then(fn, fn);
+    this.sweepChain = run.catch(() => undefined);
+    return run;
+  }
+
+  async claimStaleLocalJob(olderThan: Date, excludeIds: string[] = []): Promise<VideoEntry | null> {
+    return this.serialiseSweep(async () => {
+      const rows = await this.readAll();
+      const cutoff = olderThan.getTime();
+      const startOf = (v: VideoEntry) => new Date(v.processing_started_at || v.created_at).getTime();
+      const candidates = rows
+        .filter((v) => v.is_local_job === true && v.status === 'in_queue' && !excludeIds.includes(v.id) && startOf(v) < cutoff)
+        .sort((a, b) => startOf(a) - startOf(b));
+      const first = candidates[0];
+      if (!first) return null;
+      const idx = rows.findIndex((v) => v.id === first.id);
+      rows[idx] = { ...rows[idx], status: 'processing', dequeued_at: new Date().toISOString() };
+      await this.writeAll(rows);
+      return rows[idx];
+    });
+  }
+
+  async failTimedOutProcessing(cutoff: Date): Promise<string[]> {
+    return this.serialiseSweep(async () => {
+      const rows = await this.readAll();
+      const failed: string[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const v = rows[i];
+        if (v.status === 'processing' && v.dequeued_at && new Date(v.dequeued_at).getTime() < cutoff.getTime()) {
+          rows[i] = { ...v, status: 'failed' };
+          failed.push(v.id);
+        }
+      }
+      if (failed.length > 0) await this.writeAll(rows);
+      return failed;
+    });
+  }
+
   // ==================== User Methods ====================
 
   private async ensureUsersDB() {

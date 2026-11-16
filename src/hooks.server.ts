@@ -268,6 +268,11 @@ if (!building) {
   runCleanup().catch(err => console.error('[Background Tasks] Initial cleanup error:', err));
   // Then schedule for regular intervals
   scheduleCleanupTask();
+  // Hourly queue sweep (time out stuck jobs, move long local waits to RunPod).
+  // Dynamic import keeps the sweeper's dependencies out of the build/test import graph.
+  import('$lib/queueSweeperRuntime')
+    .then((m) => m.startQueueSweeper())
+    .catch((err) => console.error('[Queue Sweep] Failed to start:', err));
 }
 
 /**

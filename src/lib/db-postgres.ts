@@ -750,6 +750,46 @@ export class PostgresDatabase implements IDatabase {
     }
   }
 
+  async claimStaleLocalJob(olderThan: Date, excludeIds: string[] = []): Promise<VideoEntry | null> {
+    // One statement: the sub-select locks the oldest qualifying row (SKIP LOCKED, so a
+    // concurrent sweeper/worker/migration passes over it instead of waiting) and the outer
+    // UPDATE re-checks status='in_queue'. Two concurrent callers can never receive the same row.
+    // Raw SQL bypasses Prisma's @updatedAt, hence updated_at = NOW().
+    const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      UPDATE videos
+      SET status = 'processing', dequeued_at = NOW(), updated_at = NOW()
+      WHERE id = (
+        SELECT id FROM videos
+        WHERE is_local_job = true
+          AND status = 'in_queue'
+          AND COALESCE(processing_started_at, created_at) < ${olderThan}
+          AND NOT (id = ANY(${excludeIds}::text[]))
+        ORDER BY COALESCE(processing_started_at, created_at) ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      AND status = 'in_queue'
+      RETURNING id
+    `;
+    if (!rows || rows.length === 0) return null;
+    const video = await this.prisma.video.findUnique({ where: { id: rows[0].id } });
+    return video ? this.mapToVideoEntry(video) : null;
+  }
+
+  async failTimedOutProcessing(cutoff: Date): Promise<string[]> {
+    // Single conditional UPDATE: a row that a completed webhook already flipped no longer
+    // matches status='processing', so the two writers cannot overwrite each other.
+    const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      UPDATE videos
+      SET status = 'failed', updated_at = NOW()
+      WHERE status = 'processing'
+        AND dequeued_at IS NOT NULL
+        AND dequeued_at < ${cutoff}
+      RETURNING id
+    `;
+    return rows.map((r) => r.id);
+  }
+
   // ==================== User Methods ====================
 
   async createUser(username: string, password_hash: string, email?: string, roles?: string[]): Promise<User> {
