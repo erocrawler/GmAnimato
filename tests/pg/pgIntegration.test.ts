@@ -17,11 +17,14 @@
  *   docker rm -f gmanimato-pgtest
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import bcrypt from 'bcrypt';
+import { isHttpError, isRedirect } from '@sveltejs/kit';
 
 const PG_URL = process.env.PG_TEST_URL;
 
 const h = vi.hoisted(() => ({
   runpod: { submit: null as any, retry: null as any, status: null as any } as Record<'submit' | 'retry' | 'status', any>,
+  oauthUserInfo: {} as any,
 }));
 
 vi.mock('$env/dynamic/private', () => ({
@@ -44,12 +47,16 @@ vi.mock('$lib/jobWorkflow', () => ({
 vi.mock('$lib/s3', () => ({ uploadBufferToS3: async () => 'https://s3.test/x.mp4' }));
 vi.mock('$lib/serverImageUrl', () => ({ toOriginalUrl: (u: string) => u, toProxiedUrl: (u: string) => u }));
 vi.mock('$lib/ref2vPoster', () => ({ extractRef2VPosterFromResult: async () => null }));
+vi.mock('$lib/oauth', () => ({
+  exchangeCodeForTokens: async () => ({ access_token: 'at-test', token_type: 'Bearer', expires_in: 3600 }),
+  getUserInfo: async () => h.oauthUserInfo,
+}));
 vi.mock('$lib/imageRecognition', () => ({ evaluatePromptProperties: async () => ({}) }));
 
 describe.skipIf(!PG_URL)('real Postgres integration', () => {
   let db: any; // real $lib/db module (delegates to a real PostgresDatabase)
   let prisma: any;
-  let retry: any, reopen: any, webhook: any, kickoff: any, submitJob: any, runQueueSweep: any;
+  let retry: any, reopen: any, webhook: any, kickoff: any, submitJob: any, runQueueSweep: any, oauthCallback: any;
   let FREE: any, PAID: any, ADMIN: any, OTHER: any;
 
   const startOfTodayMinus = (hours: number) => new Date(Date.now() - hours * 3600_000).toISOString();
@@ -67,6 +74,7 @@ describe.skipIf(!PG_URL)('real Postgres integration', () => {
     kickoff = (await import('../../src/routes/api/i2v/kickoff/+server')).POST;
     submitJob = (await import('../../src/lib/local-queue')).submitJob;
     runQueueSweep = (await import('../../src/lib/queueSweeper')).runQueueSweep;
+    oauthCallback = (await import('../../src/routes/auth/gmgard/callback/+page.server')).load;
   });
 
   afterAll(async () => {
@@ -125,6 +133,185 @@ describe.skipIf(!PG_URL)('real Postgres integration', () => {
       request: new Request('http://x/api/i2v/kickoff', { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }),
       locals: { user },
     });
+
+  // ==================== OAuth identity binding (A6) ====================
+  describe('OAuth identity binding', () => {
+    const userRow = (username: string) => prisma.user.findUnique({ where: { username } });
+    const callback = async (userInfo: any) => {
+      h.oauthUserInfo = userInfo;
+      const store: Record<string, string> = { oauth_state: 'st', oauth_verifier: 'ver' };
+      const cookies = { get: (k: string) => store[k], set: vi.fn(), delete: vi.fn() };
+      try {
+        await oauthCallback({ url: new URL('http://x/auth/gmgard/callback?code=c&state=st'), cookies });
+        return { thrown: null, cookies };
+      } catch (e) {
+        return { thrown: e, cookies };
+      }
+    };
+    const loggedInAs = async (r: any) => {
+      expect(isRedirect(r.thrown) && r.thrown.status === 302).toBe(true);
+      const token = r.cookies.set.mock.calls.find((c: any[]) => c[0] === 'session')?.[1];
+      expect(token).toBeTruthy();
+      const sess = await prisma.session.findUnique({ where: { token }, include: { user: true } });
+      return sess?.user;
+    };
+    const status = (r: any) => (isHttpError(r.thrown) ? r.thrown.status : null);
+
+    it('the new migration is applied: columns are nullable, unique index exists', async () => {
+      const cols = await prisma.$queryRawUnsafe(
+        "SELECT column_name, is_nullable, column_default FROM information_schema.columns WHERE table_name='users' AND column_name IN ('oauth_provider','oauth_sub') ORDER BY column_name");
+      expect(cols).toEqual([
+        { column_name: 'oauth_provider', is_nullable: 'YES', column_default: null },
+        { column_name: 'oauth_sub', is_nullable: 'YES', column_default: null },
+      ]);
+      const idx = await prisma.$queryRawUnsafe("SELECT indexdef FROM pg_indexes WHERE indexname='users_oauth_provider_oauth_sub_key'");
+      expect(idx[0].indexdef).toMatch(/UNIQUE.*\(oauth_provider, oauth_sub\)/);
+    });
+
+    it('unique index: the same (provider, sub) cannot belong to two users; NULLs never collide', async () => {
+      // the seeded users all have NULL/NULL and coexist
+      expect(await prisma.user.count({ where: { oauthSub: null } })).toBe(4);
+      const a = await db.createOAuthUser({ username: 'ga', password_hash: 'h', provider: 'gmgard', sub: 'S1', roles: ['gmgard-user'] });
+      expect(a).toMatchObject({ username: 'ga', oauth_provider: 'gmgard', oauth_sub: 'S1' });
+      expect(await db.createOAuthUser({ username: 'gb', password_hash: 'h', provider: 'gmgard', sub: 'S1' })).toBeNull();
+      expect(await userRow('gb')).toBeNull();
+      // same sub under another provider is a different identity
+      expect(await db.createOAuthUser({ username: 'gc', password_hash: 'h', provider: 'other', sub: 'S1' })).not.toBeNull();
+      // raw insert hits the real index
+      await expect(prisma.user.create({ data: { username: 'gd', passwordHash: 'h', oauthProvider: 'gmgard', oauthSub: 'S1' } }))
+        .rejects.toMatchObject({ code: 'P2002' });
+      // duplicate username -> null, not a throw
+      expect(await db.createOAuthUser({ username: 'ga', password_hash: 'h', provider: 'gmgard', sub: 'S2' })).toBeNull();
+    });
+
+    it('getUserByOAuthIdentity finds the bound user only for the exact (provider, sub)', async () => {
+      const a = await db.createOAuthUser({ username: 'ga', password_hash: 'h', provider: 'gmgard', sub: 'S1' });
+      expect((await db.getUserByOAuthIdentity('gmgard', 'S1'))?.id).toBe(a.id);
+      expect(await db.getUserByOAuthIdentity('gmgard', 'S2')).toBeUndefined();
+      expect(await db.getUserByOAuthIdentity('other', 'S1')).toBeUndefined();
+    });
+
+    it('linkOAuthIdentity only writes while oauth_sub IS NULL; concurrent binds of different subs: exactly one wins', async () => {
+      const legacy = await db.createUser('legacy', 'x', undefined, ['gmgard-user']);
+      const results = await Promise.all([
+        db.linkOAuthIdentity(legacy.id, 'gmgard', 'SUB-A'),
+        db.linkOAuthIdentity(legacy.id, 'gmgard', 'SUB-B'),
+      ]);
+      expect(results.filter(Boolean)).toHaveLength(1);
+      const row = await userRow('legacy');
+      expect(row.oauthProvider).toBe('gmgard');
+      expect(row.oauthSub).toBe(results[0] ? 'SUB-A' : 'SUB-B');
+
+      // already bound -> refuses, value unchanged
+      const winner = row.oauthSub;
+      expect(await db.linkOAuthIdentity(legacy.id, 'gmgard', 'SUB-C')).toBe(false);
+      expect((await userRow('legacy')).oauthSub).toBe(winner);
+      // (provider, sub) held by someone else -> false (unique violation swallowed), user stays unbound
+      const other = await db.createUser('legacy2', 'x', undefined, ['gmgard-user']);
+      expect(await db.linkOAuthIdentity(other.id, 'gmgard', winner)).toBe(false);
+      expect((await userRow('legacy2')).oauthSub).toBeNull();
+      // unknown user
+      expect(await db.linkOAuthIdentity('nope', 'gmgard', 'SUB-Z')).toBe(false);
+    });
+
+    it('legacy OAuth account (gmgard-user, no sub): first login binds, second login goes by sub even after a rename', async () => {
+      const legacy = await db.createUser('alice', 'legacy-non-bcrypt', 'alice@example.test', ['gmgard-user']);
+      let r = await callback({ sub: 'GM-1', preferred_username: 'alice', email: 'alice@example.test' });
+      expect((await loggedInAs(r))?.id).toBe(legacy.id);
+      expect(await userRow('alice')).toMatchObject({ oauthProvider: 'gmgard', oauthSub: 'GM-1' });
+
+      r = await callback({ sub: 'GM-1', preferred_username: 'alice-renamed' });
+      expect((await loggedInAs(r))?.id).toBe(legacy.id);
+      expect(await userRow('alice-renamed')).toBeNull();
+      expect(await prisma.user.count({ where: { oauthSub: 'GM-1' } })).toBe(1);
+    });
+
+    it('hijack by squatting: a locally registered account with the victim\'s GmGard name is NOT logged into, row unchanged', async () => {
+      const mine = await db.createUser('victim', await bcrypt.hash('attacker-pw', 4), 'a@example.test', []);
+      const before = await userRow('victim');
+      const r = await callback({ sub: 'GM-VICTIM', preferred_username: 'victim', email: 'v@example.test' });
+      expect(status(r)).toBe(403);
+      expect(r.cookies.set).not.toHaveBeenCalled();
+      expect(await prisma.session.count()).toBe(0);
+      expect(await userRow('victim')).toEqual(before);
+      expect(mine.id).toBe(before.id);
+      expect(await prisma.user.count({ where: { oauthSub: 'GM-VICTIM' } })).toBe(0);
+    });
+
+    it('impersonation: a local privileged account (roles [admin], no gmgard-user) is not reachable through a same-named GmGard account', async () => {
+      await db.createUser('root', await bcrypt.hash('pw', 4), undefined, ['admin']);
+      const r = await callback({ sub: 'GM-EVIL', preferred_username: 'root' });
+      expect(status(r)).toBe(403);
+      expect(await prisma.session.count()).toBe(0);
+      expect((await userRow('root')).oauthSub).toBeNull();
+    });
+
+    it('an account already bound to another sub rejects a different GmGard identity with the same name', async () => {
+      await db.createOAuthUser({ username: 'bob', password_hash: 'h', provider: 'gmgard', sub: 'GM-BOB', roles: ['gmgard-user'] });
+      const r = await callback({ sub: 'GM-IMPOSTOR', preferred_username: 'bob' });
+      expect(status(r)).toBe(403);
+      expect(await prisma.session.count()).toBe(0);
+      expect((await userRow('bob')).oauthSub).toBe('GM-BOB');
+      expect(await prisma.user.count({ where: { oauthSub: 'GM-IMPOSTOR' } })).toBe(0);
+    });
+
+    it('new user: created with gmgard-user + identity; password_hash is a valid bcrypt nobody can match; later login by sub', async () => {
+      let r = await callback({ sub: 'GM-NEW', preferred_username: 'newbie', email: 'new@example.test' });
+      const u = await loggedInAs(r);
+      expect(u).toMatchObject({ username: 'newbie', email: 'new@example.test', oauthProvider: 'gmgard', oauthSub: 'GM-NEW' });
+      expect(JSON.parse(u.roles)).toEqual(['gmgard-user']);
+      expect(u.passwordHash).toMatch(/^\$2[aby]\$\d{2}\$.{53}$/);
+      for (const guess of ['password', '123456', 'newbie', 'admin', '', 'qwerty', '0.5', 'undefined']) {
+        expect(await bcrypt.compare(guess, u.passwordHash)).toBe(false);
+      }
+      // password login path (authenticateUser) also fails
+      const { authenticateUser } = await import('../../src/lib/auth');
+      expect(await authenticateUser('newbie', 'password')).toBeNull();
+
+      r = await callback({ sub: 'GM-NEW', preferred_username: 'newbie-2' });
+      expect((await loggedInAs(r))?.id).toBe(u.id);
+      expect(await prisma.user.count({ where: { oauthSub: 'GM-NEW' } })).toBe(1);
+    });
+
+    it('new user whose email is already held by a local account is still created (without the email)', async () => {
+      await db.createUser('local-mail', 'x', 'taken@example.test', []);
+      const r = await callback({ sub: 'GM-M', preferred_username: 'mailer', email: 'taken@example.test' });
+      const u = await loggedInAs(r);
+      expect(u).toMatchObject({ username: 'mailer', email: null, oauthSub: 'GM-M' });
+    });
+
+    it('concurrent first logins of the same new identity yield one user and two successful logins', async () => {
+      const info = { sub: 'GM-RACE', preferred_username: 'racer', email: 'race@example.test' };
+      const [r1, r2] = await Promise.all([callback(info), callback(info)]);
+      expect(await prisma.user.count({ where: { oauthSub: 'GM-RACE' } })).toBe(1);
+      const u1 = await loggedInAs(r1);
+      const u2 = await loggedInAs(r2);
+      expect(u1.id).toBe(u2.id);
+    });
+
+    it('concurrent first logins of a legacy account from the same identity both succeed (bind once)', async () => {
+      const legacy = await db.createUser('oldtimer', 'x', undefined, ['gmgard-user']);
+      const info = { sub: 'GM-OLD', preferred_username: 'oldtimer' };
+      const [r1, r2] = await Promise.all([callback(info), callback(info)]);
+      expect((await loggedInAs(r1))?.id).toBe(legacy.id);
+      expect((await loggedInAs(r2))?.id).toBe(legacy.id);
+      expect((await userRow('oldtimer')).oauthSub).toBe('GM-OLD');
+    });
+
+    it('public user mappings do not expose oauth_sub / password_hash', async () => {
+      const u = await db.createOAuthUser({ username: 'pub', password_hash: 'hash-secret', provider: 'gmgard', sub: 'GM-PUB', roles: ['gmgard-user'] });
+      const { authenticateUser, getUserByIdPublic } = await import('../../src/lib/auth');
+      const pub = await getUserByIdPublic(u.id);
+      expect(Object.keys(pub as any).sort()).toEqual(['created_at', 'email', 'id', 'roles', 'updated_at', 'username']);
+      const all = await db.getAllUsers();
+      for (const x of all) {
+        expect(x).not.toHaveProperty('oauth_sub');
+        expect(x).not.toHaveProperty('oauth_provider');
+        expect(x).not.toHaveProperty('password_hash');
+      }
+      void authenticateUser;
+    });
+  });
 
   // ==================== (a) undefined vs null ====================
   describe('(a) updateVideo undefined / null', () => {

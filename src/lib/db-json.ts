@@ -533,6 +533,45 @@ export class JsonFileDatabase implements IDatabase {
     return users.find((u) => u.email === email);
   }
 
+  async getUserByOAuthIdentity(provider: string, sub: string): Promise<User | undefined> {
+    if (!provider || !sub) return undefined;
+    const users = await this.readAllUsers();
+    return users.find((u) => u.oauth_provider === provider && u.oauth_sub === sub);
+  }
+
+  async linkOAuthIdentity(userId: string, provider: string, sub: string): Promise<boolean> {
+    if (!userId || !provider || !sub) return false;
+    const users = await this.readAllUsers();
+    const idx = users.findIndex((u) => u.id === userId);
+    if (idx === -1 || users[idx].oauth_sub) return false;
+    if (users.some((u) => u.oauth_provider === provider && u.oauth_sub === sub)) return false;
+    users[idx] = { ...users[idx], oauth_provider: provider, oauth_sub: sub, updated_at: new Date().toISOString() };
+    await this.writeAllUsers(users);
+    return true;
+  }
+
+  async createOAuthUser(input: { username: string; password_hash: string; email?: string; roles?: string[]; provider: string; sub: string }): Promise<User | null> {
+    const users = await this.readAllUsers();
+    if (users.some((u) => u.username === input.username)) return null;
+    if (input.email && users.some((u) => u.email === input.email)) return null;
+    if (users.some((u) => u.oauth_provider === input.provider && u.oauth_sub === input.sub)) return null;
+    const created_at = new Date().toISOString();
+    const user: User = {
+      id: `user-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      username: input.username,
+      email: input.email,
+      password_hash: input.password_hash,
+      roles: input.roles || [],
+      oauth_provider: input.provider,
+      oauth_sub: input.sub,
+      created_at,
+      updated_at: created_at,
+    };
+    users.push(user);
+    await this.writeAllUsers(users);
+    return user;
+  }
+
   async updateUser(id: string, patch: Partial<Omit<User, 'id' | 'created_at'>>): Promise<User | null> {
     const users = await this.readAllUsers();
     const idx = users.findIndex((u) => u.id === id);

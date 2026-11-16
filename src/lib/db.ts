@@ -143,6 +143,18 @@ export async function getUserByEmail(email: string) {
   return db.getUserByEmail(email);
 }
 
+export async function getUserByOAuthIdentity(provider: string, sub: string) {
+  return db.getUserByOAuthIdentity(provider, sub);
+}
+
+export async function linkOAuthIdentity(userId: string, provider: string, sub: string) {
+  return db.linkOAuthIdentity(userId, provider, sub);
+}
+
+export async function createOAuthUser(input: Parameters<IDatabase['createOAuthUser']>[0]) {
+  return db.createOAuthUser(input);
+}
+
 export async function updateUser(id: string, patch: Partial<Omit<User, 'id' | 'created_at'>>) {
   return db.updateUser(id, patch);
 }

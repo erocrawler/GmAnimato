@@ -75,11 +75,15 @@ export type User = {
   email?: string;
   password_hash: string; // Hashed password
   roles: string[];
+  /** External identity provider this account was created/linked through (e.g. 'gmgard'). Internal only. */
+  oauth_provider?: string;
+  /** Provider-side stable subject id. Internal only: never send to clients. */
+  oauth_sub?: string;
   created_at: string;
   updated_at?: string;
 };
 
-export type UserPublic = Omit<User, 'password_hash'>;
+export type UserPublic = Omit<User, 'password_hash' | 'oauth_provider' | 'oauth_sub'>;
 
 export type GalleryState = {
   lastVideoId?: string;       // Last video the user was viewing in the short feed
@@ -288,6 +292,17 @@ export interface IDatabase {
   getUserById(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUserByOAuthIdentity(provider: string, sub: string): Promise<User | undefined>;
+  /**
+   * Atomically bind (provider, sub) to a user whose oauth_sub is still empty.
+   * Returns false when the user is missing, already bound, or (provider, sub) belongs to someone else.
+   */
+  linkOAuthIdentity(userId: string, provider: string, sub: string): Promise<boolean>;
+  /**
+   * Create a user bound to an OAuth identity in one write. Returns null when the username,
+   * email or (provider, sub) is already taken (unique violation) instead of throwing.
+   */
+  createOAuthUser(input: { username: string; password_hash: string; email?: string; roles?: string[]; provider: string; sub: string }): Promise<User | null>;
   updateUser(id: string, patch: Partial<Omit<User, 'id' | 'created_at'>>): Promise<User | null>;
   deleteUser(id: string): Promise<boolean>;
   getGalleryState(userId: string): Promise<GalleryState | null>;

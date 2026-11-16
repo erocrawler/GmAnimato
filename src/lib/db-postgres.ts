@@ -831,6 +831,49 @@ export class PostgresDatabase implements IDatabase {
     return user ? this.mapToUser(user) : undefined;
   }
 
+  async getUserByOAuthIdentity(provider: string, sub: string): Promise<User | undefined> {
+    if (!provider || !sub) return undefined;
+    const user = await this.prisma.user.findUnique({
+      where: { oauthProvider_oauthSub: { oauthProvider: provider, oauthSub: sub } },
+    });
+    return user ? this.mapToUser(user) : undefined;
+  }
+
+  async linkOAuthIdentity(userId: string, provider: string, sub: string): Promise<boolean> {
+    if (!userId || !provider || !sub) return false;
+    try {
+      // Single conditional UPDATE: only a row whose oauth_sub is still NULL can be bound, so two
+      // concurrent first logins cannot both win.
+      const res = await this.prisma.user.updateMany({
+        where: { id: userId, oauthSub: null },
+        data: { oauthProvider: provider, oauthSub: sub },
+      });
+      return res.count === 1;
+    } catch (error) {
+      if ((error as any)?.code === 'P2002') return false; // (provider, sub) already bound to another user
+      throw error;
+    }
+  }
+
+  async createOAuthUser(input: { username: string; password_hash: string; email?: string; roles?: string[]; provider: string; sub: string }): Promise<User | null> {
+    try {
+      const user = await this.prisma.user.create({
+        data: {
+          username: input.username,
+          email: input.email || null,
+          passwordHash: input.password_hash,
+          roles: JSON.stringify(input.roles || []),
+          oauthProvider: input.provider,
+          oauthSub: input.sub,
+        },
+      });
+      return this.mapToUser(user);
+    } catch (error) {
+      if ((error as any)?.code === 'P2002') return null; // username / email / (provider, sub) already taken
+      throw error;
+    }
+  }
+
   async updateUser(id: string, patch: Partial<Omit<User, 'id' | 'created_at'>>): Promise<User | null> {
     try {
       const data: any = {};
@@ -1218,6 +1261,8 @@ export class PostgresDatabase implements IDatabase {
       email: user.email || undefined,
       password_hash: user.passwordHash,
       roles: JSON.parse(user.roles),
+      oauth_provider: user.oauthProvider || undefined,
+      oauth_sub: user.oauthSub || undefined,
       created_at: user.createdAt.toISOString(),
       updated_at: user.updatedAt.toISOString(),
     };

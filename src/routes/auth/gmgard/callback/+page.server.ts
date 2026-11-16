@@ -1,8 +1,76 @@
 import type { PageServerLoad } from './$types';
-import { error, redirect } from '@sveltejs/kit';
-import { exchangeCodeForTokens, getUserInfo } from '$lib/oauth';
-import { getUserByUsername, createUser, createSession } from '$lib/db';
+import { error, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
+import { randomBytes } from 'node:crypto';
+import bcrypt from 'bcrypt';
+import { exchangeCodeForTokens, getUserInfo, type OAuthUserInfo } from '$lib/oauth';
+import {
+  getUserByUsername,
+  getUserByOAuthIdentity,
+  linkOAuthIdentity,
+  createOAuthUser,
+  createSession,
+  type User,
+} from '$lib/db';
 import { generateJWT, generateSessionToken, getSessionExpiry, SESSION_COOKIE_OPTIONS, JWT_ENABLED } from '$lib/session';
+
+const OAUTH_PROVIDER = 'gmgard';
+const OAUTH_ROLE = 'gmgard-user';
+const SALT_ROUNDS = 10;
+const USERNAME_TAKEN_MESSAGE = '该用户名已被本站其他账号占用,请联系管理员';
+
+/**
+ * Resolve the local account for a GmGard identity. The stable key is (provider, sub); the username is
+ * only used to adopt a legacy OAuth account (role gmgard-user, no sub yet) or to name a new one.
+ * Never logs in or merges into a local-registered account / an account bound to another sub.
+ */
+async function resolveOAuthUser(sub: string, username: string, email: string | undefined): Promise<User> {
+  // a. known identity -> log in (also after a rename on the GmGard side)
+  const bound = await getUserByOAuthIdentity(OAUTH_PROVIDER, sub);
+  if (bound) return bound;
+
+  // b. legacy OAuth account: created by the old flow (role gmgard-user), never bound to a sub
+  const existing = await getUserByUsername(username);
+  if (existing) {
+    // Same identity created/bound by a concurrent request between our lookups.
+    if (existing.oauth_provider === OAUTH_PROVIDER && existing.oauth_sub === sub) return existing;
+    if (existing.roles?.includes(OAUTH_ROLE) && !existing.oauth_sub) {
+      if (await linkOAuthIdentity(existing.id, OAUTH_PROVIDER, sub)) {
+        return { ...existing, oauth_provider: OAUTH_PROVIDER, oauth_sub: sub };
+      }
+      // Lost the race: a concurrent login of the same identity may have bound it just now.
+      const raced = await getUserByOAuthIdentity(OAUTH_PROVIDER, sub);
+      if (raced) return raced;
+    }
+    // c. username belongs to a local-registered account or to another identity: no login, no merge
+    console.warn(`OAuth username conflict: provider=${OAUTH_PROVIDER} username=${username}`);
+    throw error(403, USERNAME_TAKEN_MESSAGE);
+  }
+
+  // d. new user. The password hash is a valid bcrypt of 32 random bytes nobody knows, so password
+  //    login can never succeed for this account.
+  const unknownPasswordHash = await bcrypt.hash(randomBytes(32).toString('hex'), SALT_ROUNDS);
+  const base = { username, password_hash: unknownPasswordHash, roles: [OAUTH_ROLE], provider: OAUTH_PROVIDER, sub };
+  let created = await createOAuthUser({ ...base, email });
+  if (!created && email) {
+    // The email may be held by another account (it is not an identity): retry without it.
+    created = await createOAuthUser({ ...base });
+  }
+  if (created) return created;
+
+  // Unique conflict: a concurrent first login of the same identity may have created it.
+  const raced = await getUserByOAuthIdentity(OAUTH_PROVIDER, sub);
+  if (raced) return raced;
+  console.warn(`OAuth username conflict: provider=${OAUTH_PROVIDER} username=${username}`);
+  throw error(403, USERNAME_TAKEN_MESSAGE);
+}
+
+/** Error summary that never includes message text of DB errors (Prisma messages embed the query args). */
+function describeError(err: unknown): string {
+  if (!err || typeof err !== 'object') return typeof err;
+  const e = err as { name?: string; code?: string; message?: string };
+  if (typeof e.name === 'string' && e.name.startsWith('PrismaClient')) return `${e.name}${e.code ? ` ${e.code}` : ''}`;
+  return `${e.name ?? 'Error'}: ${String(e.message ?? '').slice(0, 200)}`;
+}
 
 export const load: PageServerLoad = async ({ url, cookies }) => {
   const code = url.searchParams.get('code');
@@ -34,36 +102,22 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
   }
   
   try {
-    // Exchange code for tokens
-    console.log('Exchanging code for tokens...');
     const tokens = await exchangeCodeForTokens(code, verifier, url.origin);
-    console.log('Token exchange successful, access_token:', tokens.access_token?.substring(0, 20) + '...');
-    
-    // Get user info from GmGard
-    console.log('Fetching user info...');
-    const userInfo = await getUserInfo(tokens.access_token);
-    console.log('User info received:', userInfo);
-    
-    // Check if user exists in local database
-    console.log('Looking up user by username:', userInfo.preferred_username || userInfo.sub);
-    let user = await getUserByUsername(userInfo.preferred_username || userInfo.sub);
-    
-    // Create user if doesn't exist (federated identity)
-    if (!user) {
-      console.log('User not found, creating new user...');
-      // Generate a random password hash since this user will only login via OAuth
-      const randomPassword = Math.random().toString(36).substring(2, 15);
-      user = await createUser(
-        userInfo.preferred_username || userInfo.sub,
-        randomPassword, // This won't be used for OAuth users
-        userInfo.email,
-        ['gmgard-user']
-      );
-      console.log('User created:', user);
-    } else {
-      console.log('User found:', user);
+    const userInfo: OAuthUserInfo = await getUserInfo(tokens.access_token);
+
+    // The stable key must be a non-empty string; without it we cannot tell identities apart.
+    const sub = typeof userInfo?.sub === 'string' && userInfo.sub.trim() !== '' ? userInfo.sub : '';
+    if (!sub) {
+      console.warn('OAuth userinfo has no usable sub, rejecting login');
+      throw error(400, 'Invalid user info from identity provider');
     }
-    
+    const preferred = typeof userInfo.preferred_username === 'string' ? userInfo.preferred_username.trim() : '';
+    const username = preferred || sub;
+    const email = typeof userInfo.email === 'string' && userInfo.email ? userInfo.email : undefined;
+
+    const user = await resolveOAuthUser(sub, username, email);
+    console.log(`OAuth login ok, user id=${user.id}`);
+
     if (JWT_ENABLED) {
       // Generate short-lived JWT
       const jwt = generateJWT({
@@ -82,8 +136,6 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
       const expiresAt = getSessionExpiry();
       await createSession(user.id, refreshToken, expiresAt);
 
-      console.log('Setting JWT cookie...');
-      
       // Store JWT in cookie
       cookies.set('session', jwt, SESSION_COOKIE_OPTIONS);
       
@@ -97,7 +149,6 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
       cookies.delete('oauth_state', { path: '/' });
       cookies.delete('oauth_verifier', { path: '/' });
       
-      console.log('OAuth callback successful, redirecting to home...');
       // Redirect to home page
       throw redirect(302, '/');
     }
@@ -107,8 +158,6 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
     const expiresAt = getSessionExpiry();
     await createSession(user.id, sessionToken, expiresAt);
 
-    console.log('Setting session cookie...');
-    
     cookies.set('session', sessionToken, {
       ...SESSION_COOKIE_OPTIONS,
       expires: expiresAt,
@@ -118,17 +167,13 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
     cookies.delete('oauth_state', { path: '/' });
     cookies.delete('oauth_verifier', { path: '/' });
     
-    console.log('OAuth callback successful, redirecting to home...');
     // Redirect to home page
     throw redirect(302, '/');
     
   } catch (err) {
-    // Check if this is a SvelteKit redirect (has status property and location)
-    if (err && typeof err === 'object' && 'status' in err && 'location' in err) {
-      console.log('Redirect caught, re-throwing to SvelteKit...');
-      throw err;
-    }
-    console.error('OAuth callback error:', err);
-    throw error(500, `Failed to complete authentication: ${err instanceof Error ? err.message : String(err)}`);
+    // SvelteKit redirects and deliberate HTTP errors (400/403/...) pass through untouched
+    if (isRedirect(err) || isHttpError(err)) throw err;
+    console.error('OAuth callback error:', describeError(err));
+    throw error(500, 'Failed to complete authentication');
   }
 };
