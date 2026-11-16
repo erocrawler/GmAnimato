@@ -21,6 +21,18 @@ interface SponsorClaimResponse {
   existingClaim?: any;
 }
 
+/** The role configured for a sponsor tier (AdminSettings.roles[].sponsorTier), matched case-insensitively. */
+function sponsorRoleFor(settings: any, schemeName: string | undefined): { name: string } | undefined {
+  const tier = typeof schemeName === 'string' ? schemeName.trim().toLowerCase() : '';
+  if (!tier) return undefined;
+  return settings?.roles?.find((r: any) => r.sponsorTier && String(r.sponsorTier).toLowerCase() === tier);
+}
+
+/** Roles a sponsorship can never grant, whatever the tier mapping says. */
+function isReservedRole(name: string): boolean {
+  return name.trim().toLowerCase() === 'admin';
+}
+
 async function fetchSponsorFromCrawler(username: string): Promise<SponsorData | null> {
   try {
     // Get sponsor API config from settings, with env fallback
@@ -225,11 +237,13 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
       );
     }
 
-    // Get admin settings to validate role
+    // The role is decided by the server from the sponsor's tier (the same mapping POST shows),
+    // never by the client: a sponsor of a low tier must not be able to ask for any other role
+    // that merely exists in the settings. `roleToApply` is only accepted if it equals that role.
     const settings = await getAdminSettings();
-    const validRole = settings.roles?.find((r: any) => r.name === roleToApply);
+    const mappedRole = sponsorRoleFor(settings, sponsor.schemeName);
 
-    if (!validRole) {
+    if (!mappedRole || mappedRole.name !== roleToApply || isReservedRole(mappedRole.name)) {
       return new Response(
         JSON.stringify({ messageCode: 'INVALID_ROLE' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
