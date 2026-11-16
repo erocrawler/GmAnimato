@@ -1,6 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getPublishedVideos, getGalleryState, setGalleryState } from '$lib/db';
+import { toPublicVideo } from '$lib/publicVideo';
 
 export const GET: RequestHandler = async ({ locals, url }) => {
   if (!locals.user) {
@@ -39,7 +40,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
   });
 
   return json({
-    videos: result.videos,
+    videos: result.videos.map(toPublicVideo),
     hasMore: result.page < result.totalPages,
   });
 };

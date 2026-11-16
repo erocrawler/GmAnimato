@@ -1,6 +1,7 @@
 import type { PageServerLoad } from './$types';
 import { getVideoById, getPublishedVideos, getUserById, getLikeCount, isVideoLikedByUser, getWorkflowById, getAdminSettings } from '$lib/db';
 import { error } from '@sveltejs/kit';
+import { toPublicVideo } from '$lib/publicVideo';
 
 export const load: PageServerLoad = async ({ params, locals, url }) => {
   const video = await getVideoById(params.id);
@@ -40,7 +41,7 @@ export const load: PageServerLoad = async ({ params, locals, url }) => {
       afterValue: params.id,
       excludeId: params.id,
     })
-  ).videos;
+  ).videos.map(toPublicVideo);
 
   // Fetch author basic info
   const author = video.user_id ? await getUserById(video.user_id) : undefined;
@@ -58,7 +59,7 @@ export const load: PageServerLoad = async ({ params, locals, url }) => {
   const settings = await getAdminSettings();
   
   return {
-    video: { ...video, likesCount, isLiked },
+    video: { ...toPublicVideo(video), likesCount, isLiked },
     user: locals.user || null,
     relatedVideos,
     author: authorPublic,

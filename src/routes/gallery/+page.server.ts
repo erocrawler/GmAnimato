@@ -1,5 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { getPublishedVideos, getGalleryState } from '$lib/db';
+import { toPublicVideo } from '$lib/publicVideo';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
   const page = parseInt(url.searchParams.get('page') || '1');
@@ -35,7 +36,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const result = await getPublishedVideos({ page, pageSize, likedBy, currentUserId, isNsfw, sortBy, startAtId });
   
   return { 
-    videos: result.videos,
+    videos: result.videos.map(toPublicVideo),
     total: result.total,
     page: result.page,
     pageSize: result.pageSize,
