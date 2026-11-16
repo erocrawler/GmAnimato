@@ -15,7 +15,7 @@ export const POST: RequestHandler = async ({ request, params }) => {
     const body = await request.json();
     // The worker echoes back the `id` it was dispatched with — handler.py sends
     // `{"id": job_id, ...}`. For RunPod jobs that is the RunPod job id; for local
-    // jobs /api/worker/task hands out `job.job_id` (i.e. `local-<video id>`).
+    // jobs /api/worker/task hands out `job.job_id` (i.e. `local-<video id>-<random>`).
     // Either way it must equal the video's stored job_id, which is what makes
     // clearing job_id a valid way to reject a superseded attempt's webhook.
     const webhook_job_id = body?.id as string | undefined;
@@ -36,6 +36,14 @@ export const POST: RequestHandler = async ({ request, params }) => {
     if (webhook_job_id !== existing.job_id) {
       console.error(`[Webhook] Job ID mismatch for job. Expected: ${existing.job_id}, got: ${webhook_job_id}`);
       return new Response(JSON.stringify({ error: 'job id mismatch' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    // A finished or deleted video is final. A callback that arrives afterwards is a replay (or someone who knows the job id),
+    // and must not overwrite its result or flip it to failed. Acknowledge it so a retrying worker stops. A retry / reopen
+    // puts the video back to an active status first, and its callbacks are accepted again.
+    if (existing.status === 'completed' || existing.status === 'deleted') {
+      console.warn(`[Webhook] Ignoring callback for video ${id}: already ${existing.status}`);
+      return new Response(JSON.stringify({ success: true, ignored: `video already ${existing.status}` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
 
     const patch: any = { status: status.toLowerCase() };

@@ -5,6 +5,7 @@
 
 import type { RunPodConfig, RunPodStatusResponse } from './runpod';
 import { submitRunPodJob, getRunPodJobStatus } from './runpod';
+import { randomUUID } from 'node:crypto';
 import type { AdminSettings, VideoEntry, User } from './IDatabase';
 
 /**
@@ -141,9 +142,12 @@ export async function submitJob(
   
   // Local queue is enabled - always route new jobs to local queue first
   console.log(`[Job Router] Routing video ${video.id} to local queue`);
+  // The job id is the only thing the (public) webhook checks, so it must not be derivable from the video id,
+  // which is visible in gallery URLs. The worker echoes whatever /api/worker/task hands out.
+  const localJobId = `local-${video.id}-${randomUUID()}`;
   await updateVideo(video.id, { 
     is_local_job: true, 
-    job_id: `local-${video.id}` 
+    job_id: localJobId 
   });
   
   // Check if we should migrate oldest eligible job to RunPod
@@ -161,7 +165,7 @@ export async function submitJob(
     );
   }
   
-  return { isLocal: true, jobId: `local-${video.id}` };
+  return { isLocal: true, jobId: localJobId };
 }
 
 /**
