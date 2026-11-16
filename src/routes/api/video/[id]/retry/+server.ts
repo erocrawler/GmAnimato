@@ -1,8 +1,56 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { getVideoById, updateVideo, getAdminSettings } from '$lib/db';
+import { getVideoById, updateVideo, getAdminSettings, getUserById, getWorkflowById } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { getRunPodConfig, retryRunPodJob, getRunPodJobStatus, mapRunPodStatus, submitRunPodJob } from '$lib/runpod';
 import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
+import { getWorkflowCapabilities } from '$lib/workflows';
+import { checkSubmissionGate, checkQueueLimit, gateResponse, userHasAdvancedFeatures } from '$lib/submissionGate';
+
+/**
+ * Re-run the submission gates (daily credits, premium resolution/steps, relay
+ * tier cap, per-user queue limit) against the values stored on the video.
+ * Retry re-executes whatever is stored on the row, so it must enforce the same
+ * rules kickoff does — otherwise it is a way around them.
+ *
+ * Everything is evaluated for the video's OWNER, not the caller: an admin
+ * retrying someone else's video is neither charged nor tiered by their own
+ * roles. Returns a Response to send back when rejected, null when allowed.
+ */
+async function gateRetrySubmission(video: any, caller: { id: string; roles: string[] }): Promise<Response | null> {
+  const settings = await getAdminSettings();
+  const owner = video.user_id === caller.id ? caller : await getUserById(video.user_id);
+  if (!owner) {
+    return new Response(JSON.stringify({ error: 'video owner not found' }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const workflow = video.workflow_id ? await getWorkflowById(video.workflow_id) : null;
+  const caps = getWorkflowCapabilities(workflow);
+  const hasAdvancedFeatures = userHasAdvancedFeatures(owner.roles, settings);
+
+  const opts = video.additional_options || {};
+  const segments = opts.prompt_relay_mode === true && Array.isArray(opts.prompt_relay_segments)
+    ? (opts.prompt_relay_segments as { frames?: number }[])
+    : undefined;
+  const relayTotalFrames = segments
+    ? segments.reduce((sum, seg) => sum + (Number(seg?.frames) || 0), 0)
+    : undefined;
+
+  const rejection =
+    (await checkSubmissionGate({
+      quotaUser: owner,
+      settings,
+      quotaCost: Number.isFinite(Number(video.quota_cost)) && Number(video.quota_cost) > 0 ? Number(video.quota_cost) : 1,
+      resolution: video.video_resolution,
+      iterationSteps: video.iteration_steps,
+      freeSteps: caps.freeSteps,
+      hasAdvancedFeatures,
+      relayTotalFrames,
+    })) ?? (await checkQueueLimit(video.user_id, owner, settings));
+  return rejection ? gateResponse(rejection) : null;
+}
 
 /**
  * Helper to submit a new RunPod job for a video
@@ -92,19 +140,24 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
       console.log(`[Retry] Converting failed local job ${video.job_id} to RunPod job`);
       
       try {
+        const rejected = await gateRetrySubmission(video, locals.user);
+        if (rejected) return rejected;
+
         const newJob = await submitNewRunPodJob(runpodConfig, video, origin);
         
         // Update video with new job ID, set as remote job, and status.
-        // Clear stale timing fields from the previous attempt — otherwise the
+        // Reset timing fields from the previous attempt — otherwise the
         // status-poll timeout would measure from the OLD dequeued_at and mark
         // the fresh job failed after ~30min even while it's still running.
+        // processing_started_at = now also makes this attempt count toward the
+        // daily credits (null/value, never undefined: undefined is skipped).
         const updated = await updateVideo(id, { 
           status: 'in_queue',
           job_id: newJob.id,
           is_local_job: false,
-          dequeued_at: undefined,
-          processing_started_at: undefined
-        });
+          dequeued_at: null,
+          processing_started_at: new Date().toISOString()
+        } as any);
         if (!updated) {
           throw new Error('Failed to update video status in database after job submission');
         }
@@ -136,6 +189,9 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
         // If we get a 404, the job doesn't exist - submit as a new job
         if (String(statusErr).includes('404')) {
           console.log(`[Retry] Job ${video.job_id} not found (404), submitting as new job`);
+
+          const rejected = await gateRetrySubmission(video, locals.user);
+          if (rejected) return rejected;
           
           const newJob = await submitNewRunPodJob(runpodConfig, video, origin);
           
@@ -145,9 +201,9 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
             status: 'in_queue',
             job_id: newJob.id,
             is_local_job: false,
-            dequeued_at: undefined,
-            processing_started_at: undefined
-          });
+            dequeued_at: null,
+            processing_started_at: new Date().toISOString()
+          } as any);
           if (!updated) {
             throw new Error('Failed to update video status in database after job submission');
           }
@@ -203,15 +259,20 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
       }
 
       // Job is failed, proceed with retry
+      const rejected = await gateRetrySubmission(video, locals.user);
+      if (rejected) return rejected;
       await retryRunPodJob(runpodConfig, video.job_id);
       
-      // Update video status back to in_queue. Clear stale timing fields from
-      // the previous attempt so the status-poll timeout restarts fresh.
+      // Update video status back to in_queue. Reset the timing fields from the
+      // previous attempt so the status-poll timeout restarts fresh, and stamp
+      // processing_started_at with now: the daily-credit count only sees rows
+      // with a processing_started_at today, so this attempt is charged.
+      // (null/value, never undefined: updateVideo skips undefined fields.)
       const updated = await updateVideo(id, { 
         status: 'in_queue',
-        dequeued_at: undefined,
-        processing_started_at: undefined
-      });
+        dequeued_at: null,
+        processing_started_at: new Date().toISOString()
+      } as any);
       if (!updated) {
         throw new Error('Failed to update video status in database after retry');
       }

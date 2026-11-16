@@ -1,5 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { updateVideo, getVideoById, getActiveJobCountByUser, getAdminSettings, checkDailyQuota, getLocalJobStats, getWorkflowById, getDefaultWorkflow, claimJobForMigration, isUserPaid } from '$lib/db';
+import { updateVideo, getVideoById, getAdminSettings, getLocalJobStats, getWorkflowById, getDefaultWorkflow, claimJobForMigration } from '$lib/db';
+import { checkSubmissionGate, checkQueueLimit, gateResponse, userHasAdvancedFeatures } from '$lib/submissionGate';
 import { env } from '$env/dynamic/private';
 import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
@@ -249,10 +250,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
     // Advanced-features entitlement — 720p, premium iteration steps, and the 6s
     // duration cap all key off this single flag.
-    const roles = locals.user?.roles || [];
-    const hasAdvancedFeatures = roles.some(roleName =>
-      settings.roles?.find((rc: any) => rc.name === roleName)?.allowAdvancedFeatures
-    );
+    const hasAdvancedFeatures = userHasAdvancedFeatures(locals.user?.roles, settings);
 
     // Resolve workflow to use
     let workflow = null;
@@ -450,7 +448,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       delete mergedValidationMetadata.revalidation_error;
     }
 
-    // Save user's settings first (before quota check) so their preferences are preserved
     // Snapshot the workflow's effective credit cost so historical usage stays accurate
     // even if the workflow is later edited or deleted. The cost is computed from the
     // base quotaCost plus any matching quotaCostRules (inline + `ruleset:` refs).
@@ -461,7 +458,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       loraWeights: filteredLoraWeights,
       hasRefVideo,
     }, (settings as any).quotaRuleSets ?? {});
-    const settingsPayload: any = { 
+
+    // Parameters that decide cost / tier. These are persisted ONLY after every
+    // gate below (quota, premium resolution/steps, relay frames, queue limit)
+    // has passed — retry re-executes whatever is stored on the row, so a
+    // rejected request must never leave them behind.
+    const gatedPayload: any = {
       workflow_id: workflow.id,
       quota_cost: workflowQuotaCost,
       iteration_steps: iterationSteps,
@@ -472,85 +474,56 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       lora_weights: filteredLoraWeights,
       seed: seed
     };
-    
+
+    // Save the user's non-gated edits first (before the gates) so their
+    // prompt/tags survive a rejection. These do not affect cost or tier.
+    const earlyPayload: any = {};
     if (prompt !== undefined) {
-      settingsPayload.prompt = prompt;
+      earlyPayload.prompt = prompt;
     }
-    
     if (tags !== undefined) {
-      settingsPayload.tags = tags;
+      earlyPayload.tags = tags;
     }
 
-    const saved = await updateVideo(id, settingsPayload);
-    // updateVideo now re-throws on DB errors, but guard defensively anyway: if
-    // it ever returns null (or a row without the prompt we just wrote), abort
-    // BEFORE queuing — otherwise the job gets queued with an unsaved/empty
-    // prompt and the user sees a false success.
-    if (!saved || (prompt !== undefined && (saved as any)?.prompt !== prompt)) {
-      throw new Error('Failed to persist video settings (prompt not saved)');
-    }
-
-    // Check daily quota if user is logged in (in credits — cost may be > 1)
-    if (locals.user) {
-      const quotaCheck = await checkDailyQuota(locals.user, settings, workflowQuotaCost);
-      if (quotaCheck.exceeded) {
-        const errorCode = quotaCheck.limit === 0 ? 'quota_none' : 'quota_exceeded';
-        return new Response(JSON.stringify({ 
-          error: `This video costs ${workflowQuotaCost} credit${workflowQuotaCost > 1 ? 's' : ''}. You have used ${quotaCheck.used} of your ${quotaCheck.limit} daily credits.`,
-          errorCode,
-          limit: quotaCheck.limit,
-          used: quotaCheck.used,
-          cost: workflowQuotaCost,
-        }), { 
-          status: 429, 
-          headers: { 'Content-Type': 'application/json' } 
-        });
+    if (Object.keys(earlyPayload).length > 0) {
+      const saved = await updateVideo(id, earlyPayload);
+      // updateVideo now re-throws on DB errors, but guard defensively anyway: if
+      // it ever returns null (or a row without the prompt we just wrote), abort
+      // BEFORE queuing — otherwise the job gets queued with an unsaved/empty
+      // prompt and the user sees a false success.
+      if (!saved || (prompt !== undefined && (saved as any)?.prompt !== prompt)) {
+        throw new Error('Failed to persist video settings (prompt not saved)');
       }
     }
 
-    // Enforce role requirement for the premium resolutions (everything above 480p)
-    if (resolution !== undefined && resolution !== '480p' && !hasAdvancedFeatures) {
-      return new Response(JSON.stringify({ 
-        error: `${RESOLUTION_DISPLAY_NAME[resolution]} resolution is available to users with advanced features only.` 
-      }), { 
-        status: 403, 
-        headers: { 'Content-Type': 'application/json' } 
+    // Relay segment frame total: must be 4n+1 and at least 81.
+    const relayTotalFrames = promptRelayMode && promptRelaySegments
+      ? promptRelaySegments.reduce((sum, s) => sum + s.frames, 0)
+      : undefined;
+    if (relayTotalFrames !== undefined && (relayTotalFrames < 81 || (relayTotalFrames - 1) % 4 !== 0)) {
+      return new Response(JSON.stringify({
+        error: `Total relay frames (${relayTotalFrames}) must be a value of 4n+1 and at least 81 (e.g. 81, 85, 89 … 121 … 177)`
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
       });
     }
 
-    // Enforce role requirement for premium iteration steps. A step is premium
-    // when it's above THIS workflow's freeSteps (per-workflow, default 4) — so
-    // a turbo workflow that raises freeSteps to 8 lets free users run its 8 NFE.
-    const isPremiumStep = iterationSteps > caps.freeSteps;
-    if (isPremiumStep && !hasAdvancedFeatures) {
-      return new Response(JSON.stringify({ 
-        error: `${iterationSteps} iteration steps is available to users with advanced features only.` 
-      }), { 
-        status: 403, 
-        headers: { 'Content-Type': 'application/json' } 
-      });
-    }
-
-    // Validate relay segment frame total: must be 4n+1, at least 81, within tier limit
-    if (promptRelayMode && promptRelaySegments) {
-      const totalSegmentFrames = promptRelaySegments.reduce((sum, s) => sum + s.frames, 0);
-      if (totalSegmentFrames < 81 || (totalSegmentFrames - 1) % 4 !== 0) {
-        return new Response(JSON.stringify({
-          error: `Total relay frames (${totalSegmentFrames}) must be a value of 4n+1 and at least 81 (e.g. 81, 85, 89 … 121 … 177)`
-        }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-      const maxAllowedFrames = hasAdvancedFeatures ? 177 : 121;
-      if (totalSegmentFrames > maxAllowedFrames) {
-        return new Response(JSON.stringify({
-          error: `Total relay frames (${totalSegmentFrames}) exceeds the maximum of ${maxAllowedFrames} for your account tier.`
-        }), {
-          status: 403,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
+    // Daily quota (credits — cost may be > 1), premium resolution / steps
+    // (above THIS workflow's freeSteps) and the relay-frame tier cap. Shared with
+    // the retry route so both enforce identical rules.
+    const gateRejection = await checkSubmissionGate({
+      quotaUser: locals.user,
+      settings,
+      quotaCost: workflowQuotaCost,
+      resolution,
+      iterationSteps,
+      freeSteps: caps.freeSteps,
+      hasAdvancedFeatures,
+      relayTotalFrames,
+    });
+    if (gateRejection) {
+      return gateResponse(gateRejection);
     }
 
     // Determine RunPod and local queue availability
@@ -583,7 +556,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     if (!runpodConfig && !localQueueAvailable) {
       // Fall back to mock I2V workflow only if neither local nor RunPod is configured
       console.log(`[Mock I2V] Neither local queue nor RunPod configured, using mock workflow`);
-      await updateVideo(id, { status: 'in_queue' });
+      await updateVideo(id, { ...gatedPayload, status: 'in_queue' });
       const origin = new URL(request.url).origin;
       (async () => {
         console.log(`[Mock I2V] Starting background job for ${id} at ${origin}`);
@@ -619,19 +592,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 
     // Check per-user tier queue limit (free: 3, paid: 5)
-    const activeJobCount = await getActiveJobCountByUser(existing.user_id);
-    const isPaid = isUserPaid(locals.user, settings);
-    const queueLimit = isPaid ? settings.paidUserQueueLimit : settings.freeUserQueueLimit;
-    
-    if (activeJobCount >= queueLimit) {
-      return new Response(JSON.stringify({ 
-        error: `You have reached your queue limit of ${queueLimit} jobs. Please wait for some to complete.`,
-        errorCode: 'queue_limit',
-        limit: queueLimit,
-      }), { 
-        status: 429, 
-        headers: { 'Content-Type': 'application/json' } 
-      });
+    const queueRejection = await checkQueueLimit(existing.user_id, locals.user, settings);
+    if (queueRejection) {
+      return gateResponse(queueRejection);
     }
 
     // Check RunPod queue health only if RunPod is configured
@@ -655,8 +618,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       }
     }
 
-    // Update video status to in_queue and set processing start time
+    // All gates passed: persist the cost/tier-defining parameters together with
+    // the status flip, then re-read below so submission sees the stored values.
     await updateVideo(id, { 
+      ...gatedPayload,
       status: 'in_queue', 
       processing_started_at: new Date().toISOString()
     });

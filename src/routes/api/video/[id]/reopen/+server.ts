@@ -54,8 +54,12 @@ export const POST: RequestHandler = async ({ params, locals }) => {
 
     // `null` (not `undefined`) is required to actually clear these columns —
     // updateVideo skips undefined patch fields on the Postgres backend.
+    // job_id / is_local_job belong to the failed attempt; leaving them would let
+    // retry (which keys off job_id) re-run a draft that has since been edited.
     const updated = await updateVideo(id, {
       status: 'uploaded',
+      job_id: null,
+      is_local_job: false,
       progress_percentage: null,
       progress_details: null,
       processing_started_at: null,
