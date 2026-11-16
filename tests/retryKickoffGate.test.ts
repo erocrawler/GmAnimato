@@ -74,6 +74,7 @@ import { POST as kickoff } from '../src/routes/api/i2v/kickoff/+server';
 const FREE = { id: 'u-free', roles: ['free'] };
 const PAID = { id: 'u-paid', roles: ['paid'] };
 const ADMIN = { id: 'u-admin', roles: ['admin'] };
+const OTHER = { id: 'u-other', roles: ['free'] };
 
 const failedVideo = (over: any = {}) => ({
   id: 'v1', user_id: FREE.id, status: 'failed', job_id: 'rp-old', is_local_job: false,
@@ -93,7 +94,7 @@ const callKickoff = (user: any, body: any) =>
 beforeEach(() => {
   h.updates = [];
   h.videos = {};
-  h.users = { [FREE.id]: FREE, [PAID.id]: PAID, [ADMIN.id]: ADMIN };
+  h.users = { [FREE.id]: FREE, [PAID.id]: PAID, [ADMIN.id]: ADMIN, [OTHER.id]: OTHER };
   h.workflows = { w1: { id: 'w1', name: 'Wan', workflowType: 'i2v', quotaCost: 1, templatePath: 'wan.json', capabilities: { steps: [4, 6], resolutions: ['480p', '720p', '720p-hd'], freeSteps: 4 } } };
   h.settings = {
     roles: [{ name: 'free' }, { name: 'paid', allowAdvancedFeatures: true }, { name: 'admin', allowAdvancedFeatures: true }],
@@ -173,11 +174,24 @@ describe('retry: same gates as kickoff', () => {
     expect(h.runpod.retry).not.toHaveBeenCalled();
   });
 
-  it('an admin retrying someone else\'s video is gated as the video owner, not as the admin', async () => {
-    h.videos.v1 = failedVideo({ is_local_job: true, video_resolution: '720p-hd' });
-    const res = await callRetry(ADMIN); // admin has advanced features, owner (free) does not
-    expect(res.status).toBe(403);
+  it.each([
+    ['another regular user', OTHER],
+    ['an admin', ADMIN],
+  ] as [string, any][])('404 (same as a missing id) when %s retries someone else\'s video; no RunPod call, row untouched', async (_n, caller) => {
+    h.videos.v1 = failedVideo({ is_local_job: true });
+    const before = { ...h.videos.v1 };
+    const res = await callRetry(caller);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not found' });
     expect(h.runpod.submit).not.toHaveBeenCalled();
+    expect(h.runpod.retry).not.toHaveBeenCalled();
+    expect(h.runpod.status).not.toHaveBeenCalled();
+    expect(h.updates).toHaveLength(0);
+    expect(h.videos.v1).toEqual(before);
+    // indistinguishable from a nonexistent id
+    const missing = await callRetry(caller, 'nope');
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'not found' });
   });
 
   it.each([

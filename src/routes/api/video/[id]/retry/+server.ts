@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { getVideoById, updateVideo, getAdminSettings, getUserById, getWorkflowById } from '$lib/db';
+import { getVideoById, updateVideo, getAdminSettings, getWorkflowById } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import { getRunPodConfig, retryRunPodJob, getRunPodJobStatus, mapRunPodStatus, submitRunPodJob } from '$lib/runpod';
 import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
@@ -12,19 +12,12 @@ import { checkSubmissionGate, checkQueueLimit, gateResponse, userHasAdvancedFeat
  * Retry re-executes whatever is stored on the row, so it must enforce the same
  * rules kickoff does — otherwise it is a way around them.
  *
- * Everything is evaluated for the video's OWNER, not the caller: an admin
- * retrying someone else's video is neither charged nor tiered by their own
- * roles. Returns a Response to send back when rejected, null when allowed.
+ * Retry is owner-only (see the handler), so the caller IS the owner and is
+ * charged / tiered by their own roles. Returns a Response to send back when
+ * rejected, null when allowed.
  */
-async function gateRetrySubmission(video: any, caller: { id: string; roles: string[] }): Promise<Response | null> {
+async function gateRetrySubmission(video: any, owner: { id: string; roles: string[] }): Promise<Response | null> {
   const settings = await getAdminSettings();
-  const owner = video.user_id === caller.id ? caller : await getUserById(video.user_id);
-  if (!owner) {
-    return new Response(JSON.stringify({ error: 'video owner not found' }), {
-      status: 409,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
 
   const workflow = video.workflow_id ? await getWorkflowById(video.workflow_id) : null;
   const caps = getWorkflowCapabilities(workflow);
@@ -96,9 +89,9 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
       });
     }
 
-    const isAdmin = locals.user.roles?.includes('admin');
-    if (video.user_id !== locals.user.id && !isAdmin) {
-      // Same answer as a missing id so ids cannot be probed.
+    // Owner only — no admin override for retry. Same answer as a missing id
+    // so ids cannot be probed.
+    if (video.user_id !== locals.user.id) {
       return new Response(JSON.stringify({ error: 'not found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' }
