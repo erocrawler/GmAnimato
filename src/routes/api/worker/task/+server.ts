@@ -3,6 +3,7 @@ import { env } from '$env/dynamic/private';
 import { claimLocalJob, getAdminSettings, updateVideo } from '$lib/db';
 import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
 import { H3_TWO_STAGE_CAPABILITY } from '$lib/h3TwoStage';
+import { shouldLogWorkerCapabilities } from '$lib/workerCapLog';
 
 /**
  * GET /api/worker/task
@@ -56,9 +57,19 @@ export const GET: RequestHandler = async ({ request }) => {
         // be conservative and disable it rather than send an unrunnable job.
         useSageAttention = false;
       }
-      console.log(`[Worker] Capabilities declared: [${declaredCapabilities.join(', ')}] → sage attention: ${useSageAttention}`);
-    } else {
-      console.log(`[Worker] No capabilities declared, using env default (sage attention: ${useSageAttention})`);
+    }
+    // Log the capability line once per worker and again only when it changes
+    // (workers poll every few seconds with the same header).
+    const workerKey = request.headers.get('x-worker-id') ?? requestedUserId ?? 'default';
+    const capSignature = declaredCapabilities.length > 0
+      ? `declared:${[...declaredCapabilities].sort().join(',')}|sage:${useSageAttention}`
+      : `undeclared|sage:${useSageAttention}`;
+    if (shouldLogWorkerCapabilities(workerKey, capSignature)) {
+      if (declaredCapabilities.length > 0) {
+        console.log(`[Worker] Capabilities declared: [${declaredCapabilities.join(', ')}] → sage attention: ${useSageAttention}`);
+      } else {
+        console.log(`[Worker] No capabilities declared, using env default (sage attention: ${useSageAttention})`);
+      }
     }
 
     // 768p (MiniMax H3 two-stage) needs ComfyUI with MiniMaxH3LatentUpscaleWithModel,
