@@ -12,6 +12,7 @@ import { toOriginalUrl } from '$lib/serverImageUrl';
 import { evaluatePromptProperties } from '$lib/imageRecognition';
 import { maxAllowedDurationSeconds, MAX_DURATION_SECONDS_PAID } from '$lib/mediaLimits';
 import { normalizeLoraPresets } from '$lib/loraPresets';
+import { withUserLock, UserLockTimeoutError, userLockBusyResponse } from '$lib/userLock';
 
 async function delay(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
@@ -104,6 +105,7 @@ async function runDetachedRevalidation(videoId: string): Promise<void> {
 
 export const POST: RequestHandler = async ({ request, locals }) => {
   try {
+    // Auth and body parsing touch no shared state: they stay outside the lock.
     if (!locals.user) {
       return new Response(JSON.stringify({ error: 'authentication required' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
     }
@@ -111,6 +113,31 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const id = body?.id as string | undefined;
     if (!id) return new Response(JSON.stringify({ error: 'missing id' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
+    // Everything from reading the video to flipping it to in_queue and submitting
+    // (or resetting to failed) runs under the CALLER's lock: daily credits and the
+    // queue limit are charged to the caller, and retry takes the same key, so a
+    // double-click, parallel drafts or kickoff-vs-retry cannot all pass the checks
+    // against stale reads. Every branch (4xx/5xx early returns, mock, local queue,
+    // RunPod) returns through withUserLock's finally, which releases the lock.
+    // Single-process assumption: see src/lib/userLock.ts.
+    return await withUserLock(locals.user.id, () => kickoffLocked(request, { user: locals.user! }, body, id));
+  } catch (err) {
+    if (err instanceof UserLockTimeoutError) {
+      console.warn(`[I2V] kickoff lock wait timed out for user ${locals.user?.id}`);
+      return userLockBusyResponse();
+    }
+    console.error('[I2V] Error:', err);
+    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+  }
+};
+
+async function kickoffLocked(
+  request: Request,
+  locals: { user: NonNullable<App.Locals['user']> },
+  body: any,
+  id: string,
+): Promise<Response> {
+  try {
     const existing = await getVideoById(id);
     if (!existing) return new Response(JSON.stringify({ error: 'not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
@@ -697,4 +724,4 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     console.error('[I2V] Error:', err);
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
   }
-};
+}

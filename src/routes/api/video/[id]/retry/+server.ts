@@ -5,6 +5,7 @@ import { getRunPodConfig, retryRunPodJob, getRunPodJobStatus, mapRunPodStatus, s
 import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
 import { getWorkflowCapabilities } from '$lib/workflows';
 import { checkSubmissionGate, checkQueueLimit, gateResponse, userHasAdvancedFeatures } from '$lib/submissionGate';
+import { withUserLock, UserLockTimeoutError, userLockBusyResponse } from '$lib/userLock';
 
 /**
  * Re-run the submission gates (daily credits, premium resolution/steps, relay
@@ -69,6 +70,7 @@ async function submitNewRunPodJob(runpodConfig: any, video: any, origin: string)
 
 export const POST: RequestHandler = async ({ params, request, locals }) => {
   try {
+    // Auth / id parsing touch no shared state: they stay outside the lock.
     if (!locals.user) {
       return new Response(JSON.stringify({ error: 'unauthenticated' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
     }
@@ -80,6 +82,31 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
       });
     }
 
+    // Read video / validate -> quota + queue gates -> submit -> write status all
+    // run under the owner's lock. Same key as kickoff (the user id), so a retry
+    // and a kickoff of the same user queue behind each other instead of both
+    // passing the quota / queue checks. All returns release the lock via
+    // withUserLock's finally. Single-process assumption: see src/lib/userLock.ts.
+    return await withUserLock(locals.user.id, () => retryLocked(id, request, { user: locals.user! }));
+  } catch (err) {
+    if (err instanceof UserLockTimeoutError) {
+      console.warn(`[Retry] lock wait timed out for user ${locals.user?.id}`);
+      return userLockBusyResponse();
+    }
+    console.error('[Retry] Error:', err);
+    return new Response(JSON.stringify({ error: String(err) }), { 
+      status: 500, 
+      headers: { 'Content-Type': 'application/json' } 
+    });
+  }
+};
+
+async function retryLocked(
+  id: string,
+  request: Request,
+  locals: { user: NonNullable<App.Locals['user']> },
+): Promise<Response> {
+  try {
     const video = await getVideoById(id);
     
     if (!video) {
@@ -291,4 +318,4 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
       headers: { 'Content-Type': 'application/json' } 
     });
   }
-};
+}

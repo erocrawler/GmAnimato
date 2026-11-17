@@ -16,9 +16,10 @@
  *   PG_TEST_URL=postgresql://postgres:test@127.0.0.1:55432/animato npx vitest run tests/pg
  *   docker rm -f gmanimato-pgtest
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import bcrypt from 'bcrypt';
 import { isHttpError, isRedirect } from '@sveltejs/kit';
+import { __setUserLockTimeoutForTest, __userLockSize } from '../../src/lib/userLock';
 
 const PG_URL = process.env.PG_TEST_URL;
 
@@ -28,7 +29,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock('$env/dynamic/private', () => ({
-  env: { DATABASE_PROVIDER: 'postgres', DATABASE_URL: process.env.PG_TEST_URL },
+  env: { DATABASE_PROVIDER: 'postgres', DATABASE_URL: process.env.PG_TEST_URL, S3_ALLOWED_URL_PREFIXES: 'https://s3.test/' },
 }));
 vi.mock('$lib/runpod', () => ({
   getRunPodConfig: () => ({ url: 'http://runpod.test', key: 'k' }),
@@ -528,6 +529,247 @@ describe.skipIf(!PG_URL)('real Postgres integration', () => {
       expect(h.runpod.submit).not.toHaveBeenCalled();
     });
   });
+  // ==================== (f) per-user submission lock (A4) ====================
+  // kickoff / retry are check-then-write flows (status -> daily credits -> queue
+  // limit -> flip to in_queue -> submit). Without a lock, concurrent requests of
+  // the same user all read the old state. Set A4_REPORT=1 to print the raw
+  // numbers (success counts / submit calls) of each scenario.
+  describe('(f) per-user lock on kickoff / retry (A4)', () => {
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    const report = (label: string, data: Record<string, unknown>) => {
+      if (process.env.A4_REPORT) console.info(`[A4] ${label}: ${JSON.stringify(data)}`);
+    };
+    const SUBMIT_DELAY_MS = 40; // stands in for the RunPod network round trip: widens the race window
+
+    const draft = (over: any = {}) =>
+      seed({
+        status: 'uploaded', job_id: undefined, workflow_id: undefined, quota_cost: 1, iteration_steps: 4,
+        video_resolution: '480p', processing_started_at: undefined, dequeued_at: undefined,
+        is_nsfw: true, validation_metadata: { manual_recognition_done: true }, // no detached revalidation
+        ...over,
+      });
+    const drafts = (n: number, over: any = {}) => Promise.all(Array.from({ length: n }, () => draft(over)));
+    const failedRow = (over: any = {}) => seed({ status: 'failed', job_id: 'rp-old', ...over });
+    const activeCount = (userId: string) =>
+      prisma.video.count({ where: { userId, status: { in: ['in_queue', 'processing'] } } });
+    const statuses = (rs: Response[]) => rs.map((r) => r.status);
+    const count = (xs: number[], s: number) => xs.filter((x) => x === s).length;
+
+    let n = 0;
+    const slowSubmit = () => {
+      n = 0;
+      h.runpod.submit = vi.fn(async () => {
+        await sleep(SUBMIT_DELAY_MS);
+        return { id: `rp-new-${++n}` };
+      });
+    };
+    const waitUntil = async (cond: () => boolean, ms = 3000) => {
+      const t0 = Date.now();
+      while (!cond()) {
+        if (Date.now() - t0 > ms) throw new Error('waitUntil timed out');
+        await sleep(5);
+      }
+    };
+
+    beforeEach(() => {
+      __setUserLockTimeoutForTest(null);
+      slowSubmit();
+    });
+    afterEach(() => __setUserLockTimeoutForTest(null));
+
+    it('same video, 10 concurrent kickoffs: exactly one submission, the other 9 get 400 already processing', async () => {
+      await db.updateAdminSettings({ quotaPerDay: { free: 100, paid: 10, admin: 10 }, freeUserQueueLimit: 100 } as any);
+      const v = await draft();
+      const res = await Promise.all(Array.from({ length: 10 }, () => callKickoff(FREE, { id: v.id, prompt: 'go' })));
+      const st = statuses(res);
+      report('same video x10', { ok: count(st, 200), already_processing_400: count(st, 400), submitCalls: h.runpod.submit.mock.calls.length });
+      expect(count(st, 200)).toBe(1);
+      expect(count(st, 400)).toBe(9);
+      for (const r of res.filter((r) => r.status === 400)) expect((await r.json()).error).toBe('already processing');
+      expect(h.runpod.submit).toHaveBeenCalledTimes(1);
+      const after = await row(v.id);
+      expect(after).toMatchObject({ status: 'in_queue', jobId: 'rp-new-1' });
+    });
+
+    it('daily credits = 3, 10 drafts of one user at once: exactly 3 pass, 7 get 429 quota_exceeded', async () => {
+      await db.updateAdminSettings({ quotaPerDay: { free: 3, paid: 10, admin: 10 }, freeUserQueueLimit: 100 } as any);
+      const vs = await drafts(10);
+      const res = await Promise.all(vs.map((v: any) => callKickoff(FREE, { id: v.id })));
+      const st = statuses(res);
+      const queued = await activeCount(FREE.id);
+      report('quota 3, 10 drafts', { ok: count(st, 200), s429: count(st, 429), submitCalls: h.runpod.submit.mock.calls.length, queuedInDb: queued, creditsUsed: await quota(FREE.id) });
+      expect(count(st, 200)).toBe(3);
+      expect(count(st, 429)).toBe(7);
+      for (const r of res.filter((r) => r.status === 429)) expect((await r.json()).errorCode).toBe('quota_exceeded');
+      expect(queued).toBe(3);
+      expect(h.runpod.submit).toHaveBeenCalledTimes(3);
+      expect(await quota(FREE.id)).toBe(3);
+    });
+
+    it('queue limit = 2, 10 drafts at once: exactly 2 pass, 8 get 429 queue_limit', async () => {
+      await db.updateAdminSettings({ quotaPerDay: { free: 100, paid: 10, admin: 10 }, freeUserQueueLimit: 2 } as any);
+      const vs = await drafts(10);
+      const res = await Promise.all(vs.map((v: any) => callKickoff(FREE, { id: v.id })));
+      const st = statuses(res);
+      const queued = await activeCount(FREE.id);
+      report('queue limit 2, 10 drafts', { ok: count(st, 200), s429: count(st, 429), submitCalls: h.runpod.submit.mock.calls.length, queuedInDb: queued });
+      expect(count(st, 200)).toBe(2);
+      expect(count(st, 429)).toBe(8);
+      for (const r of res.filter((r) => r.status === 429)) expect((await r.json()).errorCode).toBe('queue_limit');
+      expect(queued).toBe(2);
+      expect(h.runpod.submit).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejected requests under contention leave the draft untouched (gated columns not persisted)', async () => {
+      await db.updateAdminSettings({ quotaPerDay: { free: 1, paid: 10, admin: 10 }, freeUserQueueLimit: 100 } as any);
+      const vs = await drafts(4);
+      const before = await Promise.all(vs.map((v: any) => row(v.id)));
+      const res = await Promise.all(vs.map((v: any) => callKickoff(FREE, { id: v.id, iterationSteps: 4 })));
+      const rejectedIdx = res.map((r, i) => (r.status === 429 ? i : -1)).filter((i) => i >= 0);
+      expect(rejectedIdx).toHaveLength(3);
+      for (const i of rejectedIdx) {
+        const after = await row(vs[i].id);
+        expect(after.status).toBe('uploaded');
+        expect(after.workflowId).toBeNull();
+        expect(after.processingStartedAt).toBeNull();
+        expect(after.jobId).toBeNull();
+        expect(before[i].status).toBe('uploaded');
+      }
+    });
+
+    it('kickoff + retry of one user at once with 1 credit left: only one of them passes', async () => {
+      await db.updateAdminSettings({ quotaPerDay: { free: 1, paid: 10, admin: 10 }, freeUserQueueLimit: 100 } as any);
+      h.runpod.retry = vi.fn(async () => { await sleep(SUBMIT_DELAY_MS); return {}; });
+      const d = await draft();
+      const f = await failedRow(); // processing_started_at in 2020: does not count today
+      expect(await quota(FREE.id)).toBe(0);
+      const [rk, rr] = await Promise.all([callKickoff(FREE, { id: d.id }), callRetry(FREE, f.id)]);
+      const st = [rk.status, rr.status];
+      report('kickoff+retry, 1 credit', { kickoff: rk.status, retry: rr.status, submitCalls: h.runpod.submit.mock.calls.length, retryCalls: h.runpod.retry.mock.calls.length, creditsUsed: await quota(FREE.id) });
+      expect(count(st, 200)).toBe(1);
+      expect(count(st, 429)).toBe(1);
+      expect(h.runpod.submit.mock.calls.length + h.runpod.retry.mock.calls.length).toBe(1);
+      expect(await quota(FREE.id)).toBe(1);
+      expect(await activeCount(FREE.id)).toBe(1);
+    });
+
+    it('3 kickoffs + 3 retries mixed (3 failed rows), 1 credit left: exactly one passes overall', async () => {
+      await db.updateAdminSettings({ quotaPerDay: { free: 1, paid: 10, admin: 10 }, freeUserQueueLimit: 100 } as any);
+      h.runpod.retry = vi.fn(async () => { await sleep(SUBMIT_DELAY_MS); return {}; });
+      const ds = await drafts(3);
+      const fs = await Promise.all(Array.from({ length: 3 }, () => failedRow()));
+      const calls = [
+        ...ds.map((d: any) => callKickoff(FREE, { id: d.id })),
+        ...fs.map((f: any) => callRetry(FREE, f.id)),
+      ];
+      const st = statuses(await Promise.all(calls));
+      report('3 kickoff + 3 retry, 1 credit', { ok: count(st, 200), s429: count(st, 429), submitCalls: h.runpod.submit.mock.calls.length, retryCalls: h.runpod.retry.mock.calls.length, creditsUsed: await quota(FREE.id) });
+      expect(count(st, 200)).toBe(1);
+      expect(count(st, 429)).toBe(5);
+      expect(await quota(FREE.id)).toBe(1);
+    });
+
+    it('queue limit also holds between kickoff and retry (limit 1, one active slot): one passes', async () => {
+      await db.updateAdminSettings({ quotaPerDay: { free: 100, paid: 10, admin: 10 }, freeUserQueueLimit: 1 } as any);
+      h.runpod.retry = vi.fn(async () => { await sleep(SUBMIT_DELAY_MS); return {}; });
+      const d = await draft();
+      const f = await failedRow();
+      const [rk, rr] = await Promise.all([callKickoff(FREE, { id: d.id }), callRetry(FREE, f.id)]);
+      expect(count([rk.status, rr.status], 200)).toBe(1);
+      expect(count([rk.status, rr.status], 429)).toBe(1);
+      expect(await activeCount(FREE.id)).toBe(1);
+    });
+
+    it('a user whose lock is busy does not block another user', async () => {
+      await db.updateAdminSettings({ quotaPerDay: { free: 100, paid: 10, admin: 10 }, freeUserQueueLimit: 100 } as any);
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      let calls = 0;
+      h.runpod.submit = vi.fn(async () => {
+        calls++;
+        if (calls === 1) await gate; // the first submission (user A) hangs
+        return { id: `rp-${calls}` };
+      });
+      const a1 = await draft({ user_id: FREE.id });
+      const a2 = await draft({ user_id: FREE.id });
+      const b1 = await draft({ user_id: OTHER.id });
+      const order: string[] = [];
+      const pA1 = callKickoff(FREE, { id: a1.id }).then((r: Response) => { order.push('A1'); return r; });
+      await waitUntil(() => calls === 1);
+      const pA2 = callKickoff(FREE, { id: a2.id }).then((r: Response) => { order.push('A2'); return r; }); // queued behind A1
+      const rB = await callKickoff(OTHER, { id: b1.id });
+      order.push('B1');
+      expect(rB.status).toBe(200);
+      expect(order).toEqual(['B1']); // A1 still stuck, A2 still waiting for A1
+      expect(calls).toBe(2); // only A1 and B1 reached submit
+      release();
+      const [rA1, rA2] = await Promise.all([pA1, pA2]);
+      expect([rA1.status, rA2.status]).toEqual([200, 200]);
+      expect(order).toEqual(['B1', 'A1', 'A2']); // A2 only ran after A1 released
+    });
+
+    it('lock wait timeout: 429 busy (not 500) for kickoff and retry, nothing written for the busy requests', async () => {
+      await db.updateAdminSettings({ quotaPerDay: { free: 100, paid: 10, admin: 10 }, freeUserQueueLimit: 100 } as any);
+      __setUserLockTimeoutForTest(60);
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      h.runpod.submit = vi.fn(async () => { await gate; return { id: 'rp-slow' }; });
+      const slow = await draft();
+      const waiting = await draft({ prompt: 'untouched' });
+      const f = await failedRow();
+
+      const pSlow = callKickoff(FREE, { id: slow.id });
+      await waitUntil(() => h.runpod.submit.mock.calls.length === 1);
+
+      const t0 = Date.now();
+      const rk = await callKickoff(FREE, { id: waiting.id, prompt: 'should not be saved' });
+      const rr = await callRetry(FREE, f.id);
+      const waited = Date.now() - t0;
+      expect(rk.status).toBe(429);
+      expect(await rk.json()).toMatchObject({ errorCode: 'busy', error: expect.stringContaining('请稍后重试') });
+      expect(rr.status).toBe(429);
+      expect((await rr.json()).errorCode).toBe('busy');
+      expect(waited).toBeGreaterThanOrEqual(50); // really waited for the (shortened) timeout
+      // the timed-out requests did not touch their rows
+      expect(await row(waiting.id)).toMatchObject({ status: 'uploaded', prompt: 'untouched', jobId: null });
+      expect(await row(f.id)).toMatchObject({ status: 'failed', jobId: 'rp-old' });
+      expect(h.runpod.retry).not.toHaveBeenCalled();
+
+      release();
+      expect((await pSlow).status).toBe(200);
+      // the lock is healthy afterwards
+      const next = await callKickoff(FREE, { id: waiting.id });
+      expect(next.status).toBe(200);
+    });
+
+    it('an error inside the critical section (submit throws) resets the video to failed and releases the lock', async () => {
+      await db.updateAdminSettings({ quotaPerDay: { free: 100, paid: 10, admin: 10 }, freeUserQueueLimit: 100 } as any);
+      let calls = 0;
+      h.runpod.submit = vi.fn(async () => {
+        await sleep(10);
+        if (++calls === 1) throw new Error('runpod down');
+        return { id: 'rp-ok' };
+      });
+      const [v1, v2] = await drafts(2);
+      const [r1, r2] = await Promise.all([callKickoff(FREE, { id: v1.id }), callKickoff(FREE, { id: v2.id })]);
+      expect(r1.status).toBe(500);
+      expect(r2.status).toBe(200);
+      expect((await row(v1.id)).status).toBe('failed');
+      expect((await row(v2.id)).status).toBe('in_queue');
+    });
+
+    it('early 4xx returns (404 / 403 / 400) release the lock too', async () => {
+      const other = await draft({ user_id: OTHER.id });
+      const v = await draft();
+      expect((await callKickoff(FREE, { id: 'nope' })).status).toBe(404);
+      expect((await callKickoff(FREE, { id: other.id })).status).toBe(403);
+      expect((await callKickoff(FREE, {})).status).toBe(400);
+      __setUserLockTimeoutForTest(100); // any leaked lock would now surface as 429 busy
+      expect((await callKickoff(FREE, { id: v.id })).status).toBe(200);
+      expect(__userLockSize()).toBe(0);
+    });
+  });
+
   // ==================== (h) hourly queue sweeper ====================
   describe('(h) queue sweeper: failTimedOutProcessing / claimStaleLocalJob / runQueueSweep', () => {
     // admin_settings is not truncated between tests: pin the threshold this block depends on.
