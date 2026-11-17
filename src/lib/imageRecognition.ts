@@ -60,8 +60,10 @@ const CUSTOM_VL_ENABLE_THINKING = env.CUSTOM_VL_ENABLE_THINKING === 'true';
 // --- LLM request template -------------------------------------------------
 // Backend-specific fields of the chat-completions body (sampling, JSON mode,
 // thinking controls) come from a JSON file, not from code. Per request only
-// `messages`, `max_tokens` and (for bearer auth) `model` are added; template
-// fields win over the caller's `temperature`.
+// `messages`, `max_tokens` and (for bearer auth) `model` are added. The caller's
+// `temperature` wins over a `temperature` key in the template (callers choose
+// it per task: 0.7 annotate/relay/enhance, 0.2 evaluate); other template fields
+// are passed through unchanged.
 //
 //   CUSTOM_VL_REQUEST_TEMPLATE                 primary endpoint
 //   CUSTOM_VL_MODAL_FALLBACK_REQUEST_TEMPLATE  Modal fallback
@@ -107,7 +109,7 @@ const CUSTOM_VL_MODAL_FALLBACK_REQUEST_TEMPLATE = loadVlRequestTemplate(
   'modal-fallback'
 );
 
-function buildVlRequestBody(
+export function buildVlRequestBody(
   template: VlRequestTemplate,
   messages: unknown,
   temperature: number,
@@ -115,8 +117,8 @@ function buildVlRequestBody(
   model?: string
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    temperature,
     ...template,
+    temperature,
     messages,
     max_tokens: maxTokens ?? CUSTOM_VL_MAX_TOKENS,
   };
@@ -541,36 +543,50 @@ async function requestCustomVl(
   }
 }
 
-// Invalid JSON from the model is the common transient failure of backends that do
-// not enforce JSON mode (e.g. Strata, which also answers HTTP 502
-// structured_output_failed). One resample usually fixes it, so retry once on a
-// parse failure or a 502 before giving up. Callers keep their own null handling.
-function isTransientStructuredOutputError(error: unknown): boolean {
+// Invalid output from the model is the common transient failure of backends that
+// do not enforce JSON mode (e.g. Strata, which also answers HTTP 502
+// structured_output_failed): unparsable JSON, or JSON of the wrong shape (e.g.
+// suggested_prompts as objects). Resampling usually fixes it, so retry on a
+// parse failure, a failed `validate`, or a 502, up to VL_JSON_MAX_ATTEMPTS
+// attempts in total, before giving up. Callers keep their own null handling.
+export const VL_JSON_MAX_ATTEMPTS = 3;
+
+export function isTransientStructuredOutputError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /\(502\)|structured_output_failed/.test(message);
 }
 
-async function requestCustomVlJson<T>(
+/**
+ * `validate` (optional) turns the parsed JSON into the value the caller wants,
+ * or returns null when the shape is unusable; null triggers a retry exactly like
+ * a JSON parse failure. Without `validate`, `valid` is just `parsed`.
+ * Returns `valid: null` after the last attempt if nothing usable came back.
+ */
+export async function requestCustomVlJson<T, R = T>(
   messages: CustomVlMessage[],
   temperature: number,
-  maxTokens?: number
-): Promise<{ text: string | null; parsed: T | null }> {
-  const maxAttempts = 2;
+  maxTokens?: number,
+  validate?: (parsed: T) => R | null
+): Promise<{ text: string | null; parsed: T | null; valid: R | null }> {
+  const maxAttempts = VL_JSON_MAX_ATTEMPTS;
   for (let attempt = 1; ; attempt++) {
     let text: string | null;
     try {
       text = await requestCustomVl(messages, temperature, maxTokens);
     } catch (error) {
       if (attempt < maxAttempts && isTransientStructuredOutputError(error)) {
-        console.warn(`[Custom VL] Structured output failure, retrying (${attempt}/${maxAttempts - 1}):`, error);
+        console.warn(`[Custom VL] Structured output failure, retrying (attempt ${attempt}/${maxAttempts}):`, error);
         continue;
       }
       throw error;
     }
-    if (!text) return { text: null, parsed: null };
+    if (!text) return { text: null, parsed: null, valid: null };
     const parsed = parseJsonWithRepair<T>(text);
-    if (parsed || attempt >= maxAttempts) return { text, parsed };
-    console.warn(`[Custom VL] Response is not valid JSON, retrying (${attempt}/${maxAttempts - 1}).`);
+    const valid: R | null = parsed ? (validate ? validate(parsed) : (parsed as unknown as R)) : null;
+    if (valid || attempt >= maxAttempts) return { text, parsed, valid };
+    console.warn(
+      `[Custom VL] Response is ${parsed ? 'JSON of the wrong shape' : 'not valid JSON'}, retrying (attempt ${attempt}/${maxAttempts}).`
+    );
   }
 }
 
@@ -956,6 +972,59 @@ IMPORTANT:
 - Return ONLY valid JSON, no other text.`;
 }
 
+function pickText(value: unknown, keys: string[]): string | null {
+  if (typeof value === 'string') {
+    const t = value.trim();
+    return t ? t : null;
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const key of keys) {
+      const v = (value as Record<string, unknown>)[key];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Validates and normalizes the annotate response. Models without constrained
+ * decoding sometimes return `suggested_prompts` as `[{"prompt": "..."}]`; those
+ * are unwrapped, never stringified (String(obj) would store "[object Object]").
+ * Returns null when the shape is unusable so the caller can resample.
+ */
+export function normalizeAnnotation(parsed: unknown): {
+  suggested_prompts: [string, string];
+  tags: string[];
+  is_photo_realistic: boolean;
+  is_nsfw: boolean;
+} | null {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const p = parsed as Record<string, unknown>;
+  if (!Array.isArray(p.suggested_prompts) || !Array.isArray(p.tags)) return null;
+  if (typeof p.is_photo_realistic !== 'boolean' || typeof p.is_nsfw !== 'boolean') return null;
+
+  const prompts: string[] = [];
+  for (const item of p.suggested_prompts) {
+    const text = pickText(item, ['prompt', 'text', 'description', 'content']);
+    if (text === null) return null;
+    prompts.push(text);
+  }
+  if (prompts.length < 2) return null;
+
+  const tags: string[] = [];
+  for (const item of p.tags) {
+    const text = pickText(item, ['tag', 'name', 'label']);
+    if (text !== null) tags.push(text);
+  }
+
+  return {
+    suggested_prompts: [prompts[0], prompts[1]],
+    tags,
+    is_photo_realistic: p.is_photo_realistic,
+    is_nsfw: p.is_nsfw,
+  };
+}
+
 async function annotateWithCustomVl(
   imageUrl: string,
   lastImageUrl?: string,
@@ -1051,7 +1120,7 @@ IMPORTANT:
       }
     }
 
-    const { text, parsed } = await requestCustomVlJson<CustomVlResponse>([
+    const { text, parsed, valid } = await requestCustomVlJson<CustomVlResponse, CustomVlResponse>([
       {
         role: 'system',
         content: systemPrompt,
@@ -1060,7 +1129,7 @@ IMPORTANT:
         role: 'user',
         content: messageContent,
       },
-    ], 0.7);
+    ], 0.7, undefined, normalizeAnnotation);
 
     if (!text) {
       return null;
@@ -1076,28 +1145,30 @@ IMPORTANT:
       return null;
     }
 
-    if (
-      !Array.isArray(parsed.suggested_prompts) ||
-      !Array.isArray(parsed.tags) ||
-      typeof parsed.is_photo_realistic !== 'boolean' ||
-      typeof parsed.is_nsfw !== 'boolean'
-    ) {
-      console.error('[Custom VL] Invalid response structure:', parsed);
+    if (!valid) {
+      console.error('[Custom VL] Invalid response structure after retries:', parsed);
+      logCustomVlError('annotateImage.invalidStructure', null, {
+        user_id: userId,
+        video_id: videoId,
+        imageUrl,
+        lastImageUrl,
+        response: text,
+      });
       return null;
     }
 
-    let safePrompt0 = parsed.suggested_prompts[0] || '';
-    let safePrompt1 = parsed.suggested_prompts[1] || '';
+    let safePrompt0 = valid.suggested_prompts[0];
+    let safePrompt1 = valid.suggested_prompts[1];
     if (isRef2v) {
-      safePrompt0 = sanitizeRefTags(String(safePrompt0), refAvailableTags);
-      safePrompt1 = sanitizeRefTags(String(safePrompt1), refAvailableTags);
+      safePrompt0 = sanitizeRefTags(safePrompt0, refAvailableTags);
+      safePrompt1 = sanitizeRefTags(safePrompt1, refAvailableTags);
     }
 
     return {
       suggested_prompts: [safePrompt0, safePrompt1],
-      tags: parsed.tags.filter((t) => typeof t === 'string' && t.trim().length > 0),
-      is_photo_realistic: parsed.is_photo_realistic,
-      is_nsfw: parsed.is_nsfw,
+      tags: valid.tags,
+      is_photo_realistic: valid.is_photo_realistic,
+      is_nsfw: valid.is_nsfw,
     };
   } catch (error) {
     console.error('[Custom VL] annotateImage request failed:', error);
