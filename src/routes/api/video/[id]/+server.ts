@@ -52,9 +52,11 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
       });
     }
 
-    // Don't allow deletion of processing videos
-    if (video.status === 'processing') {
-      return new Response(JSON.stringify({ error: 'Cannot delete video while processing' }), { 
+    // Don't allow deletion while a job is queued or running. The UI never offers it (VideoList / ReviewActionBar disable
+    // it for in_queue and processing); a queued job may already be at RunPod, and deleting the row would free its quota
+    // credit while the job still runs.
+    if (video.status === 'processing' || video.status === 'in_queue') {
+      return new Response(JSON.stringify({ error: 'Cannot delete video while it is queued or processing' }), { 
         status: 400, 
         headers: { 'Content-Type': 'application/json' } 
       });
