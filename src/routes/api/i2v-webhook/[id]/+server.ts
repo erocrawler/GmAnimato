@@ -2,7 +2,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { updateVideo, getVideoById } from '$lib/db';
 import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
 import { uploadBufferToS3 } from '$lib/s3';
-import { toProxiedUrl } from '$lib/serverImageUrl';
+import { resolveCallbackVideoUrl, describeRejectedHost } from '$lib/callbackUrl';
 import { extractRef2VPosterFromResult } from '$lib/ref2vPoster';
 
 export const POST: RequestHandler = async ({ request, params }) => {
@@ -68,16 +68,27 @@ export const POST: RequestHandler = async ({ request, params }) => {
       };
     }
     
-    // Extract video URL from files array if present
+    // Extract video URL from files array if present. The address comes from the
+    // callback body, so it is only accepted when it points at our own storage
+    // (S3_ENDPOINT, converted to a /media/... path), is already an in-site
+    // /media/... path, or matches S3_ALLOWED_URL_PREFIXES. Anything else is
+    // ignored; a completion without any accepted URL then ends up failed below.
     if (files && Array.isArray(files)) {
-      const videoFile = files.find(file => 
-        file.type === 's3_url' && 
-        file.filename && 
+      const videoFiles = files.filter(file =>
+        file && file.type === 's3_url' &&
+        file.filename &&
         (file.filename.endsWith('.mp4') || file.filename.endsWith('.webm'))
       );
-      if (videoFile?.data) {
-        // Convert to proxy URL if it matches our S3 endpoint
-        patch.final_video_url = toProxiedUrl(videoFile.data);
+      for (const videoFile of videoFiles) {
+        if (!videoFile.data) continue;
+        const accepted = resolveCallbackVideoUrl(videoFile.data);
+        if (accepted) {
+          patch.final_video_url = accepted;
+          break;
+        }
+        console.warn(
+          `[Webhook] Ignoring video URL for ${id}: host ${describeRejectedHost(videoFile.data)} is not our S3_ENDPOINT, a /media/ path or in S3_ALLOWED_URL_PREFIXES`
+        );
       }
     }
 

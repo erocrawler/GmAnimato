@@ -5,7 +5,6 @@ import { validateAndConvertImage } from '$lib/imageValidation';
 import {
   validateAndConvertVideo,
   extractVideoPoster,
-  probeVideoDuration,
   probeVideoDurationFromBuffer,
   hasAudioFromBuffer,
   validateAndConvertReferenceAudio
@@ -14,7 +13,7 @@ import { createVideoEntryForReview } from '$lib/videoEntryCreation';
 import { getAdminSettings } from '$lib/db';
 import { toOriginalUrl } from '$lib/serverImageUrl';
 import { maxAllowedDurationSeconds } from '$lib/mediaLimits';
-import { isSafeMediaPath } from '$lib/mediaPath';
+import { normalizeMediaRef } from '$lib/mediaPath';
 
 /**
  * Shared "upload -> draft" logic for the /new form action and POST /api/uploads.
@@ -107,8 +106,8 @@ export async function createDraftFromUploadForm(
 
     return { success: true, entry: result.entry };
   } else if (mode === 'ref2v') {
-    // Handle Ref2V mode: optional reference video (client-clipped webm OR a
-    // user-provided URL) + up to 6 optional reference images. Refs are ALL
+    // Handle Ref2V mode: optional reference video (client-clipped webm OR an
+    // in-site /media/ reference) + up to 6 optional reference images. Refs are ALL
     // optional — with none provided the workflow degrades to pure t2v.
     const refVideoFile = form.get('ref_video') as File | null;
     const refVideoUrlInput = form.get('ref_video_url')?.toString()?.trim() || '';
@@ -118,8 +117,8 @@ export async function createDraftFromUploadForm(
 
     // Upload ref video (if any) to S3. The buffer is validated + downscaled
     // to ~480p (long edge ≤854, aspect preserved, audio kept) via ffmpeg,
-    // mirroring how ref images are validated/converted. Cross-origin URLs
-    // can't be clipped client-side, so they're passed through as-is.
+    // mirroring how ref images are validated/converted. A reused in-site
+    // video (/media/... path) skips the re-encode.
     let refVideoUrl = '';
     let refVideoName = '';
     let refVideoHasAudio: boolean | undefined;
@@ -149,79 +148,47 @@ export async function createDraftFromUploadForm(
       refVideoName = refVideoFile.name || `ref_video.${videoResult.ext || 'webm'}`;
       refVideoHasAudio = videoResult.hasAudio;
     } else if (refVideoUrlInput) {
-      // Reused video without local re-encode (default trim) or cross-origin URL.
-      // Normalize an absolute URL that points at our own /media/ proxy
-      // (e.g. https://animato.gmgard.moe/media/wan/xxx.mp4) to the relative
-      // /media/... form. The app's /media/ route requires a session and
-      // would 403; the S3 object behind it is publicly readable, so probing
-      // the S3 URL directly works from any host.
-      const absMediaMatch = refVideoUrlInput.match(/^https?:\/\/[^/]+\/(media\/.+)$/i);
-      const normalizedInput = absMediaMatch ? `/${absMediaMatch[1]}` : refVideoUrlInput;
-
-      const isMediaProxy = normalizedInput.startsWith('/media/');
-      const isHttpUrl = /^https?:\/\//i.test(normalizedInput);
-      if (opts.apiMode && !isSafeMediaPath(normalizedInput)) {
-        // API clients may only reference videos already on this site
-        // (see /api/video/resolve-ref); never make the server fetch an
-        // arbitrary external URL on their behalf.
-        return { error: 'ref_video_url must be a /media/... path (use /api/video/resolve-ref to get one)' };
+      // Reused video without local re-encode (default trim). The server fetches
+      // and probes whatever URL lands here, so only references to this site's
+      // own media proxy are accepted — never an arbitrary external address.
+      // An absolute URL that points at our own /media/ proxy
+      // (e.g. https://animato.gmgard.moe/media/wan/xxx.mp4) is normalised to
+      // the relative /media/... form. The app's /media/ route requires a
+      // session and would 403; the S3 object behind it is publicly readable,
+      // so probing the S3 URL directly works from any host.
+      const mediaRef = normalizeMediaRef(refVideoUrlInput);
+      if (!mediaRef) {
+        return {
+          error: opts.apiMode
+            ? 'ref_video_url must be a /media/... path (use /api/video/resolve-ref to get one)'
+            : 'ref_video_url must be a /media/... path (upload the file instead)'
+        };
       }
-      if (!isHttpUrl && !isMediaProxy) {
-        return { error: 'ref video URL must be an http(s) URL' };
-      }
-      if (isHttpUrl) {
-        const urlDuration = await probeVideoDuration(normalizedInput);
-        if (urlDuration !== null && urlDuration > maxRefVideoSeconds + 0.5) {
-          return {
-            error: `ref video is ${Math.round(urlDuration)}s — max ${maxRefVideoSeconds}s. Please use a shorter clip or download it first.`
-          };
-        }
-      }
-      if (isMediaProxy) {
-        // /media/ reuse: keep the proxied URL as-is to avoid re-upload, but
-        // probe hasAudio so we know whether to keep the audio line in the workflow.
-        refVideoUrl = normalizedInput;
-        refVideoName = 'ref_video.webm';
-        try {
-          // Resolve /media/ to S3 URL for server-side probing (same logic as src/routes/media/[...path]/+server.ts)
-          const s3Endpoint = env.S3_ENDPOINT;
-          const mediaPath = normalizedInput.slice('/media/'.length);
-          const s3Url = s3Endpoint ? `${s3Endpoint}/${mediaPath}` : normalizedInput;
-          const mediaResp = await fetch(s3Url);
-          if (mediaResp.ok) {
-            const ab = await mediaResp.arrayBuffer();
-            const buf = Buffer.from(ab);
-            const hasAudio = await hasAudioFromBuffer(buf);
-            if (hasAudio !== null) refVideoHasAudio = hasAudio;
-            // Same buffer, one extra ffprobe: fills ref_video_duration for
-            // /media/ reuse uploads that carry no client duration.
-            try {
-              noteServerDuration(await probeVideoDurationFromBuffer(buf, 'mp4'));
-            } catch (e) {
-              console.warn('[Ref2V] Failed to probe duration for /media/ ref video:', e);
-            }
+      // /media/ reuse: keep the proxied URL as-is to avoid re-upload, but
+      // probe hasAudio so we know whether to keep the audio line in the workflow.
+      refVideoUrl = mediaRef;
+      refVideoName = 'ref_video.webm';
+      try {
+        // Resolve /media/ to S3 URL for server-side probing (same logic as src/routes/media/[...path]/+server.ts)
+        const s3Endpoint = env.S3_ENDPOINT;
+        const mediaPath = mediaRef.slice('/media/'.length);
+        const s3Url = s3Endpoint ? `${s3Endpoint}/${mediaPath}` : mediaRef;
+        const mediaResp = await fetch(s3Url);
+        if (mediaResp.ok) {
+          const ab = await mediaResp.arrayBuffer();
+          const buf = Buffer.from(ab);
+          const hasAudio = await hasAudioFromBuffer(buf);
+          if (hasAudio !== null) refVideoHasAudio = hasAudio;
+          // Same buffer, one extra ffprobe: fills ref_video_duration for
+          // /media/ reuse uploads that carry no client duration.
+          try {
+            noteServerDuration(await probeVideoDurationFromBuffer(buf, 'mp4'));
+          } catch (e) {
+            console.warn('[Ref2V] Failed to probe duration for /media/ ref video:', e);
           }
-        } catch (e) {
-          console.warn('[Ref2V] Failed to probe hasAudio for /media/ ref video:', e);
         }
-      } else if (isHttpUrl) {
-        try {
-          const resp = await fetch(normalizedInput);
-          if (!resp.ok) throw new Error(`fetch ref_video_url failed: ${resp.status}`);
-          const buf = Buffer.from(await resp.arrayBuffer());
-          const ct = resp.headers.get('content-type') || 'video/webm';
-          const videoResult2 = await validateAndConvertVideo(buf, ct, maxRefVideoSeconds);
-          if (videoResult2.error) return { error: videoResult2.error };
-          noteServerDuration(videoResult2.durationSec);
-          refVideoUrl = await uploadBufferToS3(videoResult2.buffer, videoResult2.ext || 'webm');
-          refVideoName = `ref_video.${videoResult2.ext || 'webm'}`;
-          refVideoHasAudio = videoResult2.hasAudio;
-        } catch (e) {
-          return { error: `ref_video_url fetch failed: ${String(e)}` };
-        }
-      } else {
-        refVideoUrl = normalizedInput;
-        refVideoName = 'ref_video.webm';
+      } catch (e) {
+        console.warn('[Ref2V] Failed to probe hasAudio for /media/ ref video:', e);
       }
     }
 
