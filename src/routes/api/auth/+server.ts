@@ -11,6 +11,8 @@ import {
   JWT_ENABLED,
 } from '$lib/session';
 
+const MIN_PASSWORD_LENGTH = 6;
+
 export const POST: RequestHandler = async ({ request, cookies, getClientAddress }) => {
   let ip = 'unknown';
   try { ip = getClientAddress(); } catch { /* no address available */ }
@@ -122,6 +124,14 @@ export const POST: RequestHandler = async ({ request, cookies, getClientAddress 
           headers: { 'Content-Type': 'application/json' },
         });
       }
+    }
+
+    // Same minimum as api/profile/change-password (login is intentionally not restricted: legacy accounts)
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return new Response(
+        JSON.stringify({ error: 'Password must be at least 6 characters', errorCode: 'password_too_short' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
     const user = await registerUser(username, password, email);

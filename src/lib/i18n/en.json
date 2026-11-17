@@ -112,6 +112,7 @@
       "invalidPasscode": "Invalid registration code",
       "usernameTaken": "That username is already taken",
       "missingFields": "Please fill in all required fields",
+      "passwordTooShort": "Password must be at least 6 characters",
       "validationError": "Invalid input — please check your username and try again"
     }
   },

@@ -89,12 +89,26 @@ export function isSessionExpired(expiresAt: Date): boolean {
 }
 
 /**
- * Session cookie options
+ * Whether cookies should carry the Secure flag. Read from env on every call.
+ * COOKIE_SECURE=true|1 forces on, false|0 forces off; anything else falls back to NODE_ENV === 'production'.
+ */
+export function cookieSecure(): boolean {
+  const v = (env.COOKIE_SECURE ?? '').trim().toLowerCase();
+  if (v === 'true' || v === '1') return true;
+  if (v === 'false' || v === '0') return false;
+  return env.NODE_ENV === 'production';
+}
+
+/**
+ * Session cookie options.
+ * `secure` is a getter so it is resolved per request (cookies.set spreads the object, which invokes it).
  */
 export const SESSION_COOKIE_OPTIONS = {
   path: '/',
   httpOnly: true,
   sameSite: 'lax' as const,
-  secure: env.NODE_ENV === 'production',
+  get secure(): boolean {
+    return cookieSecure();
+  },
   maxAge: 60 * 60 * 24 * SESSION_EXPIRY_DAYS, // 7 days in seconds
 };

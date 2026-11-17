@@ -112,6 +112,7 @@
       "invalidPasscode": "注册码无效",
       "usernameTaken": "该用户名已被占用",
       "missingFields": "请填写所有必填字段",
+      "passwordTooShort": "密码至少需要 6 个字符",
       "validationError": "输入无效，请检查用户名后重试"
     }
   },

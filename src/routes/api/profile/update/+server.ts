@@ -1,6 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { updateUser } from '$lib/db';
 import { validateUser, formatValidationErrors } from '$lib/validation';
+import { generateJWT, SESSION_COOKIE_OPTIONS, JWT_ENABLED } from '$lib/session';
 
 export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
   if (!locals.user) {
@@ -44,12 +45,20 @@ export const PUT: RequestHandler = async ({ request, locals, cookies }) => {
     updated_at: updated.updated_at,
   };
 
-  cookies.set('session', JSON.stringify(userPublic), {
-    path: '/',
-    httpOnly: true,
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 7, // 7 days
-  });
+  // JWT mode: the session cookie carries the claims (incl. email), so re-issue it.
+  // Opaque-token mode: the cookie is a DB session token and user data is looked up
+  // server-side per request, so the cookie must stay untouched.
+  if (JWT_ENABLED) {
+    const jwt = generateJWT({
+      id: updated.id,
+      username: updated.username,
+      email: updated.email,
+      roles: updated.roles,
+    });
+    if (jwt) {
+      cookies.set('session', jwt, SESSION_COOKIE_OPTIONS);
+    }
+  }
 
   return new Response(JSON.stringify({ success: true, user: userPublic }), {
     headers: { 'Content-Type': 'application/json' },

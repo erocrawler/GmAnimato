@@ -1,6 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { error } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { isSafeMediaPath } from '$lib/mediaPath';
 
 /**
  * Media proxy that maps /media/* to S3_ENDPOINT/*
@@ -22,6 +23,12 @@ export const GET: RequestHandler = async ({ params, request }) => {
       throw error(400, 'Missing image path');
     }
 
+    // Only plain [A-Za-z0-9._-] segments: no traversal, encoding, or query smuggling into the S3 URL.
+    // Same response as a missing object so nothing about the rule leaks.
+    if (!isSafeMediaPath('/media/' + imagePath)) {
+      throw error(404, 'Not found');
+    }
+
     // Construct the full S3 URL
     const s3Url = `${s3Endpoint}/${imagePath}`;
 
@@ -41,9 +48,8 @@ export const GET: RequestHandler = async ({ params, request }) => {
       throw error(response.status, `Failed to fetch image: ${response.statusText}`);
     }
 
-    // Get content type and body
+    // Get content type; the body is streamed through, never buffered in memory
     const contentType = response.headers.get('content-type') || 'image/jpeg';
-    const arrayBuffer = await response.arrayBuffer();
 
     // Build response headers
     const responseHeaders: HeadersInit = {
@@ -74,7 +80,7 @@ export const GET: RequestHandler = async ({ params, request }) => {
     }
 
     // Return with appropriate status code (206 for partial content, 200 otherwise)
-    return new Response(arrayBuffer, {
+    return new Response(response.body, {
       status: response.status === 206 ? 206 : 200,
       headers: responseHeaders
     });

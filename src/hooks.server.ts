@@ -1,6 +1,7 @@
 import type { Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
 import { getSessionByToken, getUserById, deleteSession, deleteExpiredSessions, getAllSponsorClaims, deleteSponsorClaim, expireSponsorClaim, updateSponsorClaim, updateUser, getAdminSettings, getApiTokenByHash, touchApiToken } from '$lib/db';
+import { isAdminGatedPath } from '$lib/adminGate';
 import { isSessionExpired, verifyJWT, JWT_ENABLED, generateJWT, SESSION_COOKIE_OPTIONS } from '$lib/session';
 import { building, dev } from '$app/environment';
 import { env } from '$env/dynamic/private';
@@ -483,7 +484,8 @@ export const handle: Handle = async ({ event, resolve }) => {
   }
 
   // Check admin access for admin routes
-  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+  // (gate uses the canonical path; the public-route check above intentionally keeps the raw one)
+  if (isAdminGatedPath(pathname)) {
     if (!event.locals.user?.roles?.includes('admin')) {
       throw redirect(303, '/');
     }

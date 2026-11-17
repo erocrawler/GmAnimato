@@ -41,6 +41,7 @@
           invalid_passcode: t('auth.errors.invalidPasscode'),
           username_taken: t('auth.errors.usernameTaken'),
           missing_fields: t('auth.errors.missingFields'),
+          password_too_short: t('auth.errors.passwordTooShort'),
           validation_error: json.error || t('auth.errors.validationError'),
         };
         error = (code && codeMap[code]) || json.error || t('auth.errors.authFailed');

@@ -2,6 +2,7 @@ import type { PageServerLoad, Actions } from './$types';
 import { redirect } from '@sveltejs/kit';
 import { getAuthorizationUrl, generatePKCE } from '$lib/oauth';
 import { randomBytes } from 'crypto';
+import { cookieSecure } from '$lib/session';
 
 export const load: PageServerLoad = async ({ cookies, url }) => {
   // Start OAuth flow immediately on GET so link clicks work without a form submit
@@ -11,7 +12,7 @@ export const load: PageServerLoad = async ({ cookies, url }) => {
   cookies.set('oauth_state', state, {
     path: '/',
     httpOnly: true,
-    secure: false, // Set to true in production with HTTPS
+    secure: cookieSecure(),
     sameSite: 'lax',
     maxAge: 600 // 10 minutes
   });
@@ -19,7 +20,7 @@ export const load: PageServerLoad = async ({ cookies, url }) => {
   cookies.set('oauth_verifier', verifier, {
     path: '/',
     httpOnly: true,
-    secure: false,
+    secure: cookieSecure(),
     sameSite: 'lax',
     maxAge: 600
   });
@@ -40,7 +41,7 @@ export const actions: Actions = {
     cookies.set('oauth_state', state, {
       path: '/',
       httpOnly: true,
-      secure: false, // Set to true in production with HTTPS
+      secure: cookieSecure(),
       sameSite: 'lax',
       maxAge: 600 // 10 minutes
     });
@@ -48,7 +49,7 @@ export const actions: Actions = {
     cookies.set('oauth_verifier', verifier, {
       path: '/',
       httpOnly: true,
-      secure: false,
+      secure: cookieSecure(),
       sameSite: 'lax',
       maxAge: 600
     });
