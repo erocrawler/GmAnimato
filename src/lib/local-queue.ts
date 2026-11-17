@@ -8,9 +8,25 @@ import { submitRunPodJob, getRunPodJobStatus } from './runpod';
 import { randomUUID } from 'node:crypto';
 import type { AdminSettings, VideoEntry, User } from './IDatabase';
 
+/** Pauses between the attempts to persist a successful RunPod submission (attempt 1 -> 2 -> 3). */
+export const MIGRATION_WRITEBACK_RETRY_DELAYS_MS = [200, 600] as const;
+
+const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 /**
  * Migrate oldest eligible job from local queue to RunPod
  * This is called when local queue is backed up to free up space for new jobs
+ * 
+ * Outcomes (return value: true only for a completed migration):
+ *  - success: row written back as {is_local_job:false, job_id:<runpod id>, status:'in_queue', dequeued_at:null}.
+ *  - failure BEFORE the RunPod submission succeeded (claim row exists, build or submit threw):
+ *    row is reset to in_queue with dequeued_at:null so a worker can take it; returns false.
+ *  - failure AFTER the submission succeeded (the write-back failed 3 times in a row): the row is
+ *    deliberately NOT reset. Putting it back to in_queue while is_local_job is still true would let a
+ *    local worker run the same video a second time while the RunPod job is already running (and billed).
+ *    It stays 'processing' (claimJobForMigration stamped dequeued_at), the timeout sweep marks it failed
+ *    after PROCESSING_TIMEOUT_MS, and the user can retry. An error log carries the ids for reconciliation.
+ *    Returns false.
  * 
  * @param config RunPod configuration
  * @param settings Admin settings for determining eligibility
@@ -18,6 +34,7 @@ import type { AdminSettings, VideoEntry, User } from './IDatabase';
  * @param updateVideo Function to update video in database
  * @param buildWorkflowCallback Function to build workflow for the migrated job
  * @param submit RunPod submission (injectable for the queue sweeper / tests; defaults to submitRunPodJob)
+ * @param sleep Delay used between write-back attempts (injectable so tests do not really wait)
  * @returns true if a job was migrated, false otherwise
  */
 export async function migrateOldestEligibleJob(
@@ -26,7 +43,8 @@ export async function migrateOldestEligibleJob(
   claimJobForMigration: (settings: AdminSettings) => Promise<VideoEntry | null>,
   updateVideo: (id: string, patch: any) => Promise<any>,
   buildWorkflowCallback: (video: VideoEntry) => Promise<any>,
-  submit: (config: RunPodConfig, payload: any) => Promise<{ id: string }> = submitRunPodJob
+  submit: (config: RunPodConfig, payload: any) => Promise<{ id: string }> = submitRunPodJob,
+  sleep: (ms: number) => Promise<void> = realSleep
 ): Promise<boolean> {
   if (!config) {
     console.log('[Queue Migration] RunPod not configured, cannot migrate');
@@ -34,6 +52,9 @@ export async function migrateOldestEligibleJob(
   }
 
   let candidate: VideoEntry | null = null;
+  // Set once RunPod has accepted the job; from then on the failure handling must differ.
+  let submitted = false;
+  let runpodJobId: string | undefined;
   try {
     // Atomically claim a job for migration (prevents race with workers)
     // This marks the job as 'processing' to prevent workers from claiming it
@@ -51,14 +72,40 @@ export async function migrateOldestEligibleJob(
 
     // Submit to RunPod
     const result = await submit(config, payload);
+    submitted = true;
+    runpodJobId = result.id;
 
     // Update database to mark as RunPod job and restore to in_queue status
-    // (RunPod will handle the actual processing)
-    await updateVideo(candidate.id, {
-      is_local_job: false,
-      job_id: result.id,
-      status: 'in_queue'
-    });
+    // (RunPod will handle the actual processing). dequeued_at must be an explicit null
+    // (the Postgres backend skips undefined) so the in_queue row carries no stale claim time.
+    const attempts = MIGRATION_WRITEBACK_RETRY_DELAYS_MS.length + 1;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        await updateVideo(candidate.id, {
+          is_local_job: false,
+          job_id: result.id,
+          status: 'in_queue',
+          dequeued_at: null
+        });
+        lastError = undefined;
+        break;
+      } catch (writeError) {
+        lastError = writeError;
+        if (attempt < attempts - 1) {
+          await sleep(MIGRATION_WRITEBACK_RETRY_DELAYS_MS[attempt]);
+        }
+      }
+    }
+    if (lastError !== undefined) {
+      // Do NOT reset to in_queue here (see the function comment): RunPod already owns this job.
+      console.error(
+        `[Queue Migration] RunPod job ${runpodJobId} was submitted for video ${candidate.id} but recording it in the database failed after ${attempts} attempts; ` +
+        'leaving the video in processing (the timeout sweep will mark it failed). Reconcile manually if needed:',
+        lastError
+      );
+      return false;
+    }
 
     console.log(`[Queue Migration] Successfully migrated video ${candidate.id} to RunPod (job: ${result.id})`);
     return true;
@@ -67,9 +114,13 @@ export async function migrateOldestEligibleJob(
     // claimJobForMigration marked the job as 'processing' to reserve it; if the
     // workflow build or RunPod submission failed we MUST reset it — otherwise
     // the job sits in 'processing' forever and no worker can ever pick it up.
-    if (candidate?.id) {
+    // (Never reached after a successful submission: that case returns above.)
+    if (submitted) {
+      // Defensive: something unexpected threw after RunPod accepted the job. Same rule: no reset.
+      console.error(`[Queue Migration] RunPod job ${runpodJobId} was submitted for video ${candidate?.id} but an unexpected error followed; leaving the video untouched.`);
+    } else if (candidate?.id) {
       try {
-        await updateVideo(candidate.id, { status: 'in_queue' });
+        await updateVideo(candidate.id, { status: 'in_queue', dequeued_at: null });
         console.log(`[Queue Migration] Reset video ${candidate.id} back to in_queue after failed migration`);
       } catch (resetError) {
         console.error('[Queue Migration] Failed to reset job status after migration failure:', resetError);

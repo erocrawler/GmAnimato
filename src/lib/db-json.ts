@@ -456,7 +456,9 @@ export class JsonFileDatabase implements IDatabase {
       return null;
     }
 
+    // dequeued_at is the leash for the timeout sweeps; see PostgresDatabase.claimJobForMigration.
     rows[idx].status = 'processing';
+    rows[idx].dequeued_at = new Date().toISOString();
     await this.writeAll(rows);
     
     return rows[idx];

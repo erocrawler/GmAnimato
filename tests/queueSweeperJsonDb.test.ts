@@ -68,6 +68,22 @@ describe('JsonFileDatabase: queue sweeper methods (same contract as Postgres)', 
     });
   });
 
+  describe('claimJobForMigration', () => {
+    it('reserves the row as processing with a dequeued_at leash (so the timeout sweep can fail it after a crash)', async () => {
+      const user = await db.createUser('mig-u', 'x', 'mig@example.test', ['free']);
+      const q = await add({ user_id: user.id, processing_started_at: iso(45) });
+      const claimed = await db.claimJobForMigration({ freeUserWaitThresholdMinutes: 30, roles: [] } as any);
+      expect(claimed!.id).toBe(q.id);
+      const stored = (await db.getVideoById(q.id))!;
+      expect(stored.status).toBe('processing');
+      expect(stored.dequeued_at).toBeTruthy();
+      expect(new Date(stored.dequeued_at!).getTime()).toBeGreaterThan(Date.now() - 60_000);
+      // crash after the claim: the row is not stuck forever
+      await db.updateVideo(q.id, { dequeued_at: iso(31) });
+      expect(await db.failTimedOutProcessing(ago(30))).toEqual([q.id]);
+    });
+  });
+
   describe('claimStaleLocalJob', () => {
     it('claims only stale local in_queue rows, oldest first, reserving as processing + dequeued_at', async () => {
       const stale = await add({ processing_started_at: iso(45) });

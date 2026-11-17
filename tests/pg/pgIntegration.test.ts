@@ -856,6 +856,121 @@ describe.skipIf(!PG_URL)('real Postgres integration', () => {
   });
 
   // ==================== (h) hourly queue sweeper ====================
+  describe('(i) claimJobForMigration leash + submit-ok/write-fail (no duplicate execution)', () => {
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    const queued = (over: any = {}) =>
+      seed({ status: 'in_queue', is_local_job: true, job_id: 'local-old', dequeued_at: undefined, user_id: PAID.id, processing_started_at: ago(5).toISOString(), ...over });
+    let migrate: any;
+    beforeEach(async () => {
+      migrate = (await import('../../src/lib/local-queue')).migrateOldestEligibleJob;
+    });
+    const quiet = () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      return vi.spyOn(console, 'error').mockImplementation(() => {});
+    };
+    afterEach(() => vi.restoreAllMocks());
+
+    it('f: claim stamps dequeued_at + processing; after a "crash" the timeout sweep fails the row (no permanent stall)', async () => {
+      const v = await queued();
+      const settings = await db.getAdminSettings();
+      const claimed = await db.claimJobForMigration(settings);
+      expect(claimed.id).toBe(v.id);
+      const r = await row(v.id);
+      expect(r.status).toBe('processing');
+      expect(r.isLocalJob).toBe(true);
+      expect(r.dequeuedAt).not.toBeNull();
+      expect(r.dequeuedAt.getTime()).toBeGreaterThan(Date.now() - 60_000);
+
+      // fresh claim is not failed by the sweep
+      expect(await db.failTimedOutProcessing(ago(30))).toEqual([]);
+      // process died here; 31 minutes later the row is old enough to be failed
+      await prisma.video.update({ where: { id: v.id }, data: { dequeuedAt: ago(31) } });
+      expect(await db.failTimedOutProcessing(ago(30))).toEqual([v.id]);
+      expect((await row(v.id)).status).toBe('failed');
+    });
+
+    it('g: a successful migration clears dequeued_at (in_queue row carries no stale claim time)', async () => {
+      const v = await queued();
+      quiet();
+      const settings = await db.getAdminSettings();
+      const ok = await migrate(
+        { endpointUrl: 'http://runpod.test', apiKey: 'k' }, settings,
+        db.claimJobForMigration, db.updateVideo, async () => ({ input: {} }),
+        async () => ({ id: 'rp-mig' }), async () => {},
+      );
+      expect(ok).toBe(true);
+      expect(await row(v.id)).toMatchObject({ status: 'in_queue', isLocalJob: false, jobId: 'rp-mig', dequeuedAt: null });
+    });
+
+    it('g2: a failed submit resets to in_queue/local and clears dequeued_at', async () => {
+      const v = await queued();
+      quiet();
+      const settings = await db.getAdminSettings();
+      const ok = await migrate(
+        { endpointUrl: 'http://runpod.test', apiKey: 'k' }, settings,
+        db.claimJobForMigration, db.updateVideo, async () => ({ input: {} }),
+        async () => { throw new Error('runpod 500'); }, async () => {},
+      );
+      expect(ok).toBe(false);
+      expect(await row(v.id)).toMatchObject({ status: 'in_queue', isLocalJob: true, jobId: 'local-old', dequeuedAt: null });
+    });
+
+    it('h: RunPod accepted the job but the write-back fails 3x -> row stays processing/local/old job_id, no worker can claim it, timeout sweep fails it', async () => {
+      const v = await queued();
+      const err = quiet();
+      const settings = await db.getAdminSettings();
+      const submit = vi.fn(async () => ({ id: 'rp-orphan' }));
+      const failingUpdate = vi.fn(async () => { throw new Error('db down'); });
+      const sleeps: number[] = [];
+      const ok = await migrate(
+        { endpointUrl: 'http://runpod.test', apiKey: 'k' }, settings,
+        db.claimJobForMigration, failingUpdate, async () => ({ input: {} }),
+        submit, async (ms: number) => { sleeps.push(ms); },
+      );
+      expect(ok).toBe(false);
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(failingUpdate).toHaveBeenCalledTimes(3);
+      expect(sleeps).toEqual([200, 600]);
+      const logged = err.mock.calls.map((c: any[]) => c.map(String).join(' ')).join('\n');
+      expect(logged).toContain(v.id);
+      expect(logged).toContain('rp-orphan');
+
+      const r = await row(v.id);
+      expect(r).toMatchObject({ status: 'processing', isLocalJob: true, jobId: 'local-old' });
+      expect(r.dequeuedAt).not.toBeNull();
+      expect(await db.claimLocalJob()).toBeNull();           // local worker cannot take it
+      expect(await db.claimStaleLocalJob(ago(0))).toBeNull(); // nor the sweeper's own claim
+      expect(await db.claimJobForMigration(settings)).toBeNull(); // nor another migration
+      await prisma.video.update({ where: { id: v.id }, data: { dequeuedAt: ago(31) } });
+      expect(await db.failTimedOutProcessing(ago(30))).toEqual([v.id]);
+    });
+
+    it('h2: same scenario through runQueueSweep: counted as one failed migration, not re-selected in the sweep, no reset to in_queue', async () => {
+      // real timers on purpose: faking setTimeout stalls the pg driver; one row = 200ms + 600ms of real back-off
+      {
+        await db.updateAdminSettings({ freeUserWaitThresholdMinutes: 30 } as any);
+        const v = await queued({ user_id: FREE.id, processing_started_at: ago(100).toISOString() });
+        quiet();
+        h.runpod.submit = vi.fn(async () => ({ id: 'rp-orphan' }));
+        const s = await runQueueSweep({
+          now: () => Date.now(),
+          getAdminSettings: () => db.getAdminSettings(),
+          failTimedOutProcessing: (c: Date) => db.failTimedOutProcessing(c),
+          claimStaleLocalJob: (o: Date, ex?: string[]) => db.claimStaleLocalJob(o, ex),
+          updateVideo: async () => { throw new Error('db down'); },
+          getRunPodConfig: () => ({ endpointUrl: 'http://runpod.test', apiKey: 'k' }),
+          resolveCallbackBase: () => 'https://cb.example.test',
+          buildPayload: async () => ({ input: {} }),
+          submitRunPodJob: (c: any, pl: any) => h.runpod.submit(c, pl),
+          logger: { log: () => {}, warn: () => {}, error: () => {} },
+        });
+        expect(s).toMatchObject({ migrated: 0, migrationFailed: 1 });
+        expect(h.runpod.submit).toHaveBeenCalledTimes(1);
+        expect(await row(v.id)).toMatchObject({ status: 'processing', isLocalJob: true, jobId: 'local-old' });
+      }
+    });
+  });
+
   describe('(h) queue sweeper: failTimedOutProcessing / claimStaleLocalJob / runQueueSweep', () => {
     // admin_settings is not truncated between tests: pin the threshold this block depends on.
     beforeEach(async () => {

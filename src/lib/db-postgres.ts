@@ -751,10 +751,14 @@ export class PostgresDatabase implements IDatabase {
 
           if (isEligible) {
             // Mark as migrating by setting status to 'processing' temporarily
-            // This prevents workers from claiming it
+            // This prevents workers from claiming it.
+            // dequeued_at is the leash for the timeout sweeps (failTimedOutProcessing and the
+            // status poll both require it): without it a crash between this claim and the
+            // write-back would leave a 'processing' row nobody ever fails or re-claims.
+            // The migration write-back / reset clears it again (dequeued_at: null).
             const updated = await tx.video.update({
               where: { id: candidate.id },
-              data: { status: 'processing' }
+              data: { status: 'processing', dequeuedAt: new Date() }
             });
 
             return updated;
