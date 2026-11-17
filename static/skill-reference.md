@@ -17,7 +17,7 @@ Owner = the video's creator; other users' videos answer `404`.
 - `GET /api/videos?page&page_size≤50&status=uploaded|in_queue|processing|completed|failed&sort=upload|completion&direction=asc|desc` — your videos: `{videos,page,page_size,total,total_pages}`.
 - `GET /api/video/{id}` — one video in full (inputs, options, LoRAs, seed, status).
 - `GET /api/video/{id}/status` — poll (§5).
-- `GET /api/video/{id}/download?format=gif|webp[&quality=small&fps=1-30&scale=120-1280]` — converted clip, cached 10 min; 409 when not completed.
+- `GET /api/video/{id}/download?format=gif|webp[&quality=small&fps=8|10|12|15|24&scale=320|480|640|720|960]` — converted clip, cached 10 min; other fps/scale values → 400; 409 when not completed; 429 (+Retry-After) when the conversion queue is full; 504 when ffmpeg times out.
 - `GET /media/{bucket}/{file}` — media files (supports Range).
 - `POST /api/uploads` — create a draft (§3).
 - `POST /api/video/update` — `{id,prompt?}`; prompt only while `uploaded`.

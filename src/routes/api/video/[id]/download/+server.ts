@@ -1,10 +1,12 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { getVideoById } from '$lib/db';
 import { env } from '$env/dynamic/private';
-import { spawn } from 'child_process';
 import { createReadStream, promises as fs } from 'fs';
-import { join } from 'path';
 import { Readable } from 'stream';
+import { DownloadCache } from '$lib/server/downloadCache';
+import { FfmpegLimiter, FfmpegQueueFullError } from '$lib/server/ffmpegLimiter';
+import { FfmpegTimeoutError, runFfmpeg } from '$lib/server/ffmpegRun';
+import { parseFps, parseScale } from '$lib/server/downloadPresets';
 
 const ALLOWED_FORMATS = ['gif', 'webp'] as const;
 type Format = (typeof ALLOWED_FORMATS)[number];
@@ -18,27 +20,35 @@ type GifQuality = keyof typeof GIF_PRESETS;
 
 // ---------------------------------------------------------------------------
 // Disk cache under /tmp — zero RAM overhead, survives between requests.
-// Files older than TTL are ignored (and lazily replaced on next request).
+// Files older than TTL are ignored (and lazily replaced on next request);
+// a periodic sweep deletes aged files and orphaned .tmp leftovers.
 // ---------------------------------------------------------------------------
 const CACHE_DIR = '/tmp/gmanimato-dl-cache';
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const CACHE_MAX_AGE_MS = 30 * 60 * 1000; // sweep deletes finished files older than this
+const FFMPEG_TIMEOUT_MS = 120 * 1000; // per ffmpeg run
+const TMP_MAX_AGE_MS = 2 * FFMPEG_TIMEOUT_MS + 60 * 1000; // orphaned .tmp older than this
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
-// Ensure cache directory exists once at module load time.
-fs.mkdir(CACHE_DIR, { recursive: true }).catch(() => {/* ignore */});
+// Global (per-process) cap on simultaneous ffmpeg runs; extra requests queue, and once the
+// queue is full they get 429 immediately.
+const MAX_CONCURRENT_FFMPEG = 2;
+const MAX_QUEUED_FFMPEG = 20;
+const RETRY_AFTER_SECONDS = 30;
+
+const cache = new DownloadCache({
+  dir: CACHE_DIR,
+  ttlMs: CACHE_TTL_MS,
+  maxAgeMs: CACHE_MAX_AGE_MS,
+  tmpMaxAgeMs: TMP_MAX_AGE_MS,
+});
+const limiter = new FfmpegLimiter(MAX_CONCURRENT_FFMPEG, MAX_QUEUED_FFMPEG, RETRY_AFTER_SECONDS);
+
+// Ensure cache directory exists once at module load time, then start the sweeper.
+cache.ensureDir().then(() => cache.startSweeper(SWEEP_INTERVAL_MS));
 
 function cacheFilePath(id: string, format: Format, fps: number, scale: number): string {
-  // Use only safe characters in the filename
-  return join(CACHE_DIR, `${id}_${format}_${fps}_${scale}`);
-}
-
-async function getCachePath(path: string): Promise<string | null> {
-  try {
-    const stat = await fs.stat(path);
-    if (Date.now() - stat.mtimeMs > CACHE_TTL_MS) return null;
-    return path;
-  } catch {
-    return null;
-  }
+  return cache.filePath(id, format, fps, scale);
 }
 
 // In-flight deduplication: two simultaneous requests for the same key share
@@ -87,24 +97,8 @@ async function convertWithFfmpeg(
     ];
   }
 
-  await new Promise<void>((resolve, reject) => {
-    const errChunks: Buffer[] = [];
-    const proc = spawn('ffmpeg', args);
-    proc.stderr.on('data', (chunk: Buffer) => errChunks.push(chunk));
-    proc.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        fs.unlink(tmpPath).catch(() => {/* ignore */});
-        const stderr = Buffer.concat(errChunks).toString();
-        reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-500)}`));
-      }
-    });
-    proc.on('error', (err) => {
-      fs.unlink(tmpPath).catch(() => {/* ignore */});
-      reject(new Error(`Failed to spawn ffmpeg: ${err.message}`));
-    });
-  });
+  // Hold the slot only while ffmpeg runs; the timer starts once the slot is acquired.
+  await limiter.run(() => runFfmpeg(['-nostdin', ...args], tmpPath, { timeoutMs: FFMPEG_TIMEOUT_MS }));
 
   // Atomic rename so a partial file is never served
   await fs.rename(tmpPath, outPath);
@@ -120,13 +114,16 @@ async function getConverted(
 ): Promise<string> {
   const outPath = cacheFilePath(videoId, format, fps, scale);
 
-  const cached = await getCachePath(outPath);
+  const cached = await cache.fresh(outPath);
   if (cached) return cached;
 
   // Deduplicate simultaneous identical requests
   const existing = inFlight.get(outPath);
   if (existing) return existing;
 
+  // Lease covers the whole conversion (queue wait included) so the sweeper never removes
+  // the .tmp file or a just-renamed result underneath us.
+  const release = cache.hold(outPath);
   const promise = convertWithFfmpeg(inputUrl, format, fps, scale, outPath)
     .then(() => {
       inFlight.delete(outPath);
@@ -135,10 +132,18 @@ async function getConverted(
     .catch((err) => {
       inFlight.delete(outPath);
       throw err;
-    });
+    })
+    .finally(release);
 
   inFlight.set(outPath, promise);
   return promise;
+}
+
+function jsonError(status: number, error: string, headers: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify({ error }), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...headers },
+  });
 }
 
 export const GET: RequestHandler = async ({ params, locals, url }) => {
@@ -166,10 +171,12 @@ export const GET: RequestHandler = async ({ params, locals, url }) => {
   const defaultFps   = format === 'gif' ? GIF_PRESETS[gifQuality].fps   : 10;
   const defaultScale = format === 'gif' ? GIF_PRESETS[gifQuality].scale : 480;
 
-  const fpsParam   = url.searchParams.get('fps');
-  const scaleParam = url.searchParams.get('scale');
-  const fps   = Math.min(30, Math.max(1,   parseInt(fpsParam   ?? String(defaultFps),   10) || defaultFps));
-  const scale = Math.min(1280, Math.max(120, parseInt(scaleParam ?? String(defaultScale), 10) || defaultScale));
+  const fpsRes = parseFps(url.searchParams.get('fps'), defaultFps);
+  if (!fpsRes.ok) return jsonError(400, fpsRes.error);
+  const scaleRes = parseScale(url.searchParams.get('scale'), defaultScale);
+  if (!scaleRes.ok) return jsonError(400, scaleRes.error);
+  const fps = fpsRes.value;
+  const scale = scaleRes.value;
 
   const video = await getVideoById(id);
   if (!video) {
@@ -208,6 +215,14 @@ export const GET: RequestHandler = async ({ params, locals, url }) => {
   try {
     filePath = await getConverted(inputUrl, id, format, fps, scale);
   } catch (err) {
+    if (err instanceof FfmpegQueueFullError) {
+      return jsonError(429, 'Too many conversions in progress, try again later', {
+        'Retry-After': String(err.retryAfterSeconds),
+      });
+    }
+    if (err instanceof FfmpegTimeoutError) {
+      return jsonError(504, 'Conversion timed out');
+    }
     const msg = String(err);
     const isNotFound = msg.includes('spawn') && msg.includes('ENOENT');
     return new Response(
@@ -216,13 +231,22 @@ export const GET: RequestHandler = async ({ params, locals, url }) => {
     );
   }
 
-  const stat = await fs.stat(filePath);
+  // Lease the file until the response stream ends so the sweeper cannot delete it mid-read.
+  const releaseRead = cache.hold(filePath);
+  let stat;
+  try {
+    stat = await fs.stat(filePath);
+  } catch (err) {
+    releaseRead();
+    return jsonError(500, String(err));
+  }
   const mimeType = format === 'gif' ? 'image/gif' : 'image/webp';
   const qualitySuffix = format === 'gif' && gifQuality === 'small' ? '-small' : '';
   const filename = `video-${id}${qualitySuffix}.${format}`;
 
   // Stream the file — no buffering into RAM
   const nodeStream = createReadStream(filePath);
+  nodeStream.once('close', releaseRead);
   const webStream = Readable.toWeb(nodeStream) as ReadableStream;
 
   return new Response(webStream, {
