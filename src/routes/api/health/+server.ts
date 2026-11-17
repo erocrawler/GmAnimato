@@ -2,6 +2,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { getAdminSettings } from '$lib/db';
+import { jsonServerError } from '$lib/server/safe-error';
 
 export const GET: RequestHandler = async () => {
   try {
@@ -55,14 +56,8 @@ export const GET: RequestHandler = async () => {
       });
     }
   } catch (err) {
-    console.error('[Health] Error:', err);
-    return new Response(JSON.stringify({ 
-      error: String(err),
-      available: false,
-      queueFull: false
-    }), { 
-      status: 500, 
-      headers: { 'Content-Type': 'application/json' } 
+    return jsonServerError('[Health] Error:', err, {
+      extra: { available: false, queueFull: false }
     });
   }
 };

@@ -1,6 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { updateVideo, getVideoById } from '$lib/db';
 import { DB_LIMITS } from '$lib/validation';
+import { jsonServerError } from '$lib/server/safe-error';
 
 /**
  * Publish/unpublish toggle for a video detail page, plus prompt auto-save
@@ -69,7 +70,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const updated = await updateVideo(id, patch);
     return new Response(JSON.stringify({ success: true, updated }), { headers: { 'Content-Type': 'application/json' } });
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    return jsonServerError('[Video Update] Error', err);
   }
 };
 

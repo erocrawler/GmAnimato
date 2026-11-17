@@ -4,6 +4,7 @@ import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
 import { uploadBufferToS3 } from '$lib/s3';
 import { resolveCallbackVideoUrl, describeRejectedHost } from '$lib/callbackUrl';
 import { extractRef2VPosterFromResult } from '$lib/ref2vPoster';
+import { jsonServerError } from '$lib/server/safe-error';
 
 export const POST: RequestHandler = async ({ request, params }) => {
   try {
@@ -188,6 +189,6 @@ export const POST: RequestHandler = async ({ request, params }) => {
 
     return new Response(JSON.stringify({ success: true }), { status: 201, headers: { 'Content-Type': 'application/json' } });
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    return jsonServerError('[Webhook] Error', err);
   }
 };

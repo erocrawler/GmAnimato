@@ -2,6 +2,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { getRunPodConfig, getRunPodHealth } from '$lib/runpod';
 import { getAdminSettings, getLocalJobStats } from '$lib/db';
+import { jsonServerError } from '$lib/server/safe-error';
 
 export const GET: RequestHandler = async ({ locals }) => {
   // Check if user is admin
@@ -72,21 +73,14 @@ export const GET: RequestHandler = async ({ locals }) => {
       return new Response(JSON.stringify({ 
         available: false,
         reason: 'Unable to check RunPod status',
-        queueFull: false,
-        error: String(err)
+        queueFull: false
       }), { 
         headers: { 'Content-Type': 'application/json' } 
       });
     }
   } catch (err) {
-    console.error('[Admin Queue Status] Error:', err);
-    return new Response(JSON.stringify({ 
-      error: String(err),
-      available: false,
-      queueFull: false
-    }), { 
-      status: 500, 
-      headers: { 'Content-Type': 'application/json' } 
+    return jsonServerError('[Admin Queue Status] Error:', err, {
+      extra: { available: false, queueFull: false }
     });
   }
 };

@@ -6,6 +6,7 @@ import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
 import { getWorkflowCapabilities } from '$lib/workflows';
 import { checkSubmissionGate, checkQueueLimit, gateResponse, userHasAdvancedFeatures } from '$lib/submissionGate';
 import { withUserLock, UserLockTimeoutError, userLockBusyResponse } from '$lib/userLock';
+import { jsonServerError } from '$lib/server/safe-error';
 
 /**
  * Re-run the submission gates (daily credits, premium resolution/steps, relay
@@ -93,11 +94,7 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
       console.warn(`[Retry] lock wait timed out for user ${locals.user?.id}`);
       return userLockBusyResponse();
     }
-    console.error('[Retry] Error:', err);
-    return new Response(JSON.stringify({ error: String(err) }), { 
-      status: 500, 
-      headers: { 'Content-Type': 'application/json' } 
-    });
+    return jsonServerError('[Retry] Error:', err);
   }
 };
 
@@ -192,11 +189,7 @@ async function retryLocked(
           headers: { 'Content-Type': 'application/json' } 
         });
       } catch (err) {
-        console.error('[Retry] Error submitting local job to RunPod:', err);
-        return new Response(JSON.stringify({ error: String(err) }), { 
-          status: 500, 
-          headers: { 'Content-Type': 'application/json' } 
-        });
+        return jsonServerError('[Retry] Error submitting local job to RunPod:', err);
       }
     }
 
@@ -305,17 +298,9 @@ async function retryLocked(
         headers: { 'Content-Type': 'application/json' } 
       });
     } catch (err) {
-      console.error('[Retry] Error:', err);
-      return new Response(JSON.stringify({ error: String(err) }), { 
-        status: 500, 
-        headers: { 'Content-Type': 'application/json' } 
-      });
+      return jsonServerError('[Retry] Error:', err);
     }
   } catch (err) {
-    console.error('[Retry] Error:', err);
-    return new Response(JSON.stringify({ error: String(err) }), { 
-      status: 500, 
-      headers: { 'Content-Type': 'application/json' } 
-    });
+    return jsonServerError('[Retry] Error:', err);
   }
 }

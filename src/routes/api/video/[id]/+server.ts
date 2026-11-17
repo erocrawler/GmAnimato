@@ -1,6 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { getVideoById, deleteVideo } from '$lib/db';
 import { errorResponse, jsonResponse, serializeVideoDetail } from '$lib/agentApi';
+import { jsonServerError } from '$lib/server/safe-error';
 
 /**
  * GET /api/video/{id} — detail of one video (owner or admin; anyone else gets a
@@ -69,9 +70,6 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
       headers: { 'Content-Type': 'application/json' } 
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), { 
-      status: 500, 
-      headers: { 'Content-Type': 'application/json' } 
-    });
+    return jsonServerError('[Video Delete] Error', err);
   }
 };

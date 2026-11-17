@@ -2,6 +2,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { getAdminSettings, getAllSponsorClaims, getAllUsers, updateSponsorClaim, expireSponsorClaim } from '$lib/db';
 import { env } from '$env/dynamic/private';
 import type { AdminSettings, SponsorClaim } from '$lib/IDatabase';
+import { safeErrorMessage } from '$lib/server/safe-error';
 
 type CrawlerSponsor = {
   fansNickname?: string;
@@ -84,9 +85,7 @@ async function fetchSponsorsFromCrawlerSafe(settings: AdminSettings): Promise<Cr
     }
     return { sponsors, available: true };
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error('[Admin Sponsors] Crawler fetch error:', errorMsg);
-    return { sponsors: [], available: false, error: errorMsg };
+    return { sponsors: [], available: false, error: safeErrorMessage('[Admin Sponsors] Crawler fetch error:', err, 'Crawler request failed') };
   }
 }
 

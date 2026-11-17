@@ -5,6 +5,7 @@ import { getRunPodConfig, mapRunPodStatus, extractVideoUrl, PROCESSING_TIMEOUT_M
 import { getJobStatus } from '$lib/local-queue';
 import { toProxiedUrl } from '$lib/serverImageUrl';
 import { extractRef2VPosterFromResult } from '$lib/ref2vPoster';
+import { jsonServerError } from '$lib/server/safe-error';
 
 export const GET: RequestHandler = async ({ params, locals }) => {
   try {
@@ -213,10 +214,6 @@ export const GET: RequestHandler = async ({ params, locals }) => {
       headers: { 'Content-Type': 'application/json' } 
     });
   } catch (err) {
-    console.error('[Status Poll] Error:', err);
-    return new Response(JSON.stringify({ error: String(err) }), { 
-      status: 500, 
-      headers: { 'Content-Type': 'application/json' } 
-    });
+    return jsonServerError('[Status Poll] Error:', err);
   }
 };

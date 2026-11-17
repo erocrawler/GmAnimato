@@ -13,6 +13,7 @@ import { evaluatePromptProperties } from '$lib/imageRecognition';
 import { maxAllowedDurationSeconds, MAX_DURATION_SECONDS_PAID } from '$lib/mediaLimits';
 import { normalizeLoraPresets } from '$lib/loraPresets';
 import { withUserLock, UserLockTimeoutError, userLockBusyResponse } from '$lib/userLock';
+import { jsonServerError, safeErrorMessage } from '$lib/server/safe-error';
 
 async function delay(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
@@ -89,7 +90,7 @@ async function runDetachedRevalidation(videoId: string): Promise<void> {
 
     await updateVideo(videoId, patch);
   } catch (error) {
-    console.error('[I2V] Detached revalidation failed:', error);
+    const revalidationError = safeErrorMessage('[I2V] Detached revalidation failed:', error, '重新校验失败');
     const latest = await getVideoById(videoId);
     if (!latest) return;
     await updateVideo(videoId, {
@@ -97,7 +98,7 @@ async function runDetachedRevalidation(videoId: string): Promise<void> {
         ...(latest.validation_metadata || {}),
         revalidation_status: 'failed',
         revalidation_completed_at: new Date().toISOString(),
-        revalidation_error: String(error),
+        revalidation_error: revalidationError,
       },
     });
   }
@@ -126,8 +127,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       console.warn(`[I2V] kickoff lock wait timed out for user ${locals.user?.id}`);
       return userLockBusyResponse();
     }
-    console.error('[I2V] Error:', err);
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    return jsonServerError('[I2V] Error:', err);
   }
 };
 
@@ -701,12 +701,8 @@ async function kickoffLocked(
       
       console.log(`[I2V] Submitted job ${jobId} for video ${id} (local: ${isLocal})`);
     } catch (err) {
-      console.error(`[I2V] Job submission failed:`, err);
       await updateVideo(id, { status: 'failed' });
-      return new Response(
-        JSON.stringify({ error: String(err) }), 
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
+      return jsonServerError(`[I2V] Job submission failed:`, err);
     }
 
     // Return the updated video status
@@ -721,7 +717,6 @@ async function kickoffLocked(
       { headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
-    console.error('[I2V] Error:', err);
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    return jsonServerError('[I2V] Error:', err);
   }
 }

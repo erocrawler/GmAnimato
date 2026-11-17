@@ -2,6 +2,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { getVideoById } from '$lib/db';
 import { enhanceMiniMaxPrompt } from '$lib/imageRecognition';
 import { collectLabeledReferenceImages, detectReferenceWorkflowType } from '$lib/referenceImages';
+import { jsonServerError } from '$lib/server/safe-error';
 
 /**
  * POST /api/video/[id]/enhance-prompt
@@ -100,15 +101,11 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error('[enhance-prompt] Error:', err);
-    // Surface the real error (e.g. context-size exceeded) so the UI can show
-    // something actionable instead of a generic "unavailable".
+    // Only the context-size case maps to an actionable fixed message; any other
+    // upstream/model error text stays in the log and the user gets a generic one.
     const friendly = /exceeds the available context|context size|n_ctx|exceed_context_size/i.test(message)
       ? '请求超出模型上下文窗口（参考图片/截图过多或过大）。请减少参考素材后重试。'
-      : message;
-    return new Response(
-      JSON.stringify({ success: false, error: friendly }),
-      { status: 502, headers: { 'Content-Type': 'application/json' } }
-    );
+      : '提示词增强失败,请稍后重试';
+    return jsonServerError('[enhance-prompt] Error:', err, { status: 502, message: friendly, extra: { success: false } });
   }
 };

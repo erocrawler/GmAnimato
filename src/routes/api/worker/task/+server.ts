@@ -4,6 +4,7 @@ import { claimLocalJob, getAdminSettings, updateVideo } from '$lib/db';
 import { buildJobWorkflow, getCallbackUrl } from '$lib/jobWorkflow';
 import { H3_TWO_STAGE_CAPABILITY } from '$lib/h3TwoStage';
 import { shouldLogWorkerCapabilities } from '$lib/workerCapLog';
+import { GENERIC_ERROR_MESSAGE } from '$lib/server/safe-error';
 
 /**
  * GET /api/worker/task
@@ -146,8 +147,9 @@ export const GET: RequestHandler = async ({ request }) => {
         console.error(`[Worker] Failed to mark job ${claimedJob.id} failed:`, markErr);
       }
     }
+    // Already logged above; answer with the fixed message only (status unchanged).
     return new Response(
-      JSON.stringify({ error: String(err) }), 
+      JSON.stringify({ error: GENERIC_ERROR_MESSAGE }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }

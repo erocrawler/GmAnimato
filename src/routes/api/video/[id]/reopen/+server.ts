@@ -1,5 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { getVideoById, updateVideo } from '$lib/db';
+import { jsonServerError } from '$lib/server/safe-error';
 
 /**
  * Reopen a FAILED video for editing.
@@ -77,9 +78,6 @@ export const POST: RequestHandler = async ({ params, locals }) => {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return jsonServerError('[Video Reopen] Error', err);
   }
 };

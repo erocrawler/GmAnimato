@@ -1,5 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { toggleLike } from '$lib/db';
+import { jsonServerError } from '$lib/server/safe-error';
 
 export const POST: RequestHandler = async ({ params, locals }) => {
   try {
@@ -37,9 +38,6 @@ export const POST: RequestHandler = async ({ params, locals }) => {
       headers: { 'Content-Type': 'application/json' } 
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), { 
-      status: 500, 
-      headers: { 'Content-Type': 'application/json' } 
-    });
+    return jsonServerError('[Video Like] Error', err);
   }
 };

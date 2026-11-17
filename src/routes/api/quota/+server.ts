@@ -1,5 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { getAdminSettings, checkDailyQuota } from '$lib/db';
+import { jsonServerError } from '$lib/server/safe-error';
 
 export const GET: RequestHandler = async ({ locals }) => {
   try {
@@ -24,10 +25,6 @@ export const GET: RequestHandler = async ({ locals }) => {
       headers: { 'Content-Type': 'application/json' }
     });
   } catch (err) {
-    console.error('[API /quota] Error:', err);
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return jsonServerError('[API /quota] Error:', err);
   }
 };

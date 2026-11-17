@@ -2,6 +2,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { getVideoById, updateVideo } from '$lib/db';
 import { generatePromptRelaySegments } from '$lib/imageRecognition';
 import { toOriginalUrl } from '$lib/serverImageUrl';
+import { jsonServerError } from '$lib/server/safe-error';
 
 export const POST: RequestHandler = async ({ params, request, locals }) => {
   try {
@@ -85,10 +86,6 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
       { headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
-    console.error('[analyze-relay] Error:', err);
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return jsonServerError('[analyze-relay] Error:', err);
   }
 };
