@@ -256,6 +256,14 @@ export interface IDatabase {
   getPublishedVideos(options?: GetPublishedVideosOptions): Promise<PaginatedVideos>;
   getVideoById(id: string): Promise<VideoEntry | undefined>;
   updateVideo(id: string, patch: Partial<VideoEntry>): Promise<VideoEntry | null>;
+  /**
+   * Conditional write for callbacks: applies `patch` in ONE statement that only matches
+   * while the row still carries this job_id and has not reached a final status
+   * (completed/deleted). A callback that arrives after a retry superseded the job, or
+   * after another writer already finished the row, therefore changes nothing.
+   * Returns true when a row was updated, false when zero rows matched.
+   */
+  completeVideoIfNotFinal(id: string, jobId: string, patch: Partial<VideoEntry>): Promise<boolean>;
   deleteVideo(id: string): Promise<boolean>;
   toggleLike(videoId: string, userId: string): Promise<VideoEntry | null>;
   getLikeCount(videoId: string): Promise<number>;

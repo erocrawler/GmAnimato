@@ -435,6 +435,27 @@ export class PostgresDatabase implements IDatabase {
     }
   }
 
+  // Conditional single-statement write for webhook callbacks. updateMany keeps the guard in
+  // the UPDATE itself, so a concurrent retry (new job_id) or a concurrent completion cannot be
+  // overwritten between a read and a write. Prisma does not apply @updatedAt to updateMany, so
+  // updated_at is set explicitly here.
+  async completeVideoIfNotFinal(id: string, jobId: string, patch: Partial<VideoEntry>): Promise<boolean> {
+    const data: any = {};
+    for (const [app, def] of Object.entries(VIDEO_FIELD_TABLE) as [VideoAppField, VideoFieldDef][]) {
+      if (def.skipUpdate) continue;
+      const v = (patch as any)[app];
+      if (v === undefined) continue;
+      data[def.prisma] = videoToDb(def, v);
+    }
+    data.updatedAt = new Date();
+
+    const result = await this.prisma.video.updateMany({
+      where: { id, jobId, status: { notIn: ['completed', 'deleted'] } },
+      data,
+    });
+    return result.count > 0;
+  }
+
   async deleteVideo(id: string): Promise<boolean> {
     try {
       await this.prisma.video.update({

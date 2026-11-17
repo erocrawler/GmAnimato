@@ -26,6 +26,9 @@ const PG_URL = process.env.PG_TEST_URL;
 const h = vi.hoisted(() => ({
   runpod: { submit: null as any, retry: null as any, status: null as any } as Record<'submit' | 'retry' | 'status', any>,
   oauthUserInfo: {} as any,
+  // Optional hook so a test can park the handler inside the base64 upload and let another
+  // writer finish the row in between (the exact read-then-write window this change closes).
+  s3Upload: null as null | (() => Promise<string>),
 }));
 
 vi.mock('$env/dynamic/private', () => ({
@@ -45,7 +48,9 @@ vi.mock('$lib/jobWorkflow', () => ({
   buildJobWorkflow: async () => ({ payload: { input: {} } }),
   getCallbackUrl: (origin: string, id: string) => `${origin}/api/i2v-webhook/${id}`,
 }));
-vi.mock('$lib/s3', () => ({ uploadBufferToS3: async () => 'https://s3.test/x.mp4' }));
+vi.mock('$lib/s3', () => ({
+  uploadBufferToS3: async (...a: any[]) => (h.s3Upload ? h.s3Upload() : 'https://s3.test/x.mp4'),
+}));
 vi.mock('$lib/serverImageUrl', () => ({ toOriginalUrl: (u: string) => u, toProxiedUrl: (u: string) => u }));
 vi.mock('$lib/ref2vPoster', () => ({ extractRef2VPosterFromResult: async () => null }));
 vi.mock('$lib/oauth', () => ({
@@ -452,6 +457,86 @@ describe.skipIf(!PG_URL)('real Postgres integration', () => {
       expect(fin.finalVideoUrl).toBe('https://s3.test/o.mp4');
       expect(fin.progressPercentage).toBeNull();
       expect(fin.processingTimeMs).toBeGreaterThanOrEqual(600_000); // Int column: only fits ~24.8 days of elapsed ms
+    });
+
+    // ==================== conditional final write ====================
+
+    it('completeVideoIfNotFinal: two concurrent completions of the same job — exactly one write lands', async () => {
+      const v = await seed({ status: 'processing', job_id: 'rp-dup' });
+      // Make updated_at clearly old, so the assertion below proves the write sets it.
+      await prisma.video.update({ where: { id: v.id }, data: { updatedAt: new Date(Date.now() - 3600_000) } });
+      const results = await Promise.all([
+        db.completeVideoIfNotFinal(v.id, 'rp-dup', { status: 'completed', final_video_url: 'https://s3.test/a.mp4' }),
+        db.completeVideoIfNotFinal(v.id, 'rp-dup', { status: 'completed', final_video_url: 'https://s3.test/b.mp4' }),
+      ]);
+      expect(results.filter(Boolean)).toHaveLength(1);
+      const fin = await row(v.id);
+      expect(fin.finalVideoUrl).toBe(results[0] ? 'https://s3.test/a.mp4' : 'https://s3.test/b.mp4');
+      expect(fin.updatedAt.getTime()).toBeGreaterThan(Date.now() - 60_000); // updateMany does not apply @updatedAt by itself
+    });
+
+    it('completeVideoIfNotFinal: a final row or a superseded job id matches zero rows and writes nothing', async () => {
+      const done = await seed({ status: 'completed', job_id: 'rp-c', final_video_url: 'https://s3.test/real.mp4' });
+      const before = await row(done.id);
+      expect(await db.completeVideoIfNotFinal(done.id, 'rp-c', { status: 'failed' })).toBe(false);
+      expect(await db.completeVideoIfNotFinal(done.id, 'rp-c', { status: 'completed', final_video_url: 'https://s3.test/evil.mp4' })).toBe(false);
+      expect(await row(done.id)).toEqual(before); // byte-identical, updatedAt included
+
+      const live = await seed({ status: 'processing', job_id: 'rp-new-j' });
+      expect(await db.completeVideoIfNotFinal(live.id, 'rp-old-j', { status: 'completed', final_video_url: 'https://s3.test/x.mp4' })).toBe(false);
+      expect(await row(live.id)).toMatchObject({ status: 'processing', finalVideoUrl: null });
+    });
+
+    it('webhook: COMPLETED and FAILED racing on the same job leave one consistent terminal row', async () => {
+      const now = new Date().toISOString();
+      const v = await seed({ status: 'processing', job_id: 'rp-race', processing_started_at: now, dequeued_at: now });
+      const [a, b] = await Promise.all([
+        callWebhook(v.id, { id: 'rp-race', status: 'COMPLETED', files: [{ type: 's3_url', filename: 'o.mp4', data: 'https://s3.test/race.mp4' }] }),
+        callWebhook(v.id, { id: 'rp-race', status: 'FAILED' }),
+      ]);
+      for (const res of [a, b]) expect([200, 201]).toContain(res.status);
+      const fin = await row(v.id);
+      // The real output is never lost to a racing failure; a failure that landed first is
+      // overwritten by the completion, a failure that landed second matches zero rows.
+      expect(fin.status).toBe('completed');
+      expect(fin.finalVideoUrl).toBe('https://s3.test/race.mp4');
+      expect(fin.progressPercentage).toBeNull();
+    });
+
+    it('webhook: a callback that loses the race writes nothing and is acknowledged', async () => {
+      // Deterministic loss: park the handler inside the (mocked) base64 upload, let another
+      // writer finish the row, then release it. Its final write must match zero rows.
+      // processing_started_at must be recent: processing_time_ms is an Int column.
+      const v = await seed({ status: 'processing', job_id: 'rp-lost', processing_started_at: new Date().toISOString() });
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      let started!: () => void;
+      const entered = new Promise<void>((r) => (started = r));
+      h.s3Upload = async () => {
+        started();
+        await gate;
+        return 'https://s3.test/second.mp4';
+      };
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const pending = callWebhook(v.id, {
+          id: 'rp-lost', status: 'COMPLETED',
+          files: [{ type: 'base64', filename: 'o.mp4', data: Buffer.from('x').toString('base64') }],
+        });
+        await entered; // the handler has read the row and is now past its status guard
+        await db.updateVideo(v.id, { status: 'completed', final_video_url: 'https://s3.test/first.mp4' });
+        release();
+        const res = await pending;
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ success: true, ignored: true });
+        expect(await row(v.id)).toMatchObject({ status: 'completed', finalVideoUrl: 'https://s3.test/first.mp4' });
+        const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(logged).toContain(v.id);
+        expect(logged).not.toContain('s3.test'); // no address in the log
+      } finally {
+        h.s3Upload = null;
+        warn.mockRestore();
+      }
     });
   });
 

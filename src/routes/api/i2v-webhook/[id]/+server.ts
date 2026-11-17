@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { updateVideo, getVideoById } from '$lib/db';
+import { completeVideoIfNotFinal, getVideoById } from '$lib/db';
 import { validateVideoEntry, formatValidationErrors } from '$lib/validation';
 import { uploadBufferToS3 } from '$lib/s3';
 import { resolveCallbackVideoUrl, describeRejectedHost } from '$lib/callbackUrl';
@@ -175,9 +175,18 @@ export const POST: RequestHandler = async ({ request, params }) => {
       );
     }
 
-    const updated = await updateVideo(id, patch);
+    // The write itself carries the guard: it only matches while the row still holds this
+    // job_id and has not reached a final status. The checks above are outside the statement,
+    // so a concurrent retry / completion between them and this UPDATE would otherwise be
+    // overwritten (the classic read-then-blind-write race). Zero affected rows means the row
+    // moved on — acknowledge the callback so a retrying worker stops, and write nothing.
+    const written = await completeVideoIfNotFinal(id, webhook_job_id, patch);
+    if (!written) {
+      console.warn(`[Webhook] Ignored callback for video ${id}: row already completed/deleted or job superseded`);
+      return new Response(JSON.stringify({ success: true, ignored: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
 
-    return new Response(JSON.stringify({ success: true, updated }), { status: 201, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ success: true }), { status: 201, headers: { 'Content-Type': 'application/json' } });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
   }

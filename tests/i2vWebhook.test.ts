@@ -1,11 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The webhook handler is exercised against an in-memory video: no DB, no S3, no network.
-const h = vi.hoisted(() => ({ video: null as any, updates: [] as any[], env: {} as Record<string, string | undefined>, uploads: 0 }));
+const h = vi.hoisted(() => ({
+  video: null as any,
+  updates: [] as any[],
+  env: {} as Record<string, string | undefined>,
+  uploads: 0,
+  // Set to make the conditional write report "0 rows" — i.e. the row moved on between the
+  // handler's read and its write (another writer finished it, or a retry superseded the job).
+  lostRace: false,
+}));
 
 vi.mock('$lib/db', () => ({
   getVideoById: async (id: string) => (h.video && h.video.id === id ? { ...h.video } : undefined),
-  updateVideo: async (id: string, patch: any) => { h.updates.push(patch); h.video = { ...h.video, ...patch }; return h.video; },
+  completeVideoIfNotFinal: async (id: string, jobId: string, patch: any) => {
+    if (h.lostRace) return false;
+    if (!h.video || h.video.id !== id || h.video.job_id !== jobId) return false;
+    h.updates.push(patch);
+    h.video = { ...h.video, ...patch };
+    return true;
+  },
 }));
 vi.mock('$lib/validation', () => ({ validateVideoEntry: () => [], formatValidationErrors: () => '' }));
 vi.mock('$lib/s3', () => ({ uploadBufferToS3: async () => { h.uploads++; return '/media/b/uploaded.mp4'; } }));
@@ -21,7 +35,7 @@ function call(id: string, body: any) {
 const done = (url = 'https://evil.test/x.mp4') => ({ id: 'local-v1-abc', status: 'COMPLETED', files: [{ type: 's3_url', filename: 'a.mp4', data: url }] });
 
 describe('i2v webhook', () => {
-  beforeEach(() => { h.updates = []; h.uploads = 0; h.env.S3_ENDPOINT = 'https://s3.test'; delete h.env.S3_ALLOWED_URL_PREFIXES; h.video = { id: 'v1', job_id: 'local-v1-abc', status: 'processing', final_video_url: undefined }; });
+  beforeEach(() => { h.updates = []; h.uploads = 0; h.lostRace = false; h.env.S3_ENDPOINT = 'https://s3.test'; delete h.env.S3_ALLOWED_URL_PREFIXES; h.video = { id: 'v1', job_id: 'local-v1-abc', status: 'processing', final_video_url: undefined }; });
 
   it('accepts the completion of a processing video', async () => {
     const res = await call('v1', done('https://s3.test/ok.mp4'));
@@ -62,6 +76,22 @@ describe('i2v webhook', () => {
     const res = await call('v1', done('https://s3.test/second.mp4'));
     expect(res.status).toBe(201);
     expect(h.video.final_video_url).toBe('/media/second.mp4');
+  });
+
+  it('a write that matches no row (row finished or job superseded meanwhile) is acknowledged and not applied', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // The handler read a live row, but by write time the conditional UPDATE matched nothing.
+    h.lostRace = true;
+    const res = await call('v1', done('https://s3.test/late.mp4'));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true, ignored: true });
+    expect(h.updates).toHaveLength(0);
+    expect(h.video.status).toBe('processing'); // nothing was written
+    const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n');
+    warn.mockRestore();
+    expect(logged).toContain('v1'); // the video id is all we need to trace it
+    expect(logged).not.toContain('late.mp4'); // no address, ever
+    expect(logged).not.toContain('s3.test');
   });
 
   describe('result video address', () => {

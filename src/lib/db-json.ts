@@ -41,6 +41,17 @@ export class JsonFileDatabase implements IDatabase {
     return JSON.parse(txt) as VideoEntry[];
   }
 
+  // readAll + writeAll is a whole-file read-modify-write, so two overlapping callers could
+  // both read the same state and the later write would silently win. Serialize those paths
+  // through one chain: a conditional write then re-reads the file after the previous one is
+  // done, which gives the JSON backend the same semantics as a single SQL UPDATE ... WHERE.
+  private mutationQueue: Promise<unknown> = Promise.resolve();
+  private serialized<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.mutationQueue.then(fn, fn);
+    this.mutationQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
   private async writeAll(rows: VideoEntry[]) {
     await this.ensureDB();
     await fs.writeFile(DB_FILE, JSON.stringify(rows, null, 2), 'utf-8');
@@ -257,21 +268,38 @@ export class JsonFileDatabase implements IDatabase {
   }
 
   async updateVideo(id: string, patch: Partial<VideoEntry>): Promise<VideoEntry | null> {
-    const rows = await this.readAll();
-    const idx = rows.findIndex((r) => r.id === id);
-    if (idx === -1) return null;
-    rows[idx] = { ...rows[idx], ...patch } as VideoEntry;
-    await this.writeAll(rows);
-    return rows[idx];
+    return this.serialized(async () => {
+      const rows = await this.readAll();
+      const idx = rows.findIndex((r) => r.id === id);
+      if (idx === -1) return null;
+      rows[idx] = { ...rows[idx], ...patch } as VideoEntry;
+      await this.writeAll(rows);
+      return rows[idx];
+    });
+  }
+
+  // Same contract as PostgresDatabase.completeVideoIfNotFinal: the job_id / final-status
+  // guard is evaluated against the file as it is at write time, not as the caller read it.
+  async completeVideoIfNotFinal(id: string, jobId: string, patch: Partial<VideoEntry>): Promise<boolean> {
+    return this.serialized(async () => {
+      const rows = await this.readAll();
+      const idx = rows.findIndex((r) => r.id === id && r.job_id === jobId && r.status !== 'completed' && r.status !== 'deleted');
+      if (idx === -1) return false;
+      rows[idx] = { ...rows[idx], ...patch } as VideoEntry;
+      await this.writeAll(rows);
+      return true;
+    });
   }
 
   async deleteVideo(id: string): Promise<boolean> {
-    const rows = await this.readAll();
-    const idx = rows.findIndex((r) => r.id === id);
-    if (idx === -1) return false;
-    rows[idx] = { ...rows[idx], status: 'deleted', is_published: false } as VideoEntry;
-    await this.writeAll(rows);
-    return true;
+    return this.serialized(async () => {
+      const rows = await this.readAll();
+      const idx = rows.findIndex((r) => r.id === id);
+      if (idx === -1) return false;
+      rows[idx] = { ...rows[idx], status: 'deleted', is_published: false } as VideoEntry;
+      await this.writeAll(rows);
+      return true;
+    });
   }
 
   async toggleLike(videoId: string, userId: string): Promise<VideoEntry | null> {
