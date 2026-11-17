@@ -7,6 +7,7 @@ import { DownloadCache } from '$lib/server/downloadCache';
 import { FfmpegLimiter, FfmpegQueueFullError } from '$lib/server/ffmpegLimiter';
 import { FfmpegTimeoutError, runFfmpeg } from '$lib/server/ffmpegRun';
 import { parseFps, parseScale } from '$lib/server/downloadPresets';
+import { jsonServerError } from '$lib/server/safe-error';
 
 const ALLOWED_FORMATS = ['gif', 'webp'] as const;
 type Format = (typeof ALLOWED_FORMATS)[number];
@@ -205,10 +206,7 @@ export const GET: RequestHandler = async ({ params, locals, url }) => {
   try {
     inputUrl = resolveVideoUrl(video.final_video_url);
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return jsonServerError('[download] resolveVideoUrl failed:', err);
   }
 
   let filePath: string;
@@ -225,10 +223,9 @@ export const GET: RequestHandler = async ({ params, locals, url }) => {
     }
     const msg = String(err);
     const isNotFound = msg.includes('spawn') && msg.includes('ENOENT');
-    return new Response(
-      JSON.stringify({ error: isNotFound ? 'ffmpeg is not installed on this server' : msg }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
+    return jsonServerError('[download] conversion failed:', err, {
+      message: isNotFound ? 'ffmpeg is not installed on this server' : undefined,
+    });
   }
 
   // Lease the file until the response stream ends so the sweeper cannot delete it mid-read.

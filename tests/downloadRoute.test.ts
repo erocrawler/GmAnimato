@@ -3,7 +3,7 @@ import { FfmpegTimeoutError } from '../src/lib/server/ffmpegRun';
 
 const h = vi.hoisted(() => ({
   runs: [] as Array<{ resolve: () => void; reject: (e: Error) => void; args: string[] }>,
-  mode: 'hang' as 'hang' | 'timeout',
+  mode: 'hang' as 'hang' | 'timeout' | 'boom',
 }));
 
 vi.mock('$env/dynamic/private', () => ({ env: {} }));
@@ -22,6 +22,7 @@ vi.mock('../src/lib/server/ffmpegRun', async (orig) => {
     ...real,
     runFfmpeg: (args: string[]) => {
       if (h.mode === 'timeout') return Promise.reject(new real.FfmpegTimeoutError(120000));
+      if (h.mode === 'boom') return Promise.reject(new Error('internal: /srv/secret/path pq: relation "videos" does not exist'));
       return new Promise<void>((resolve, reject) => h.runs.push({ resolve, reject, args }));
     },
   };
@@ -54,6 +55,17 @@ describe('GET /api/video/[id]/download', () => {
     const res = await call('t1', 'format=gif');
     expect(res.status).toBe(504);
     expect(new FfmpegTimeoutError(1)).toBeInstanceOf(Error);
+  });
+
+  it('500 with a fixed message that never echoes the raw ffmpeg/internal error', async () => {
+    h.mode = 'boom';
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await call('e1', 'format=gif');
+    const body = await res.text();
+    spy.mockRestore();
+    expect(res.status).toBe(500);
+    expect(body).not.toContain('/srv/secret/path');
+    expect(body).not.toContain('pq:');
   });
 
   it('caps concurrency at 2, queues 20, then answers 429 + Retry-After', async () => {
